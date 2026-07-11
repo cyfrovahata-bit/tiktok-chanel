@@ -3,7 +3,15 @@ import path from "path";
 import os from "os";
 import { eq, and, desc } from "drizzle-orm";
 import { getDb, scripts, videos, assets as assetsTable } from "@shorts/shared/db";
-import { r2Get, r2Put, RenderJobData } from "@shorts/shared";
+import {
+  r2Get,
+  r2Put,
+  RenderJobData,
+  askClaudeJSON,
+  videoMetaPrompt,
+  VIDEO_META_SCHEMA,
+  VideoMeta,
+} from "@shorts/shared";
 import { ttsWithTimestamps } from "./tts";
 import { renderVideo, RenderAsset } from "./ffmpegRender";
 
@@ -96,6 +104,31 @@ export async function processRenderJob(data: RenderJobData): Promise<void> {
       .where(eq(videos.id, video.id));
 
     console.log(`✅ [відео ${video.id}] Готово: ${videoKey} (${durationSec}с)`);
+
+    // 5. Метадані публікації (заголовки/описи/хештеги під TikTok і YouTube).
+    // Не фейлимо джобу, якщо LLM недоступний — метадані можна догенерувати з UI.
+    try {
+      console.log(`📝 [відео ${video.id}] Генерую описи та хештеги…`);
+      const meta = await askClaudeJSON<VideoMeta>(
+        videoMetaPrompt({
+          seriesTitle: script.title,
+          partIndex: part.index,
+          partsCount: script.parts.length,
+          partTitle: part.title,
+          voiceover: part.voiceover,
+        }),
+        VIDEO_META_SCHEMA as unknown as Record<string, unknown>
+      );
+      await db
+        .update(videos)
+        .set({ ...meta, updatedAt: new Date() })
+        .where(eq(videos.id, video.id));
+      console.log(`📝 [відео ${video.id}] Метадані збережено`);
+    } catch (metaErr) {
+      console.error(
+        `⚠️ [відео ${video.id}] Не вдалося згенерувати метадані (відео при цьому готове): ${(metaErr as Error).message}`
+      );
+    }
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }

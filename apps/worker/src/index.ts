@@ -2,6 +2,7 @@ import "./loadEnv";
 import { Worker, Job } from "bullmq";
 import { RENDER_QUEUE, RenderJobData, redisConnectionOptions } from "@shorts/shared";
 import { processRenderJob, markRenderFailed } from "./renderJob";
+import { startScheduler } from "./scheduler";
 
 async function main() {
   console.log("🎬 AI Shorts Factory — worker запускається…");
@@ -39,6 +40,8 @@ async function main() {
   });
 
   console.log(`👂 Слухаю чергу "${RENDER_QUEUE}"…`);
+
+  startScheduler();
 
   // Акуратне завершення
   for (const sig of ["SIGINT", "SIGTERM"] as const) {
