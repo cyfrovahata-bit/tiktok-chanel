@@ -1,0 +1,22 @@
+{
+  "name": "@shorts/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "render:sample": "tsx src/renderSample.ts"
+  },
+  "dependencies": {
+    "@shorts/shared": "*",
+    "bullmq": "^5.80.1",
+    "dotenv": "^17.4.2",
+    "ioredis": "^5.11.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3"
+  }
+}
