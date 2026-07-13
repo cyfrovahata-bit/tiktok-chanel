@@ -1,11 +1,17 @@
 {
   "last_update_id": 0,
-  "themes": [],
+  "themes": [
+    {
+      "title": "Найбільший орган в тілі людини — це шкіра, і вона може вагою до 10 кг.",
+      "status": "pending",
+      "date": "2026-07-13"
+    }
+  ],
   "session": {
-    "active": false,
-    "theme": null,
-    "prompt_message_id": null,
+    "active": true,
+    "theme": "Найбільший орган в тілі людини — це шкіра, і вона може вагою до 10 кг.",
+    "prompt_message_id": 5,
     "photos": [],
-    "window_end": null
+    "window_end": "2026-07-13T22:32:26.471Z"
   }
 }
