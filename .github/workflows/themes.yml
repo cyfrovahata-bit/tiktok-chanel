@@ -1,0 +1,33 @@
+name: themes
+
+on:
+  schedule:
+    # Київ 11:00 та 19:00, ЛІТНІЙ час (UTC+3).
+    # Взимку (UTC+2) перемкнути на '0 9 * * *' і '0 17 * * *' — див. README.
+    - cron: '0 8 * * *'
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: themes
+  cancel-in-progress: false
+
+jobs:
+  themes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Згенерувати тему і надіслати промпт
+        run: node src/themes.js
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

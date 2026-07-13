@@ -1,0 +1,14 @@
+{
+  "name": "slideshow-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram-бот «Слайдшоу-монтажер» для каналу «Чи Ви Знали?» — конвеєр на GitHub Actions без сервера",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "themes": "node src/themes.js",
+    "check": "node src/check.js"
+  }
+}

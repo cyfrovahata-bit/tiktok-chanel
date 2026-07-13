@@ -1,0 +1,39 @@
+name: check
+
+on:
+  schedule:
+    # Робочі вікна після тем (UTC, ЛІТНІЙ час — Київ = UTC+3):
+    # кожні 5 хв у перші пів години після теми, далі кожні 15 хв.
+    # Взимку зсунути всі години на +1 — див. README.
+    - cron: '*/5 8 * * *'
+    - cron: '*/15 9-11 * * *'
+    - cron: '*/5 16 * * *'
+    - cron: '*/15 17-19 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Встановити FFmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+
+      - name: Обробити оновлення Telegram
+        run: node src/check.js
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
