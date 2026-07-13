@@ -10,8 +10,10 @@ const WINDOW_HOURS = 3;
 // Спільна логіка для themes.js і check.js (кнопка «Інша тема»):
 // генерує тему, надсилає промпт із кнопкою, відкриває нову сесію в state.
 export async function startNewSession(state) {
+  // Заборонені: done (уже використані) і rejected (власнику не сподобались).
+  // pending/skipped можуть випасти знову — тема пропала не з вини власника.
   const usedTitles = state.themes
-    .filter((theme) => theme.status === 'done' || theme.status === 'pending')
+    .filter((theme) => theme.status === 'done' || theme.status === 'rejected')
     .map((theme) => theme.title);
   const theme = await generateTheme(usedTitles);
 
