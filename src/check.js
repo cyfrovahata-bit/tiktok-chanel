@@ -93,8 +93,7 @@ async function produceVideo(state) {
   await sendVideo(chatId, outputPath);
   if (texts) {
     await sendMessage(chatId, texts.title);
-    await sendMessage(chatId, texts.description);
-    await sendMessage(chatId, texts.hashtags);
+    await sendMessage(chatId, `${texts.description}\n\n${texts.hashtags}`);
     if (texts.music) {
       await sendMessage(chatId, `🎵 Музика (шукай у TikTok):\n${texts.music}`);
     }
