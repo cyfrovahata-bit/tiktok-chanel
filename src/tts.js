@@ -29,7 +29,31 @@ const ENGINES = {
   get edge() { return edgeTts; },
 };
 
+// Словничок наголосів: слова, де TTS системно помиляється. Наголошена
+// голосна позначається комбінованим акутом (U+0301) — моделі його поважають.
+// Помітили нове слово з кривим наголосом — додайте пару сюди.
+const PRONUNCIATION_FIXES = [
+  ['колібрі', 'колі́брі'],
+];
+
+function fixPronunciation(text) {
+  let result = text;
+  for (const [word, fixed] of PRONUNCIATION_FIXES) {
+    result = result.replace(new RegExp(word, 'gi'), (match) => matchCase(fixed, match));
+  }
+  return result;
+}
+
+function matchCase(replacement, original) {
+  if (original === original.toUpperCase()) return replacement.toUpperCase();
+  if (original[0] === original[0].toUpperCase()) {
+    return replacement[0].toUpperCase() + replacement.slice(1);
+  }
+  return replacement;
+}
+
 export async function synthesizeVoiceover(text, outputPath) {
+  text = fixPronunciation(text);
   const primary = ENGINES[process.env.TTS_ENGINE] ? process.env.TTS_ENGINE : 'openai';
   const order = [primary, ...Object.keys(ENGINES).filter((name) => name !== primary)];
   let lastError;
