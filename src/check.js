@@ -137,6 +137,9 @@ async function main() {
     return;
   }
 
+  const photosBefore = state.session.photos.length;
+  const hadScript = Boolean(state.session.script);
+
   const updates = await getUpdates(state.last_update_id + 1);
   for (const update of updates) {
     state.last_update_id = Math.max(state.last_update_id, update.update_id);
@@ -147,11 +150,26 @@ async function main() {
     }
   }
 
-  if (state.session.photos.length >= PHOTOS_NEEDED) {
+  // Монтаж стартує лише коли є ОБИДВІ частини: сценарій і 6 фото.
+  // Інакше запуск міг би влучити між повідомленнями і згенерувати
+  // відео без озвучки за сценарієм.
+  const photosReady = state.session.photos.length >= PHOTOS_NEEDED;
+  const scriptReady = Boolean(state.session.script);
+  if (photosReady && scriptReady) {
     await produceVideo(state);
-  } else {
-    await saveState(state, 'check: оновлення оброблено');
+    return;
   }
+
+  // Підказуємо, чого ще бракує — лише коли щось нове прийшло цим запуском.
+  if (photosReady && !scriptReady && state.session.photos.length > photosBefore) {
+    await sendMessage(ownerChatId(), '📸 6 фото отримано! Тепер надішліть текст сценарію — і я змонтую відео.');
+  } else if (scriptReady && !hadScript && !photosReady) {
+    await sendMessage(
+      ownerChatId(),
+      `📝 Сценарій отримано! Чекаю 6 фото (наразі ${state.session.photos.length}).`,
+    );
+  }
+  await saveState(state, 'check: оновлення оброблено');
 }
 
 main().catch((error) => {
