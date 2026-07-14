@@ -7,8 +7,9 @@
 import { execFile } from 'node:child_process';
 import { rename, unlink, writeFile } from 'node:fs/promises';
 
-// Відео триває 21.5 с — озвучка має влазити, інакше кінець обріжеться.
-const MAX_AUDIO_SECONDS = 21.3;
+// Відео триває 21.5 с. Цільова довжина озвучки — до 20 с: голос має
+// закінчитися трохи раніше за відео і не обганяти слайди.
+const MAX_AUDIO_SECONDS = 20.0;
 
 // cedar і marin — нові голоси, які OpenAI рекомендує як найякісніші.
 const OPENAI_VOICE = process.env.TTS_OPENAI_VOICE || 'cedar';
@@ -75,7 +76,8 @@ export async function synthesizeVoiceover(text, outputPath) {
 async function fitToVideo(outputPath) {
   const duration = await audioDuration(outputPath);
   if (duration <= MAX_AUDIO_SECONDS) return;
-  const factor = Math.min(duration / (MAX_AUDIO_SECONDS - 0.2), 1.35);
+  // Обмеження 1.2: сильніше прискорення звучить заметушливо.
+  const factor = Math.min(duration / (MAX_AUDIO_SECONDS - 0.2), 1.2);
   const fitted = `${outputPath}.fit.mp3`;
   await run('ffmpeg', ['-y', '-i', outputPath, '-filter:a', `atempo=${factor.toFixed(3)}`, fitted]);
   await rename(fitted, outputPath);
