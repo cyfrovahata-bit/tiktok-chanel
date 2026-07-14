@@ -15,15 +15,20 @@
       "title": "Чому деякі сорти чаю насправді містять більше кофеїну, ніж кава?",
       "status": "done",
       "date": "2026-07-14"
+    },
+    {
+      "title": "Чи знали ви, що у деяких морських зірок є здатність виростати знову після втрати своїх кінцівок?",
+      "status": "pending",
+      "date": "2026-07-14"
     }
   ],
   "session": {
-    "active": false,
-    "theme": null,
-    "prompt_message_id": null,
+    "active": true,
+    "theme": "Чи знали ви, що у деяких морських зірок є здатність виростати знову після втрати своїх кінцівок?",
+    "prompt_message_id": 55,
     "photos": [],
     "script": null,
-    "window_end": null
+    "window_end": "2026-07-14T21:53:46.049Z"
   },
   "last_theme_slot": null
 }
