@@ -44,30 +44,27 @@ export async function synthesizeVoiceover(text, outputPath) {
   throw lastError;
 }
 
-// ElevenLabs, модель Multilingual v2. Налаштування під живу розповідну
-// начитку: stability нижче середини (більше емоційних коливань),
-// similarity 0.8, помірний style, speaker boost.
-async function elevenLabsTts(text, outputPath, speed) {
+// ElevenLabs. За замовчуванням — модель Eleven v3 з аудіо-тегами
+// ([excited], [whispers]...) у режимі Creative (stability 0.0): максимум
+// живої гри голосом. Для старої Multilingual v2 — класичні налаштування
+// розповідної начитки.
+async function elevenLabsTts(text, outputPath, retry) {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) throw new Error('Не задано ELEVENLABS_API_KEY');
-  const voiceId = process.env.TTS_ELEVEN_VOICE_ID || 'nPczCjzI2devNBz1zQrb'; // Brian — глибокий чоловічий наратор
-  const voiceSettings = {
-    stability: 0.45,
-    similarity_boost: 0.8,
-    style: 0.4,
-    use_speaker_boost: true,
-  };
-  if (speed) voiceSettings.speed = speed;
+  const voiceId = process.env.TTS_ELEVEN_VOICE_ID || 'N2lVS1w4EtoT3dr4eOWO'; // Callum — характерний, не заїжджений
+  const modelId = process.env.TTS_ELEVEN_MODEL || 'eleven_v3';
+  const isV3 = modelId.startsWith('eleven_v3');
+  const voiceSettings = isV3
+    ? { stability: 0.0, use_speaker_boost: true } // 0.0 = Creative
+    : { stability: 0.45, similarity_boost: 0.8, style: 0.4, use_speaker_boost: true, ...(retry ? { speed: retry } : {}) };
+  // v2-моделі читають теги вголос — прибираємо їх.
+  const input = isV3 ? text : text.replace(/\[[a-z ]+\]/gi, '').replace(/ {2,}/g, ' ').trim();
   const response = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
     {
       method: 'POST',
       headers: { 'xi-api-key': key, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        text,
-        model_id: 'eleven_multilingual_v2',
-        voice_settings: voiceSettings,
-      }),
+      body: JSON.stringify({ text: input, model_id: modelId, voice_settings: voiceSettings }),
     },
   );
   if (!response.ok) {
@@ -75,9 +72,10 @@ async function elevenLabsTts(text, outputPath, speed) {
   }
   await writeFile(outputPath, Buffer.from(await response.arrayBuffer()));
 
-  // Якщо начитка довша за відео — один раз перечитуємо швидше (максимум 1.2).
+  // Якщо начитка довша за відео — одна повторна спроба:
+  // v2 перечитує швидше (speed до 1.2), v3 просто генерує новий дубль.
   const duration = await audioDuration(outputPath);
-  if (!speed && duration > MAX_AUDIO_SECONDS) {
+  if (!retry && duration > MAX_AUDIO_SECONDS + 1) {
     const factor = Math.min(duration / (MAX_AUDIO_SECONDS - 0.3), 1.2);
     return elevenLabsTts(text, outputPath, Number(factor.toFixed(2)));
   }
