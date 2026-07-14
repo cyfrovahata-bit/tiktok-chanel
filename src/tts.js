@@ -15,12 +15,12 @@ const EDGE_VOICE = process.env.TTS_VOICE || 'uk-UA-OstapNeural'; // жіночи
 // Структура з openai.fm: окремі поля подачі, прості прямі риси.
 const INSTRUCTIONS =
   process.env.TTS_INSTRUCTIONS ||
-  `Voice: Young energetic Ukrainian male narrator of a viral TikTok facts channel.
+  `Voice: Confident charismatic Ukrainian male showman, host of a viral TikTok facts channel; commands attention like a seasoned TV presenter.
 Language: Natural, native Ukrainian pronunciation with correct word stress; no foreign accent.
-Tone: Enthusiastic and amazed, as if sharing an incredible secret with a close friend.
-Pacing: Quick but crisp; a short dramatic pause after the opening question and before the final call to action.
-Emotion: Genuine wonder; punch the numbers and comparisons.
-Delivery: Conversational and alive, never monotone; finish with a warm, inviting call to subscribe.`;
+Tone: Bold and assertive with contagious excitement — he KNOWS this fact will blow your mind; zero hesitation, zero uncertainty.
+Pacing: Energetic and driving; a punchy dramatic pause after the opening question and before the final call to action.
+Emotion: Confident amazement; hit the numbers and comparisons hard, with a slight rise in intensity toward the conclusion.
+Delivery: Strong steady projection from the very first word, like speaking to a big audience; every sentence lands as a statement, ends decisively — never trailing off; finish with a firm, magnetic call to subscribe.`;
 
 export async function synthesizeVoiceover(text, outputPath) {
   const primary = process.env.TTS_ENGINE === 'edge' ? edgeTts : openaiTts;
