@@ -5,7 +5,7 @@
 // Основний рушій задається TTS_ENGINE у check.yml; якщо він падає,
 // автоматично пробуються наступні.
 import { execFile } from 'node:child_process';
-import { unlink, writeFile } from 'node:fs/promises';
+import { rename, unlink, writeFile } from 'node:fs/promises';
 
 // Відео триває 21.5 с — озвучка має влазити, інакше кінець обріжеться.
 const MAX_AUDIO_SECONDS = 21.3;
@@ -35,13 +35,27 @@ export async function synthesizeVoiceover(text, outputPath) {
   let lastError;
   for (const name of order) {
     try {
-      return await ENGINES[name](text, outputPath);
+      await ENGINES[name](text, outputPath);
+      // Фінальна гарантія синхрону: якщо начитка довша за відео —
+      // прискорюємо її atempo (без зміни тону) рівно під довжину відео.
+      await fitToVideo(outputPath);
+      return outputPath;
     } catch (error) {
       lastError = error;
       console.error(`TTS ${name} не вдався: ${error.message}`);
     }
   }
   throw lastError;
+}
+
+async function fitToVideo(outputPath) {
+  const duration = await audioDuration(outputPath);
+  if (duration <= MAX_AUDIO_SECONDS) return;
+  const factor = Math.min(duration / (MAX_AUDIO_SECONDS - 0.2), 1.35);
+  const fitted = `${outputPath}.fit.mp3`;
+  await run('ffmpeg', ['-y', '-i', outputPath, '-filter:a', `atempo=${factor.toFixed(3)}`, fitted]);
+  await rename(fitted, outputPath);
+  console.log(`Озвучка прискорена в ${factor.toFixed(2)} раза (була ${duration.toFixed(1)} с)`);
 }
 
 // ElevenLabs. За замовчуванням — модель Eleven v3 з аудіо-тегами
@@ -72,10 +86,10 @@ async function elevenLabsTts(text, outputPath, retry) {
   }
   await writeFile(outputPath, Buffer.from(await response.arrayBuffer()));
 
-  // Якщо начитка довша за відео — одна повторна спроба:
-  // v2 перечитує швидше (speed до 1.2), v3 просто генерує новий дубль.
+  // v2 при задовгій начитці перечитує швидше (природніше за atempo);
+  // для v3 параметра швидкості немає — підганяння зробить fitToVideo.
   const duration = await audioDuration(outputPath);
-  if (!retry && duration > MAX_AUDIO_SECONDS + 1) {
+  if (!retry && !isV3 && duration > MAX_AUDIO_SECONDS) {
     const factor = Math.min(duration / (MAX_AUDIO_SECONDS - 0.3), 1.2);
     return elevenLabsTts(text, outputPath, Number(factor.toFixed(2)));
   }

@@ -44,6 +44,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           ENABLE_TTS: "1"
-          TTS_ENGINE: openai  # інші: elevenlabs, edge; при падінні — автофолбек
+          TTS_ENGINE: elevenlabs  # інші: openai, edge; при падінні — автофолбек
+          # TTS_ELEVEN_VOICE_ID: N2lVS1w4EtoT3dr4eOWO  # Callum (за замовчуванням)
+          # TTS_ELEVEN_MODEL: eleven_v3                # стабільніше: eleven_multilingual_v2
           # TTS_OPENAI_VOICE: cedar      # інші: marin, ash, onyx, nova, coral...
           # TTS_VOICE: uk-UA-OstapNeural # голос edge; жіночий: uk-UA-PolinaNeural
