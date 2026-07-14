@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { generateTheme } from './openai.js';
 import { ownerChatId, sendMessage } from './telegram.js';
-import { emptySession, kyivDate, markTheme, readState, saveState } from './state.js';
+import { currentThemeSlot, emptySession, kyivDate, markTheme, readState, saveState } from './state.js';
 
 const WINDOW_HOURS = 3;
 
@@ -25,6 +25,8 @@ export async function startNewSession(state) {
   });
 
   state.themes.push({ title: theme, status: 'pending', date: kyivDate() });
+  // Мітка слота, щоб запізнілий плановий запуск themes не дублював тему.
+  state.last_theme_slot = currentThemeSlot() ?? state.last_theme_slot ?? null;
   state.session = {
     active: true,
     theme,
@@ -38,6 +40,11 @@ export async function startNewSession(state) {
 
 async function main() {
   const state = await readState();
+
+  // Тему цього слота вже надіслано (можливо, self-healing у check.js) —
+  // запізнілий плановий запуск не має дублювати її.
+  const slot = currentThemeSlot();
+  if (slot && state.last_theme_slot === slot) return;
 
   if (state.session.active) {
     markTheme(state, state.session.theme, 'skipped');

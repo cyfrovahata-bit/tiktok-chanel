@@ -6,7 +6,7 @@ import path from 'node:path';
 import { generateNarration, generatePostTexts } from './openai.js';
 import { buildSlideshow, mixAudio } from './montage.js';
 import { synthesizeVoiceover } from './tts.js';
-import { emptySession, markTheme, readState, saveState } from './state.js';
+import { currentThemeSlot, emptySession, markTheme, readState, saveState } from './state.js';
 import { startNewSession } from './themes.js';
 import {
   answerCallbackQuery,
@@ -127,7 +127,18 @@ async function produceVideo(state) {
 
 async function main() {
   const state = await readState();
-  if (!state.session.active) return;
+
+  if (!state.session.active) {
+    // Самолікування: GitHub часто дропає планові запуски themes.
+    // Якщо триває слот теми (10:00–12:00 чи 18:00–20:00 Київ), а тему
+    // ще не надіслано — надсилаємо її звідси.
+    const slot = currentThemeSlot();
+    if (slot && state.last_theme_slot !== slot) {
+      const theme = await startNewSession(state);
+      await saveState(state, `check: добрано пропущену тему «${theme}»`);
+    }
+    return;
+  }
 
   if (Date.parse(state.session.window_end) < Date.now()) {
     markTheme(state, state.session.theme, 'skipped');

@@ -36,6 +36,20 @@ export function kyivDate() {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Kyiv' }).format(new Date());
 }
 
+// Слот теми: ранковий (10:00–11:59 Київ) чи вечірній (18:00–19:59), інакше null.
+// GitHub нерідко дропає планові запуски themes, тому check.js добирає
+// пропущену тему, поки триває слот.
+export function currentThemeSlot(now = new Date()) {
+  const hour = Number(
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Kyiv', hour: '2-digit', hour12: false })
+      .formatToParts(now)
+      .find((part) => part.type === 'hour').value,
+  );
+  if (hour >= 10 && hour < 12) return `${kyivDate()}-am`;
+  if (hour >= 18 && hour < 20) return `${kyivDate()}-pm`;
+  return null;
+}
+
 function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
