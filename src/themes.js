@@ -1,4 +1,4 @@
-// Точка входу воркфлоу themes: 11:00 та 19:00 (Київ) — нова тема + промпт власнику.
+// Точка входу воркфлоу themes: 10:00 та 18:00 (Київ) — нова тема + промпт власнику.
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { generateTheme } from './openai.js';
