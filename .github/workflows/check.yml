@@ -42,7 +42,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           ENABLE_TTS: "1"
-          TTS_ENGINE: openai  # 'edge' — безкоштовний Microsoft-голос (фолбек)
+          TTS_ENGINE: openai  # інші: elevenlabs, edge; при падінні — автофолбек
           # TTS_OPENAI_VOICE: cedar      # інші: marin, ash, onyx, nova, coral...
           # TTS_VOICE: uk-UA-OstapNeural # голос edge; жіночий: uk-UA-PolinaNeural

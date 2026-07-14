@@ -6,13 +6,16 @@ on:
   workflow_dispatch:
     inputs:
       engine:
-        description: Рушій (openai або edge)
-        default: openai
+        description: Рушій озвучки
+        default: elevenlabs
         type: choice
-        options: [openai, edge]
+        options: [elevenlabs, openai, edge]
       voice:
         description: Голос OpenAI (cedar, marin, ash, onyx, nova, coral...)
         default: cedar
+      eleven_voice_id:
+        description: Voice ID ElevenLabs
+        default: nPczCjzI2devNBz1zQrb
 
 jobs:
   sample:
@@ -36,5 +39,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           TTS_ENGINE: ${{ inputs.engine }}
           TTS_OPENAI_VOICE: ${{ inputs.voice }}
+          TTS_ELEVEN_VOICE_ID: ${{ inputs.eleven_voice_id }}

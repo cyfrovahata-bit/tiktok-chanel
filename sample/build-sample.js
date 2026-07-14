@@ -16,9 +16,11 @@ await synthesizeVoiceover(narration, '/tmp/voice.mp3');
 await mixAudio('/tmp/silent.mp4', '/tmp/voice.mp3', '/tmp/sample.mp4');
 await sendVideo(ownerChatId(), '/tmp/sample.mp4');
 
-const voiceLabel =
-  process.env.TTS_ENGINE === 'edge'
-    ? `edge / ${process.env.TTS_VOICE || 'uk-UA-OstapNeural'}`
-    : `openai / ${process.env.TTS_OPENAI_VOICE || 'cedar'}`;
+const labels = {
+  edge: () => `edge / ${process.env.TTS_VOICE || 'uk-UA-OstapNeural'}`,
+  elevenlabs: () => `elevenlabs / ${process.env.TTS_ELEVEN_VOICE_ID || 'Brian'}`,
+  openai: () => `openai / ${process.env.TTS_OPENAI_VOICE || 'cedar'}`,
+};
+const voiceLabel = (labels[process.env.TTS_ENGINE] || labels.openai)();
 await sendMessage(ownerChatId(), `🎙 Зразок голосу: ${voiceLabel}`);
 console.log(`Зразок надіслано (${voiceLabel})`);
