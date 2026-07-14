@@ -95,6 +95,9 @@ async function produceVideo(state) {
     await sendMessage(chatId, texts.title);
     await sendMessage(chatId, texts.description);
     await sendMessage(chatId, texts.hashtags);
+    if (texts.music) {
+      await sendMessage(chatId, `🎵 Музика (шукай у TikTok):\n${texts.music}`);
+    }
   } else {
     await sendMessage(chatId, 'тексти не згенеровано');
   }

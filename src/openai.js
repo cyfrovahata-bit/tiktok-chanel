@@ -45,7 +45,8 @@ export async function generatePostTexts(theme) {
 {
   "title": "чіпляюча назва до 60 символів з 1 емодзі",
   "description": "опис за форматом нижче",
-  "hashtags": "5–6 хештегів українською в один рядок"
+  "hashtags": "5–6 хештегів українською в один рядок",
+  "music": "3 варіанти музики під це відео з каталогу TikTok, кожен з нового рядка у форматі: 1. Назва треку — виконавець (чому пасує, 3–5 слів). Обирай популярні/вірусні в TikTok звуки, що підходять під настрій теми: інтригуючі, епічні або атмосферні."
 }
 
 Формат description — 4 абзаци, розділені порожнім рядком, кожен з емодзі:
@@ -73,5 +74,7 @@ export async function generatePostTexts(theme) {
     title: parsed.title.trim(),
     description: parsed.description.trim(),
     hashtags: parsed.hashtags.trim(),
+    // Музика — допоміжна порада, без неї публікація не блокується.
+    music: typeof parsed.music === 'string' && parsed.music.trim() ? parsed.music.trim() : null,
   };
 }
