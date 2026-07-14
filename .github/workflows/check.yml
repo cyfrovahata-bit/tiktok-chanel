@@ -44,5 +44,5 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ENABLE_TTS: "1"
           TTS_ENGINE: openai  # 'edge' — безкоштовний Microsoft-голос (фолбек)
-          # TTS_OPENAI_VOICE: ash        # інші: onyx, nova, coral, alloy...
+          # TTS_OPENAI_VOICE: cedar      # інші: marin, ash, onyx, nova, coral...
           # TTS_VOICE: uk-UA-OstapNeural # голос edge; жіночий: uk-UA-PolinaNeural

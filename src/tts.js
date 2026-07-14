@@ -9,13 +9,18 @@ import { unlink, writeFile } from 'node:fs/promises';
 // Відео триває 21.5 с — озвучка має влазити, інакше кінець обріжеться.
 const MAX_AUDIO_SECONDS = 21.3;
 
-const OPENAI_VOICE = process.env.TTS_OPENAI_VOICE || 'ash';
+// cedar і marin — нові голоси, які OpenAI рекомендує як найякісніші.
+const OPENAI_VOICE = process.env.TTS_OPENAI_VOICE || 'cedar';
 const EDGE_VOICE = process.env.TTS_VOICE || 'uk-UA-OstapNeural'; // жіночий: uk-UA-PolinaNeural
+// Структура з openai.fm: окремі поля подачі, прості прямі риси.
 const INSTRUCTIONS =
   process.env.TTS_INSTRUCTIONS ||
-  'Говори українською, природно та енергійно, як ведучий пізнавального ' +
-  'TikTok-каналу: інтрига на початку, виразні наголоси на цифрах, ' +
-  'теплий заклик підписатися у кінці.';
+  `Voice: Young energetic Ukrainian male narrator of a viral TikTok facts channel.
+Language: Natural, native Ukrainian pronunciation with correct word stress; no foreign accent.
+Tone: Enthusiastic and amazed, as if sharing an incredible secret with a close friend.
+Pacing: Quick but crisp; a short dramatic pause after the opening question and before the final call to action.
+Emotion: Genuine wonder; punch the numbers and comparisons.
+Delivery: Conversational and alive, never monotone; finish with a warm, inviting call to subscribe.`;
 
 export async function synthesizeVoiceover(text, outputPath) {
   const primary = process.env.TTS_ENGINE === 'edge' ? edgeTts : openaiTts;
