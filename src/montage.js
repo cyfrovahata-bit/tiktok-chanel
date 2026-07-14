@@ -49,7 +49,31 @@ export async function buildSlideshow(photoPaths, outputPath) {
     '-movflags', '+faststart',
     outputPath,
   );
-  await new Promise((resolve, reject) => {
+  await runFfmpeg(args);
+  return outputPath;
+}
+
+// Підкладає озвучку під готове відео; тиша в кінці, якщо аудіо коротше.
+export async function mixAudio(videoPath, audioPath, outputPath) {
+  await runFfmpeg([
+    '-y',
+    '-i', videoPath,
+    '-i', audioPath,
+    '-map', '0:v',
+    '-map', '1:a',
+    '-c:v', 'copy',
+    '-c:a', 'aac',
+    '-b:a', '128k',
+    '-af', 'apad',
+    '-shortest',
+    '-movflags', '+faststart',
+    outputPath,
+  ]);
+  return outputPath;
+}
+
+function runFfmpeg(args) {
+  return new Promise((resolve, reject) => {
     execFile('ffmpeg', args, { maxBuffer: 64 * 1024 * 1024 }, (error, _stdout, stderr) => {
       if (error) {
         error.message = `ffmpeg завершився з помилкою: ${error.message.split('\n')[0]}`;
@@ -60,5 +84,4 @@ export async function buildSlideshow(photoPaths, outputPath) {
       }
     });
   });
-  return outputPath;
 }

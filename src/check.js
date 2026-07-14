@@ -3,8 +3,9 @@
 import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { generatePostTexts } from './openai.js';
-import { buildSlideshow } from './montage.js';
+import { generateNarration, generatePostTexts } from './openai.js';
+import { buildSlideshow, mixAudio } from './montage.js';
+import { synthesizeVoiceover } from './tts.js';
 import { emptySession, markTheme, readState, saveState } from './state.js';
 import { startNewSession } from './themes.js';
 import {
@@ -82,6 +83,20 @@ async function produceVideo(state) {
     return;
   }
 
+  // Озвучка вимкнена, поки в check.yml не задано ENABLE_TTS: "1".
+  // Будь-яка помилка озвучки не блокує публікацію — відео піде без звуку.
+  let finalVideoPath = outputPath;
+  if (process.env.ENABLE_TTS === '1') {
+    try {
+      const narration = await generateNarration(theme);
+      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'));
+      finalVideoPath = await mixAudio(outputPath, voicePath, path.join(workDir, 'out-voiced.mp4'));
+    } catch (error) {
+      if (error.stderr) console.error(error.stderr);
+      console.error('Озвучка не вдалася, надсилаю відео без звуку:', error);
+    }
+  }
+
   let texts = null;
   try {
     texts = await generatePostTexts(theme);
@@ -90,7 +105,7 @@ async function produceVideo(state) {
   }
 
   // Результат — рівно 4 повідомлення без підписів і префіксів.
-  await sendVideo(chatId, outputPath);
+  await sendVideo(chatId, finalVideoPath);
   if (texts) {
     await sendMessage(chatId, texts.title);
     await sendMessage(chatId, `${texts.description}\n\n${texts.hashtags}`);

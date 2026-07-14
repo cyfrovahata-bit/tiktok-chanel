@@ -33,9 +33,16 @@ jobs:
       - name: Встановити FFmpeg
         run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
 
+      # Озвучка (поки вимкнена): щоб увімкнути, розкоментуйте цей крок
+      # і рядок ENABLE_TTS нижче.
+      # - name: Встановити edge-tts (озвучка)
+      #   run: pip install edge-tts
+
       - name: Обробити оновлення Telegram
         run: node src/check.js
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # ENABLE_TTS: "1"
+          # TTS_VOICE: uk-UA-OstapNeural  # жіночий голос: uk-UA-PolinaNeural
