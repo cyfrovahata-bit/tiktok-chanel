@@ -5,13 +5,18 @@
       "title": "Найбільший орган в тілі людини — це шкіра, і вона може вагою до 10 кг.",
       "status": "done",
       "date": "2026-07-13"
+    },
+    {
+      "title": "Найменша пташка у світі — колібрі, яка важить менше однієї монети.",
+      "status": "pending",
+      "date": "2026-07-14"
     }
   ],
   "session": {
-    "active": false,
-    "theme": null,
-    "prompt_message_id": null,
+    "active": true,
+    "theme": "Найменша пташка у світі — колібрі, яка важить менше однієї монети.",
+    "prompt_message_id": 16,
     "photos": [],
-    "window_end": null
+    "window_end": "2026-07-14T11:32:52.050Z"
   }
 }
