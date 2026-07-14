@@ -17,6 +17,7 @@ export function emptySession() {
     theme: null,
     prompt_message_id: null,
     photos: [],
+    script: null,
     window_end: null,
   };
 }

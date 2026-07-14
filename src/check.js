@@ -49,13 +49,17 @@ async function handleCallback(state, callbackQuery) {
   await startNewSession(state);
 }
 
-function collectPhoto(state, message) {
+function collectMessage(state, message) {
   if (String(message.chat?.id) !== ownerChatId()) return;
-  if (!Array.isArray(message.photo) || message.photo.length === 0) return;
-  // Фото альбому (media_group) приходять окремими update'ами — просто
-  // накопичуємо file_id найбільшого розміру в порядку отримання.
-  const largest = message.photo.reduce((a, b) => (a.width * a.height >= b.width * b.height ? a : b));
-  state.session.photos.push(largest.file_id);
+  if (Array.isArray(message.photo) && message.photo.length > 0) {
+    // Фото альбому (media_group) приходять окремими update'ами — просто
+    // накопичуємо file_id найбільшого розміру в порядку отримання.
+    const largest = message.photo.reduce((a, b) => (a.width * a.height >= b.width * b.height ? a : b));
+    state.session.photos.push(largest.file_id);
+  } else if (typeof message.text === 'string' && message.text.trim()) {
+    // Текст від власника — сценарій слайдів від ChatGPT, основа озвучки.
+    state.session.script = message.text.trim();
+  }
 }
 
 async function produceVideo(state) {
@@ -88,7 +92,7 @@ async function produceVideo(state) {
   let finalVideoPath = outputPath;
   if (process.env.ENABLE_TTS === '1') {
     try {
-      const narration = await generateNarration(theme);
+      const narration = await generateNarration(theme, state.session.script);
       const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'));
       finalVideoPath = await mixAudio(outputPath, voicePath, path.join(workDir, 'out-voiced.mp4'));
     } catch (error) {
@@ -139,7 +143,7 @@ async function main() {
     if (update.callback_query) {
       await handleCallback(state, update.callback_query);
     } else if (update.message) {
-      collectPhoto(state, update.message);
+      collectMessage(state, update.message);
     }
   }
 
