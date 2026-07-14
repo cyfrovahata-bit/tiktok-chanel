@@ -10,13 +10,20 @@
       "title": "Найменша пташка у світі — колібрі, яка важить менше однієї монети.",
       "status": "done",
       "date": "2026-07-14"
+    },
+    {
+      "title": "Чому деякі сорти чаю насправді містять більше кофеїну, ніж кава?",
+      "status": "pending",
+      "date": "2026-07-14"
     }
   ],
   "session": {
-    "active": false,
-    "theme": null,
-    "prompt_message_id": null,
+    "active": true,
+    "theme": "Чому деякі сорти чаю насправді містять більше кофеїну, ніж кава?",
+    "prompt_message_id": 41,
     "photos": [],
-    "window_end": null
-  }
+    "script": null,
+    "window_end": "2026-07-14T20:05:00.889Z"
+  },
+  "last_theme_slot": null
 }
