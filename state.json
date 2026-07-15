@@ -1,5 +1,5 @@
 {
-  "last_update_id": 954000730,
+  "last_update_id": 954000745,
   "themes": [
     {
       "title": "Найбільший орган в тілі людини — це шкіра, і вона може вагою до 10 кг.",
@@ -33,17 +33,17 @@
     },
     {
       "title": "Суміш води з океану та води з річок створює особливий вид води, який підтримує життя у коралових рифах.",
-      "status": "pending",
+      "status": "done",
       "date": "2026-07-15"
     }
   ],
   "session": {
-    "active": true,
-    "theme": "Суміш води з океану та води з річок створює особливий вид води, який підтримує життя у коралових рифах.",
-    "prompt_message_id": 66,
+    "active": false,
+    "theme": null,
+    "prompt_message_id": null,
     "photos": [],
     "script": null,
-    "window_end": "2026-07-15T12:42:21.633Z"
+    "window_end": null
   },
   "last_theme_slot": "2026-07-15-am"
 }
