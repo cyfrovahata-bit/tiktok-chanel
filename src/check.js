@@ -70,7 +70,10 @@ async function produceVideo(state) {
 
   try {
     const photoPaths = [];
-    for (const [index, fileId] of state.session.photos.slice(0, PHOTOS_NEEDED).entries()) {
+    // Останні 6, не перші: якщо в чергу оновлень потрапив «хвіст» зі
+    // старої сесії (наприклад, після збою offset), найсвіжіші фото
+    // від власника мають пріоритет над випадково причепленими старими.
+    for (const [index, fileId] of state.session.photos.slice(-PHOTOS_NEEDED).entries()) {
       const remotePath = await getFile(fileId);
       const localPath = path.join(workDir, `photo-${index}${path.extname(remotePath) || '.jpg'}`);
       await downloadFile(remotePath, localPath);
