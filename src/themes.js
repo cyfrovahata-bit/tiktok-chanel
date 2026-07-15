@@ -46,6 +46,15 @@ async function main() {
   const slot = currentThemeSlot();
   if (slot && state.last_theme_slot === slot) return;
 
+  // GitHub інколи затримує плановий запуск на години — якщо він фактично
+  // виконався вже поза вікном теми (10:00–12:00 / 18:00–20:00 Київ),
+  // не створювати «фантомну» тему в неурочний час. Наступний реальний
+  // слот підхопить усе сам (check.js self-healing або наступний themes.yml).
+  if (!slot) {
+    console.log('Поза вікном теми (плановий запуск сильно затримався) — пропускаю.');
+    return;
+  }
+
   if (state.session.active) {
     markTheme(state, state.session.theme, 'skipped');
     state.session = emptySession();
