@@ -109,15 +109,25 @@ async function produceVideo(state) {
   }
 
   // Результат — рівно 4 повідомлення без підписів і префіксів.
-  await sendVideo(chatId, finalVideoPath);
-  if (texts) {
-    await sendMessage(chatId, texts.title);
-    await sendMessage(chatId, `${texts.description}\n\n${texts.hashtags}`);
-    if (texts.music) {
-      await sendMessage(chatId, `🎵 Музика (шукай у TikTok):\n${texts.music}`);
+  // Мережевий збій саме тут (Telegram API) не має «з'їдати» вже готове
+  // відео і озвучку — сесія лишається активною, наступний запуск
+  // повторить відправку без повторного монтажу/TTS/OpenAI-викликів.
+  try {
+    await sendVideo(chatId, finalVideoPath);
+    if (texts) {
+      await sendMessage(chatId, texts.title);
+      await sendMessage(chatId, `${texts.description}\n\n${texts.hashtags}`);
+      if (texts.music) {
+        await sendMessage(chatId, `🎵 Музика (шукай у TikTok):\n${texts.music}`);
+      }
+    } else {
+      await sendMessage(chatId, 'тексти не згенеровано');
     }
-  } else {
-    await sendMessage(chatId, 'тексти не згенеровано');
+  } catch (error) {
+    console.error('Не вдалося надіслати результат (мережевий збій?):', error);
+    await saveState(state, 'check: відео готове, надсилання не вдалось — повторю наступного разу');
+    process.exitCode = 1;
+    return;
   }
 
   markTheme(state, theme, 'done');
@@ -127,7 +137,23 @@ async function produceVideo(state) {
 
 async function main() {
   const state = await readState();
+  try {
+    await run(state);
+  } catch (error) {
+    // Гарантія: навіть якщо щось усередині впало неочікувано (мережа,
+    // баг), offset і будь-які часткові зміни стану, накопичені в пам'яті
+    // до падіння, все одно зберігаються — інакше зіпсоване оновлення
+    // блокувало б увесь конвеєр і падало б знову на кожному наступному
+    // запуску назавжди.
+    console.error(error);
+    await saveState(state, 'check: аварійне збереження стану після помилки').catch((saveError) => {
+      console.error('Не вдалося зберегти стан після помилки:', saveError);
+    });
+    process.exitCode = 1;
+  }
+}
 
+async function run(state) {
   if (!state.session.active) {
     // Самолікування: GitHub часто дропає планові запуски themes.
     // Якщо триває слот теми (10:00–12:00 чи 18:00–20:00 Київ), а тему
@@ -154,10 +180,18 @@ async function main() {
   const updates = await getUpdates(state.last_update_id + 1);
   for (const update of updates) {
     state.last_update_id = Math.max(state.last_update_id, update.update_id);
-    if (update.callback_query) {
-      await handleCallback(state, update.callback_query);
-    } else if (update.message) {
-      collectMessage(state, update.message);
+    try {
+      if (update.callback_query) {
+        await handleCallback(state, update.callback_query);
+      } else if (update.message) {
+        collectMessage(state, update.message);
+      }
+    } catch (error) {
+      // Одне «зіпсоване» оновлення (наприклад, протермінований callback_query)
+      // не має блокувати решту черги назавжди: offset уже посунуто вище,
+      // і main() внизу гарантовано збереже стан — інакше цей самий update
+      // повторювався б і падав би на кожному наступному запуску.
+      console.error(`Update ${update.update_id} не оброблено:`, error.message);
     }
   }
 
