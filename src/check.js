@@ -1,6 +1,6 @@
 // Точка входу воркфлоу check: читає оновлення Telegram, обробляє кнопку
 // «Інша тема» і фото; коли фото 6 — монтує відео і шле 4 повідомлення-результати.
-import { mkdtemp } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { generateNarration, generatePostTexts } from './openai.js';
@@ -20,6 +20,19 @@ import {
 } from './telegram.js';
 
 const PHOTOS_NEEDED = 6;
+const LAST_VIDEO_DIR = 'last-video';
+
+// Знімок матеріалів останнього змонтованого відео (фото + сценарій + тема) —
+// дозволяє scripts/regenerate.js перезібрати відео (наприклад, після
+// виправлення вимови) без повторного надсилання фото власником.
+async function saveLastVideoSnapshot(photoPaths, theme, script) {
+  await mkdir(LAST_VIDEO_DIR, { recursive: true });
+  for (const [index, photoPath] of photoPaths.entries()) {
+    await copyFile(photoPath, path.join(LAST_VIDEO_DIR, `${index + 1}.jpg`));
+  }
+  await writeFile(path.join(LAST_VIDEO_DIR, 'theme.txt'), theme);
+  await writeFile(path.join(LAST_VIDEO_DIR, 'script.txt'), script || '');
+}
 
 async function handleCallback(state, callbackQuery) {
   const chatId = ownerChatId();
@@ -68,8 +81,8 @@ async function produceVideo(state) {
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'slideshow-'));
   const outputPath = path.join(workDir, 'out.mp4');
 
+  let photoPaths = [];
   try {
-    const photoPaths = [];
     // Останні 6, не перші: якщо в чергу оновлень потрапив «хвіст» зі
     // старої сесії (наприклад, після збою offset), найсвіжіші фото
     // від власника мають пріоритет над випадково причепленими старими.
@@ -88,6 +101,15 @@ async function produceVideo(state) {
     await saveState(state, 'check: помилка монтажу, сесія активна');
     process.exitCode = 1;
     return;
+  }
+
+  // Знімок для можливої перегенерації (scripts/regenerate.js) — власник
+  // може попросити перезібрати відео (виправити слово, тощо) без
+  // повторного надсилання фото. Некритично: помилка тут не має нічого зупиняти.
+  try {
+    await saveLastVideoSnapshot(photoPaths, theme, state.session.script);
+  } catch (error) {
+    console.error('Не вдалося зберегти знімок для перегенерації:', error);
   }
 
   // Озвучка вимкнена, поки в check.yml не задано ENABLE_TTS: "1".
@@ -128,14 +150,16 @@ async function produceVideo(state) {
     }
   } catch (error) {
     console.error('Не вдалося надіслати результат (мережевий збій?):', error);
-    await saveState(state, 'check: відео готове, надсилання не вдалось — повторю наступного разу');
+    await saveState(state, 'check: відео готове, надсилання не вдалось — повторю наступного разу', [
+      LAST_VIDEO_DIR,
+    ]);
     process.exitCode = 1;
     return;
   }
 
   markTheme(state, theme, 'done');
   state.session = emptySession();
-  await saveState(state, `check: відео змонтовано, тема «${theme}» закрита`);
+  await saveState(state, `check: відео змонтовано, тема «${theme}» закрита`, [LAST_VIDEO_DIR]);
 }
 
 async function main() {

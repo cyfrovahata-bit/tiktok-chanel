@@ -55,15 +55,19 @@ function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-export async function saveState(state, commitMessage) {
+// extraPaths — додаткові файли/директорії для коміту разом зі state.json
+// (наприклад, last-video/ — знімок останнього змонтованого відео для
+// подальшої перегенерації без повторного надсилання фото від власника).
+export async function saveState(state, commitMessage, extraPaths = []) {
   await writeFile(STATE_FILE, `${JSON.stringify(state, null, 2)}\n`);
   // Поза GitHub Actions (локальний дебаг) файл пишемо, але не комітимо.
   if (process.env.GITHUB_ACTIONS !== 'true') return;
 
+  const paths = ['state.json', ...extraPaths];
   git('config', 'user.name', 'github-actions[bot]');
   git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com');
-  git('add', 'state.json');
-  if (!git('status', '--porcelain', 'state.json').trim()) return;
+  git('add', ...paths);
+  if (!git('status', '--porcelain', ...paths).trim()) return;
   git('commit', '-m', commitMessage);
 
   // Два воркфлоу можуть писати state.json одночасно: перед пушем підтягуємо

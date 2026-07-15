@@ -1,0 +1,29 @@
+name: regenerate
+
+# Перезбирає ОСТАННЄ відео з матеріалів у last-video/ (наприклад, після
+# виправлення вимови слова в словничку tts.js) — без повторного
+# надсилання фото власником.
+on:
+  workflow_dispatch:
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Встановити FFmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+
+      - name: Перезібрати і надіслати відео
+        run: node scripts/regenerate.js
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          TTS_ENGINE: elevenlabs
