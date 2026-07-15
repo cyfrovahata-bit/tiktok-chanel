@@ -35,15 +35,20 @@
       "title": "Суміш води з океану та води з річок створює особливий вид води, який підтримує життя у коралових рифах.",
       "status": "done",
       "date": "2026-07-15"
+    },
+    {
+      "title": "Чи знаєте ви, що людське тіло містить приблизно 60 000 миль кровоносних судин?",
+      "status": "pending",
+      "date": "2026-07-15"
     }
   ],
   "session": {
-    "active": false,
-    "theme": null,
-    "prompt_message_id": null,
+    "active": true,
+    "theme": "Чи знаєте ви, що людське тіло містить приблизно 60 000 миль кровоносних судин?",
+    "prompt_message_id": 90,
     "photos": [],
     "script": null,
-    "window_end": null
+    "window_end": "2026-07-15T18:26:37.682Z"
   },
-  "last_theme_slot": "2026-07-15-am"
+  "last_theme_slot": "2026-07-15-pm"
 }
