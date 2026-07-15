@@ -1,0 +1,26 @@
+name: reroll
+
+# Ручна заміна активної теми (той самий ефект, що й кнопка «Інша тема»,
+# коли зручніше попросити через чат, а не з телефону).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  reroll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Замінити тему
+        run: node scripts/reroll-theme.js
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
