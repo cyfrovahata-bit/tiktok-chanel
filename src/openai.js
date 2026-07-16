@@ -1,4 +1,6 @@
 // OpenAI: генерація теми (воркфлоу themes) і текстів публікації (воркфлоу check).
+import { pickPoolFact } from './facts-pool.js';
+
 const MODEL = 'gpt-4o-mini';
 
 async function chat(prompt, options = {}) {
@@ -55,6 +57,11 @@ function pickCategory() {
 }
 
 export async function generateTheme(usedTitles) {
+  // Спершу — випадковий (не по категоріях підряд) ще не використаний факт
+  // із кураторського пулу; GPT не викликається, поки пул не вичерпано.
+  const poolFact = pickPoolFact(usedTitles);
+  if (poolFact) return poolFact;
+
   const category = pickCategory();
   const prompt = `Ти — контент-директор українського TikTok-каналу «Чи Ви Знали?».
 Придумай ОДНУ нову тему для короткого факт-ролика з категорії: ${category}.

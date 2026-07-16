@@ -2,8 +2,11 @@
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { generateTheme } from './openai.js';
+import { remainingFacts } from './facts-pool.js';
 import { ownerChatId, sendMessage } from './telegram.js';
 import { currentThemeSlot, emptySession, kyivDate, markTheme, readState, saveState } from './state.js';
+
+const LOW_POOL_THRESHOLD = 10;
 
 const WINDOW_HOURS = 3;
 
@@ -16,6 +19,13 @@ export async function startNewSession(state) {
     .filter((theme) => theme.status === 'done' || theme.status === 'rejected')
     .map((theme) => theme.title);
   const theme = await generateTheme(usedTitles);
+
+  // Пул перевірених фактів тане — попереджаємо власника, поки лишається
+  // ще кілька, щоб було коли поповнити список (не після того, як скінчиться).
+  const left = remainingFacts([...usedTitles, theme]).length;
+  if (left > 0 && left <= LOW_POOL_THRESHOLD) {
+    await sendMessage(ownerChatId(), `⚠️ У пулі перевірених фактів залишилось ${left}. Час поповнити список!`);
+  }
 
   const template = await readFile(new URL('../prompt.template.txt', import.meta.url), 'utf8');
   const promptText = template.replaceAll('{{TEMA}}', theme);
