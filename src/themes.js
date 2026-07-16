@@ -2,7 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { generateTheme } from './openai.js';
-import { remainingFacts } from './facts-pool.js';
+import { FACTS_POOL, remainingFacts } from './facts-pool.js';
 import { ownerChatId, sendMessage } from './telegram.js';
 import { currentThemeSlot, emptySession, kyivDate, markTheme, readState, saveState } from './state.js';
 
@@ -34,7 +34,13 @@ export async function startNewSession(state) {
     inline_keyboard: [[{ text: '🔄 Інша тема', callback_data: 'other_theme' }]],
   });
 
-  state.themes.push({ title: theme, status: 'pending', date: kyivDate() });
+  // source фіксує походження факту — прямо в state.json, який бот і так
+  // комітить щоразу. Не лише проти повторів (усі done/rejected title і так
+  // заборонені незалежно від джерела), а щоб при підборі наступної партії
+  // фактів для пулу було видно одним поглядом на history, що з пулу вже
+  // пішло в ефір, а що GPT вигадав сам (і теж більше не пропонувати).
+  const source = FACTS_POOL.some((fact) => fact.text === theme) ? 'pool' : 'gpt';
+  state.themes.push({ title: theme, status: 'pending', date: kyivDate(), source });
   // Мітка слота, щоб запізнілий плановий запуск themes не дублював тему.
   state.last_theme_slot = currentThemeSlot() ?? state.last_theme_slot ?? null;
   state.session = {
