@@ -7,6 +7,19 @@ const FPS = 25;
 const SLIDE_SECONDS = 4;
 const FADE_SECONDS = 0.5;
 
+// Маскот (assets/mascot.png) накладається внизу зліва на 30% висоти кадру.
+// Фон малюнка — суцільний майже чорний (#00000E); colorkey прибирає його
+// без окремого інструменту для видалення фону.
+const MASCOT_HEIGHT = Math.round(HEIGHT * 0.3);
+const MASCOT_MARGIN = 40;
+const MASCOT_BG_COLOR = '0x00000E';
+const MASCOT_BG_SIMILARITY = 0.15;
+const MASCOT_BG_BLEND = 0.05;
+// «Дихання» + легкий підскок — щоб маскот виглядав живим без ліпсінку.
+const MASCOT_PULSE_PERIOD = 1.4;
+const MASCOT_PULSE_AMPLITUDE = 8;
+const MASCOT_BOB_AMPLITUDE = 6;
+
 export function buildFilterComplex(count) {
   const parts = [];
   for (let i = 0; i < count; i++) {
@@ -50,6 +63,33 @@ export async function buildSlideshow(photoPaths, outputPath) {
     outputPath,
   );
   await runFfmpeg(args);
+  return outputPath;
+}
+
+// Накладає маскота внизу зліва (30% висоти кадру), прибираючи його суцільний
+// фон через colorkey. Легка пульсація розміру й підскок — щоб не був статичною
+// наліпкою поверх відео.
+export async function overlayMascot(videoPath, mascotPath, outputPath) {
+  const size = `${MASCOT_HEIGHT}+${MASCOT_PULSE_AMPLITUDE}*sin(2*PI*t/${MASCOT_PULSE_PERIOD})`;
+  const y = `main_h-overlay_h-${MASCOT_MARGIN}+${MASCOT_BOB_AMPLITUDE}*sin(2*PI*t/${MASCOT_PULSE_PERIOD}+1)`;
+  const filter =
+    `[1:v]colorkey=${MASCOT_BG_COLOR}:${MASCOT_BG_SIMILARITY}:${MASCOT_BG_BLEND},` +
+    `scale=w='${size}':h='${size}':eval=frame[mascot];` +
+    `[0:v][mascot]overlay=x=${MASCOT_MARGIN}:y='${y}':format=auto[vout]`;
+  await runFfmpeg([
+    '-y',
+    '-i', videoPath,
+    '-i', mascotPath,
+    '-filter_complex', filter,
+    '-map', '[vout]',
+    '-map', '0:a?',
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    '-r', String(FPS),
+    '-c:a', 'copy',
+    '-movflags', '+faststart',
+    outputPath,
+  ]);
   return outputPath;
 }
 

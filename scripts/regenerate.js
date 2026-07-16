@@ -6,7 +6,7 @@
 // Запуск: Actions → regenerate → Run workflow.
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { buildSlideshow, mixAudio } from '../src/montage.js';
+import { buildSlideshow, mixAudio, overlayMascot } from '../src/montage.js';
 import { synthesizeVoiceover } from '../src/tts.js';
 import { generateNarration, generatePostTexts } from '../src/openai.js';
 import { ownerChatId, sendMessage, sendVideo } from '../src/telegram.js';
@@ -20,9 +20,10 @@ const chatId = ownerChatId();
 console.log(`Перегенерація: «${theme}»`);
 
 await buildSlideshow(photos, '/tmp/regen-silent.mp4');
+await overlayMascot('/tmp/regen-silent.mp4', 'assets/mascot.png', '/tmp/regen-mascot.mp4');
 const narration = await generateNarration(theme, script);
 await synthesizeVoiceover(narration, '/tmp/regen-voice.mp3');
-await mixAudio('/tmp/regen-silent.mp4', '/tmp/regen-voice.mp3', '/tmp/regen-final.mp4');
+await mixAudio('/tmp/regen-mascot.mp4', '/tmp/regen-voice.mp3', '/tmp/regen-final.mp4');
 
 const texts = await generatePostTexts(theme);
 
