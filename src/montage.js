@@ -15,10 +15,14 @@ const MASCOT_MARGIN = 40;
 const MASCOT_BG_COLOR = '0x00000E';
 const MASCOT_BG_SIMILARITY = 0.15;
 const MASCOT_BG_BLEND = 0.05;
-// «Дихання» + легкий підскок — щоб маскот виглядав живим без ліпсінку.
-const MASCOT_PULSE_PERIOD = 1.4;
-const MASCOT_PULSE_AMPLITUDE = 8;
-const MASCOT_BOB_AMPLITUDE = 6;
+// Пружний підскок зі стисканням/розтягуванням (squash & stretch) — щоб
+// маскот виглядав живим і в стислому відео на телефоні, а не завмерлою
+// наліпкою. Без ліпсінку (потребував би окремих кадрів рота), але з чітко
+// помітним рухом у ритмі енергійного ведучого.
+const MASCOT_BOUNCE_PERIOD = 0.9;
+const MASCOT_BOUNCE_HEIGHT = 70; // на скільки px маскот підстрибує вгору
+const MASCOT_SQUASH = 0.12; // ±12% висоти: стиск на землі, розтяг у польоті
+const MASCOT_STRETCH_W = 0.07; // легка компенсація ширини в протифазі
 
 export function buildFilterComplex(count) {
   const parts = [];
@@ -67,14 +71,17 @@ export async function buildSlideshow(photoPaths, outputPath) {
 }
 
 // Накладає маскота внизу зліва (30% висоти кадру), прибираючи його суцільний
-// фон через colorkey. Легка пульсація розміру й підскок — щоб не був статичною
-// наліпкою поверх відео.
+// фон через colorkey, і підстрибує ним у ритмі (squash & stretch), щоб рух
+// був явно помітний навіть у стисненому відео на телефоні.
 export async function overlayMascot(videoPath, mascotPath, outputPath) {
-  const size = `${MASCOT_HEIGHT}+${MASCOT_PULSE_AMPLITUDE}*sin(2*PI*t/${MASCOT_PULSE_PERIOD})`;
-  const y = `main_h-overlay_h-${MASCOT_MARGIN}+${MASCOT_BOB_AMPLITUDE}*sin(2*PI*t/${MASCOT_PULSE_PERIOD}+1)`;
+  // bounce: 0 (стоїть на «землі», стиснутий) → 1 (пік стрибка, розтягнутий) → 0.
+  const bounce = `abs(sin(PI*t/${MASCOT_BOUNCE_PERIOD}))`;
+  const h = `${MASCOT_HEIGHT}*(1+${MASCOT_SQUASH}*(${bounce}-0.5))`;
+  const w = `${MASCOT_HEIGHT}*(1-${MASCOT_STRETCH_W}*(${bounce}-0.5))`;
+  const y = `main_h-overlay_h-${MASCOT_MARGIN}-${MASCOT_BOUNCE_HEIGHT}*${bounce}`;
   const filter =
     `[1:v]colorkey=${MASCOT_BG_COLOR}:${MASCOT_BG_SIMILARITY}:${MASCOT_BG_BLEND},` +
-    `scale=w='${size}':h='${size}':eval=frame[mascot];` +
+    `scale=w='${w}':h='${h}':eval=frame[mascot];` +
     `[0:v][mascot]overlay=x=${MASCOT_MARGIN}:y='${y}':format=auto[vout]`;
   await runFfmpeg([
     '-y',
