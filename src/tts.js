@@ -102,8 +102,11 @@ export async function synthesizeVoiceover(text, outputPath) {
 async function fitToVideo(outputPath) {
   const duration = await audioDuration(outputPath);
   if (duration <= MAX_AUDIO_SECONDS) return;
-  // Обмеження 1.2: сильніше прискорення звучить заметушливо.
-  const factor = Math.min(duration / (MAX_AUDIO_SECONDS - 0.2), 1.2);
+  // Стеля 1.5 (а не 1.2): драматична начитка ElevenLabs v3 із паузами
+  // буває значно довшою за відео, і обрізаний фінал «Підписуйся» — гірше
+  // за трохи швидший темп. При 1.2 начитка ~28 с не вміщалась у 21.5-с
+  // відео; 1.5 стискає її під ціль ~19.8 с із запасом до кінця відео.
+  const factor = Math.min(duration / (MAX_AUDIO_SECONDS - 0.2), 1.5);
   const fitted = `${outputPath}.fit.mp3`;
   await run('ffmpeg', ['-y', '-i', outputPath, '-filter:a', `atempo=${factor.toFixed(3)}`, fitted]);
   await rename(fitted, outputPath);
