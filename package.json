@@ -9,6 +9,7 @@
   },
   "scripts": {
     "themes": "node src/themes.js",
-    "check": "node src/check.js"
+    "check": "node src/check.js",
+    "web": "node web/server.js"
   }
 }

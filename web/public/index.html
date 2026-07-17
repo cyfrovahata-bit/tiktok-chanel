@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Чи Ви Знали? — панель публікації</title>
+  <style>
+    :root { --bg:#0f1020; --card:#1a1c33; --accent:#ffb020; --accent2:#8b2fc9; --text:#e8e8f0; --muted:#9a9ab0; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); line-height:1.5; }
+    header { padding:20px; background:linear-gradient(90deg,var(--accent2),var(--accent)); color:#fff; }
+    header h1 { margin:0; font-size:20px; }
+    main { max-width:820px; margin:0 auto; padding:20px; }
+    .theme { background:var(--card); border-radius:12px; margin-bottom:12px; overflow:hidden; }
+    .theme summary { padding:14px 16px; cursor:pointer; font-weight:600; list-style:none; }
+    .theme summary::-webkit-details-marker { display:none; }
+    .theme .body { padding:0 16px 16px; }
+    .cat { color:var(--muted); font-size:13px; font-weight:400; }
+    pre { background:#0c0d1a; padding:12px; border-radius:8px; white-space:pre-wrap; font-size:12px; max-height:200px; overflow:auto; }
+    button { background:var(--accent); color:#111; border:0; border-radius:8px; padding:10px 16px; font-weight:600; cursor:pointer; }
+    button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+    button:disabled { opacity:.5; cursor:default; }
+    input[type=file] { margin:10px 0; color:var(--muted); }
+    label { display:block; margin:10px 0 4px; font-size:13px; color:var(--muted); }
+    input[type=text], textarea { width:100%; background:#0c0d1a; border:1px solid #2a2c48; border-radius:8px; color:var(--text); padding:8px; font-family:inherit; }
+    video { width:100%; max-width:280px; border-radius:12px; display:block; margin:12px auto; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+    .platforms label { display:inline-flex; align-items:center; gap:6px; margin-right:12px; color:var(--text); }
+    .badge { font-size:11px; padding:2px 8px; border-radius:20px; background:#2a2c48; color:var(--muted); }
+    .badge.on { background:#1f6f3f; color:#c6f6d5; }
+    .note { color:var(--muted); font-size:13px; }
+    .draft { background:#3a2a10; border:1px solid var(--accent); border-radius:8px; padding:10px 12px; margin-bottom:16px; font-size:13px; }
+  </style>
+</head>
+<body>
+  <header><h1>💡 Чи Ви Знали? — панель публікації</h1></header>
+  <main>
+    <div class="draft">⚙️ Чернетка. Публікація по платформах — заглушки, поки не підключено API. Монтаж і прев'ю відео вже робочі.</div>
+
+    <h2>1. Обери тему</h2>
+    <div id="themes" class="note">Завантаження…</div>
+
+    <div id="work" style="display:none">
+      <h2>2. Завантаж фото та збери відео</h2>
+      <p class="note">Згенеруй фото своїм ШІ за скопійованим промтом, потім завантаж їх сюди (у порядку слайдів).</p>
+      <input type="file" id="photos" accept="image/*" multiple />
+      <div class="row">
+        <button id="assemble">🎬 Зібрати відео</button>
+        <span id="status" class="note"></span>
+      </div>
+
+      <div id="preview" style="display:none">
+        <h2>3. Перевір і опублікуй</h2>
+        <video id="video" controls></video>
+        <label>Назва</label><input type="text" id="title" />
+        <label>Опис</label><textarea id="description" rows="5"></textarea>
+        <label>Хештеги</label><input type="text" id="hashtags" />
+        <div class="platforms" id="platforms"></div>
+        <div class="row">
+          <button id="publish">🚀 Опублікувати</button>
+          <button class="ghost" id="editBtn">✏️ Переробити</button>
+        </div>
+        <div id="editBox" style="display:none; margin-top:10px">
+          <label>Причина переробки (напр. «озвучка погана», «опис переробити»)</label>
+          <textarea id="reason" rows="2"></textarea>
+          <div class="row"><button id="regen">↻ Переробити</button></div>
+        </div>
+        <div id="result" class="note" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let selectedTheme = null, selectedScript = null, currentId = null, platformsMeta = [];
+
+    async function load() {
+      const { themes, platforms } = await (await fetch('/api/state')).json();
+      platformsMeta = platforms;
+      const box = document.getElementById('themes');
+      box.innerHTML = '';
+      themes.forEach((t) => {
+        const d = document.createElement('details');
+        d.className = 'theme';
+        d.innerHTML = `<summary>${t.theme} <span class="cat">· ${t.category} · ${t.recommendedPhotos} фото</span></summary>
+          <div class="body">
+            <pre>${t.prompt.replace(/</g, '&lt;')}</pre>
+            <div class="row">
+              <button class="copy">📋 Копіювати промт</button>
+              <button class="pick ghost">✅ Обрати цю тему</button>
+            </div>
+          </div>`;
+        d.querySelector('.copy').onclick = () => navigator.clipboard.writeText(t.prompt);
+        d.querySelector('.pick').onclick = () => { selectedTheme = t.theme; document.getElementById('work').style.display='block'; window.scrollTo(0, document.getElementById('work').offsetTop); };
+        box.appendChild(d);
+      });
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsDataURL(file); });
+    }
+
+    document.getElementById('assemble').onclick = async () => {
+      const files = [...document.getElementById('photos').files];
+      if (files.length < 2) { alert('Завантаж хоча б 2 фото'); return; }
+      const status = document.getElementById('status');
+      status.textContent = 'Монтую відео… (може зайняти до хвилини)';
+      const photos = await Promise.all(files.map(fileToBase64));
+      const res = await fetch('/api/assemble', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ photos, theme: selectedTheme, script: selectedScript }) });
+      const data = await res.json();
+      if (data.error) { status.textContent = 'Помилка: ' + data.error; return; }
+      currentId = data.id; status.textContent = '';
+      document.getElementById('preview').style.display = 'block';
+      document.getElementById('video').src = '/api/video/' + data.id;
+      if (data.texts) { document.getElementById('title').value = data.texts.title || ''; document.getElementById('description').value = data.texts.description || ''; document.getElementById('hashtags').value = data.texts.hashtags || ''; }
+      const pl = document.getElementById('platforms');
+      pl.innerHTML = '<label style="color:var(--muted)">Куди публікувати:</label>' + platformsMeta.map((p) => `<label><input type="checkbox" value="${p.id}" ${p.enabled?'checked':''} ${p.enabled?'':'disabled'}> ${p.name} <span class="badge ${p.enabled?'on':''}">${p.enabled?'готово':'скоро'}</span></label>`).join('');
+    };
+
+    document.getElementById('editBtn').onclick = () => { const b = document.getElementById('editBox'); b.style.display = b.style.display==='none'?'block':'none'; };
+
+    document.getElementById('regen').onclick = async () => {
+      const reason = document.getElementById('reason').value;
+      const res = await fetch('/api/regenerate', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ id: currentId, reason }) });
+      const data = await res.json();
+      document.getElementById('result').textContent = data.note || data.error || 'готово';
+    };
+
+    document.getElementById('publish').onclick = async () => {
+      const platforms = [...document.querySelectorAll('#platforms input:checked')].map((c) => c.value);
+      const res = await fetch('/api/publish', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ id: currentId, platforms, title: document.getElementById('title').value, description: document.getElementById('description').value, hashtags: document.getElementById('hashtags').value }) });
+      const data = await res.json();
+      document.getElementById('result').innerHTML = (data.results || []).map((r) => `${r.platform}: ${r.status} — ${r.detail || ''}`).join('<br>') || (data.error || 'готово');
+    };
+
+    load();
+  </script>
+</body>
+</html>
