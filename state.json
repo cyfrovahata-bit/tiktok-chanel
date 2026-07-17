@@ -56,15 +56,22 @@
       "status": "done",
       "date": "2026-07-17",
       "source": "pool"
+    },
+    {
+      "title": "Армія США налічувала 12 мільйонів солдатів наприкінці Другої світової війни 1945 року.",
+      "status": "pending",
+      "date": "2026-07-17",
+      "source": "pool"
     }
   ],
   "session": {
-    "active": false,
-    "theme": null,
-    "prompt_message_id": null,
+    "active": true,
+    "theme": "Армія США налічувала 12 мільйонів солдатів наприкінці Другої світової війни 1945 року.",
+    "prompt_message_id": 150,
     "photos": [],
     "script": null,
-    "window_end": null
+    "archive": null,
+    "window_end": "2026-07-17T18:32:21.012Z"
   },
-  "last_theme_slot": "2026-07-17-am"
+  "last_theme_slot": "2026-07-17-pm"
 }
