@@ -1,11 +1,12 @@
 // Точка входу воркфлоу check: читає оновлення Telegram, обробляє кнопку
 // «Інша тема» і фото; коли фото 6 — монтує відео і шле 4 повідомлення-результати.
-import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { generateNarration, generatePostTexts } from './openai.js';
 import { buildSlideshow, mixAudio } from './montage.js';
 import { synthesizeVoiceover } from './tts.js';
+import { extractPhotoArchive } from './archive.js';
 import { currentThemeSlot, emptySession, markTheme, readState, saveState } from './state.js';
 import { startNewSession } from './themes.js';
 import {
@@ -64,7 +65,17 @@ async function handleCallback(state, callbackQuery) {
 
 function collectMessage(state, message) {
   if (String(message.chat?.id) !== ownerChatId()) return;
-  if (Array.isArray(message.photo) && message.photo.length > 0) {
+  const doc = message.document;
+  const isZip =
+    doc &&
+    (doc.mime_type === 'application/zip' ||
+      doc.mime_type === 'application/x-zip-compressed' ||
+      /\.zip$/i.test(doc.file_name || ''));
+  if (isZip) {
+    // Архів .zip із 6 фото (1..6) — самодостатній для монтажу. Беремо
+    // найсвіжіший, якщо власник надіслав кілька.
+    state.session.archive = doc.file_id;
+  } else if (Array.isArray(message.photo) && message.photo.length > 0) {
     // Фото альбому (media_group) приходять окремими update'ами — просто
     // накопичуємо file_id найбільшого розміру в порядку отримання.
     const largest = message.photo.reduce((a, b) => (a.width * a.height >= b.width * b.height ? a : b));
@@ -82,22 +93,38 @@ async function produceVideo(state) {
   const outputPath = path.join(workDir, 'out.mp4');
 
   let photoPaths = [];
+  // Сценарій озвучки: текстове повідомлення власника має пріоритет; якщо
+  // його немає — беремо script.txt з архіву (нижче); інакше null (тема).
+  let script = state.session.script;
   try {
-    // Останні 6, не перші: якщо в чергу оновлень потрапив «хвіст» зі
-    // старої сесії (наприклад, після збою offset), найсвіжіші фото
-    // від власника мають пріоритет над випадково причепленими старими.
-    for (const [index, fileId] of state.session.photos.slice(-PHOTOS_NEEDED).entries()) {
-      const remotePath = await getFile(fileId);
-      const localPath = path.join(workDir, `photo-${index}${path.extname(remotePath) || '.jpg'}`);
-      await downloadFile(remotePath, localPath);
-      photoPaths.push(localPath);
+    if (state.session.archive) {
+      // Архів .zip: завантажуємо документ і розпаковуємо (сувора звірка
+      // імен 1..6 усередині archive.js — захист від чужих фото).
+      const remotePath = await getFile(state.session.archive);
+      const zipPath = path.join(workDir, 'archive.zip');
+      await downloadFile(remotePath, zipPath);
+      const { photoPaths: extracted, scriptText } = await extractPhotoArchive(await readFile(zipPath));
+      photoPaths = extracted;
+      if (!script) script = scriptText;
+    } else {
+      // Останні 6, не перші: якщо в чергу оновлень потрапив «хвіст» зі
+      // старої сесії (наприклад, після збою offset), найсвіжіші фото
+      // від власника мають пріоритет над випадково причепленими старими.
+      for (const [index, fileId] of state.session.photos.slice(-PHOTOS_NEEDED).entries()) {
+        const remotePath = await getFile(fileId);
+        const localPath = path.join(workDir, `photo-${index}${path.extname(remotePath) || '.jpg'}`);
+        await downloadFile(remotePath, localPath);
+        photoPaths.push(localPath);
+      }
     }
     await buildSlideshow(photoPaths, outputPath);
   } catch (error) {
     if (error.stderr) console.error(error.stderr);
     console.error(error);
     await sendMessage(chatId, `Помилка монтажу: ${error.message}`);
-    // Сесія лишається активною: власник може дослати фото, наступний запуск повторить монтаж.
+    // Помилка розпакування архіву (напр. чуже фото) — скидаємо архів, щоб
+    // власник міг надіслати виправлений; сесія лишається активною.
+    if (state.session.archive) state.session.archive = null;
     await saveState(state, 'check: помилка монтажу, сесія активна');
     process.exitCode = 1;
     return;
@@ -107,7 +134,7 @@ async function produceVideo(state) {
   // може попросити перезібрати відео (виправити слово, тощо) без
   // повторного надсилання фото. Некритично: помилка тут не має нічого зупиняти.
   try {
-    await saveLastVideoSnapshot(photoPaths, theme, state.session.script);
+    await saveLastVideoSnapshot(photoPaths, theme, script);
   } catch (error) {
     console.error('Не вдалося зберегти знімок для перегенерації:', error);
   }
@@ -117,7 +144,7 @@ async function produceVideo(state) {
   let finalVideoPath = outputPath;
   if (process.env.ENABLE_TTS === '1') {
     try {
-      const narration = await generateNarration(theme, state.session.script);
+      const narration = await generateNarration(theme, script);
       const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'));
       finalVideoPath = await mixAudio(outputPath, voicePath, path.join(workDir, 'out-voiced.mp4'));
     } catch (error) {
@@ -220,6 +247,13 @@ async function run(state) {
       // повторювався б і падав би на кожному наступному запуску.
       console.error(`Update ${update.update_id} не оброблено:`, error.message);
     }
+  }
+
+  // Архів .zip самодостатній: у ньому вже 6 фото (1..6) і, за наявності,
+  // script.txt для озвучки — монтуємо одразу, не чекаючи окремого тексту.
+  if (state.session.archive) {
+    await produceVideo(state);
+    return;
   }
 
   // Монтаж стартує лише коли є ОБИДВІ частини: сценарій і 6 фото.

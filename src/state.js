@@ -18,6 +18,9 @@ export function emptySession() {
     prompt_message_id: null,
     photos: [],
     script: null,
+    // file_id архіву .zip з 6 фото (1..6), якщо власник надіслав його
+    // документом замість 6 окремих фото. Самодостатній для монтажу.
+    archive: null,
     window_end: null,
   };
 }

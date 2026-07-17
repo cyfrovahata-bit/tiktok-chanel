@@ -114,9 +114,9 @@ const server = http.createServer(async (req, res) => {
     // за флагом робить vision-перевірку кожного, потім монтує.
     if (req.method === 'POST' && url.pathname === '/api/assemble-zip') {
       const { zip, theme, script, slideTexts } = JSON.parse(await readBody(req));
-      let photoPaths;
+      let photoPaths, scriptText;
       try {
-        photoPaths = await extractPhotoArchive(zip);
+        ({ photoPaths, scriptText } = await extractPhotoArchive(zip));
       } catch (error) {
         return json(res, 400, { error: error.message });
       }
@@ -127,7 +127,7 @@ const server = http.createServer(async (req, res) => {
           problems, // [{index, issue}] — які фото перезняти
         });
       }
-      const { videoPath, texts } = await assembleVideo({ photoPaths, theme, script });
+      const { videoPath, texts } = await assembleVideo({ photoPaths, theme, script: script || scriptText });
       const id = randomUUID();
       assembled.set(id, { videoPath, texts, theme });
       json(res, 200, { id, texts });

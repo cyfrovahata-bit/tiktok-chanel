@@ -49,6 +49,7 @@ export async function startNewSession(state) {
     prompt_message_id: message.message_id,
     photos: [],
     script: null,
+    archive: null,
     window_end: new Date(Date.now() + WINDOW_HOURS * 60 * 60 * 1000).toISOString(),
   };
   return theme;

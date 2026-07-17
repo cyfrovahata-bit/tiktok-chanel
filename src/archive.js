@@ -29,7 +29,18 @@ function run(command, args) {
   });
 }
 
-// Розпаковує zip (base64 або Buffer) і повертає рівно 6 шляхів у порядку 1..6.
+// Читає перший знайдений текстовий сценарій із архіву (script.txt / text.txt),
+// якщо власник поклав його поруч із фото — тоді озвучка синхронізується зі
+// слайдами навіть коли в бот кинуто лише архів. Немає — повертає null.
+async function readScriptText(outDir, entries) {
+  const name = entries.find((n) => /^(script|text|сценарій)\.txt$/i.test(n));
+  if (!name) return null;
+  const text = (await readFile(path.join(outDir, name), 'utf8')).trim();
+  return text || null;
+}
+
+// Розпаковує zip (base64 або Buffer). Повертає { photoPaths, scriptText }:
+// рівно 6 фото в порядку 1..6 і (необов'язково) текст сценарію з архіву.
 // Кидає помилку з людським описом, якщо структура не така, як домовлено.
 export async function extractPhotoArchive(zipData) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'archive-'));
@@ -75,5 +86,6 @@ export async function extractPhotoArchive(zipData) {
     }
   }
 
-  return ordered;
+  const scriptText = await readScriptText(outDir, entries);
+  return { photoPaths: ordered, scriptText };
 }
