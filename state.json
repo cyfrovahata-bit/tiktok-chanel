@@ -1,5 +1,5 @@
 {
-  "last_update_id": 954000766,
+  "last_update_id": 954000773,
   "themes": [
     {
       "title": "Найбільший орган в тілі людини — це шкіра, і вона може вагою до 10 кг.",
@@ -53,18 +53,18 @@
     },
     {
       "title": "Перший комп'ютерний «баг» був справжньою міллю, що застрягла в реле у 1947 році.",
-      "status": "pending",
+      "status": "done",
       "date": "2026-07-17",
       "source": "pool"
     }
   ],
   "session": {
-    "active": true,
-    "theme": "Перший комп'ютерний «баг» був справжньою міллю, що застрягла в реле у 1947 році.",
-    "prompt_message_id": 138,
+    "active": false,
+    "theme": null,
+    "prompt_message_id": null,
     "photos": [],
     "script": null,
-    "window_end": "2026-07-17T10:25:47.039Z"
+    "window_end": null
   },
   "last_theme_slot": "2026-07-17-am"
 }
