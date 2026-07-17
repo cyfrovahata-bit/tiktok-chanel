@@ -37,12 +37,45 @@ export function getUpdates(offset) {
   });
 }
 
+// Telegram відхиляє повідомлення, довші за 4096 символів («message is too
+// long»). Ділимо довгий текст по межах рядків, щоб довгий промпт ніколи не
+// валив запуск (кнопку чіпляємо лише до останньої частини).
+const TELEGRAM_TEXT_LIMIT = 4096;
+
+function splitForTelegram(text, limit = TELEGRAM_TEXT_LIMIT) {
+  if (text.length <= limit) return [text];
+  const chunks = [];
+  let current = '';
+  for (const line of text.split('\n')) {
+    // Один наддовгий рядок (рідкість) — ріжемо жорстко по ліміту.
+    if (line.length > limit) {
+      if (current) { chunks.push(current); current = ''; }
+      for (let i = 0; i < line.length; i += limit) chunks.push(line.slice(i, i + limit));
+      continue;
+    }
+    if ((current ? current.length + 1 : 0) + line.length > limit) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current = current ? `${current}\n${line}` : line;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
 // Без parse_mode: промпт має копіюватись у ChatGPT як є, а тексти публікації
 // не повинні містити жодного зайвого символу розмітки.
-export function sendMessage(chatId, text, replyMarkup) {
-  const payload = { chat_id: chatId, text };
-  if (replyMarkup) payload.reply_markup = replyMarkup;
-  return call('sendMessage', payload);
+export async function sendMessage(chatId, text, replyMarkup) {
+  const chunks = splitForTelegram(String(text));
+  let result;
+  for (let i = 0; i < chunks.length; i++) {
+    const payload = { chat_id: chatId, text: chunks[i] };
+    // reply_markup (кнопку) — лише на останній частині, щоб опинилась унизу.
+    if (replyMarkup && i === chunks.length - 1) payload.reply_markup = replyMarkup;
+    result = await call('sendMessage', payload);
+  }
+  return result;
 }
 
 export function answerCallbackQuery(callbackQueryId, text) {
