@@ -7,6 +7,23 @@ const FPS = 25;
 const SLIDE_SECONDS = 4;
 const FADE_SECONDS = 0.5;
 
+// Маскот (assets/mascot.png) накладається внизу зліва на 30% висоти кадру.
+// Фон малюнка — суцільний майже чорний (#00000E); colorkey прибирає його
+// без окремого інструменту для видалення фону.
+const MASCOT_HEIGHT = Math.round(HEIGHT * 0.3);
+const MASCOT_MARGIN = 40;
+const MASCOT_BG_COLOR = '0x00000E';
+const MASCOT_BG_SIMILARITY = 0.15;
+const MASCOT_BG_BLEND = 0.05;
+// Пружний підскок зі стисканням/розтягуванням (squash & stretch) — щоб
+// маскот виглядав живим і в стислому відео на телефоні, а не завмерлою
+// наліпкою. Без ліпсінку (потребував би окремих кадрів рота), але з чітко
+// помітним рухом у ритмі енергійного ведучого.
+const MASCOT_BOUNCE_PERIOD = 0.9;
+const MASCOT_BOUNCE_HEIGHT = 70; // на скільки px маскот підстрибує вгору
+const MASCOT_SQUASH = 0.12; // ±12% висоти: стиск на землі, розтяг у польоті
+const MASCOT_STRETCH_W = 0.07; // легка компенсація ширини в протифазі
+
 export function buildFilterComplex(count) {
   const parts = [];
   for (let i = 0; i < count; i++) {
@@ -50,6 +67,36 @@ export async function buildSlideshow(photoPaths, outputPath) {
     outputPath,
   );
   await runFfmpeg(args);
+  return outputPath;
+}
+
+// Накладає маскота внизу зліва (30% висоти кадру), прибираючи його суцільний
+// фон через colorkey, і підстрибує ним у ритмі (squash & stretch), щоб рух
+// був явно помітний навіть у стисненому відео на телефоні.
+export async function overlayMascot(videoPath, mascotPath, outputPath) {
+  // bounce: 0 (стоїть на «землі», стиснутий) → 1 (пік стрибка, розтягнутий) → 0.
+  const bounce = `abs(sin(PI*t/${MASCOT_BOUNCE_PERIOD}))`;
+  const h = `${MASCOT_HEIGHT}*(1+${MASCOT_SQUASH}*(${bounce}-0.5))`;
+  const w = `${MASCOT_HEIGHT}*(1-${MASCOT_STRETCH_W}*(${bounce}-0.5))`;
+  const y = `main_h-overlay_h-${MASCOT_MARGIN}-${MASCOT_BOUNCE_HEIGHT}*${bounce}`;
+  const filter =
+    `[1:v]colorkey=${MASCOT_BG_COLOR}:${MASCOT_BG_SIMILARITY}:${MASCOT_BG_BLEND},` +
+    `scale=w='${w}':h='${h}':eval=frame[mascot];` +
+    `[0:v][mascot]overlay=x=${MASCOT_MARGIN}:y='${y}':format=auto[vout]`;
+  await runFfmpeg([
+    '-y',
+    '-i', videoPath,
+    '-i', mascotPath,
+    '-filter_complex', filter,
+    '-map', '[vout]',
+    '-map', '0:a?',
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    '-r', String(FPS),
+    '-c:a', 'copy',
+    '-movflags', '+faststart',
+    outputPath,
+  ]);
   return outputPath;
 }
 

@@ -4,7 +4,7 @@ import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { generateNarration, generatePostTexts } from './openai.js';
-import { buildSlideshow, mixAudio } from './montage.js';
+import { buildSlideshow, mixAudio, overlayMascot } from './montage.js';
 import { synthesizeVoiceover } from './tts.js';
 import { currentThemeSlot, emptySession, markTheme, readState, saveState } from './state.js';
 import { startNewSession } from './themes.js';
@@ -79,7 +79,7 @@ async function produceVideo(state) {
   const chatId = ownerChatId();
   const theme = state.session.theme;
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'slideshow-'));
-  const outputPath = path.join(workDir, 'out.mp4');
+  let outputPath = path.join(workDir, 'out.mp4');
 
   let photoPaths = [];
   try {
@@ -101,6 +101,17 @@ async function produceVideo(state) {
     await saveState(state, 'check: помилка монтажу, сесія активна');
     process.exitCode = 1;
     return;
+  }
+
+  // Маскот — необов'язковий: якщо накладання не вдалося, відео йде без нього.
+  if (process.env.ENABLE_MASCOT === '1') {
+    try {
+      const mascotPath = path.join(process.cwd(), 'assets/mascot.png');
+      outputPath = await overlayMascot(outputPath, mascotPath, path.join(workDir, 'out-mascot.mp4'));
+    } catch (error) {
+      if (error.stderr) console.error(error.stderr);
+      console.error('Накладання маскота не вдалося, надсилаю відео без нього:', error);
+    }
   }
 
   // Знімок для можливої перегенерації (scripts/regenerate.js) — власник
