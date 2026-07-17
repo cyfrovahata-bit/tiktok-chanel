@@ -4,7 +4,15 @@ import { pathToFileURL } from 'node:url';
 import { generateTheme } from './openai.js';
 import { FACTS_POOL, remainingFacts } from './facts-pool.js';
 import { ownerChatId, sendMessage } from './telegram.js';
-import { currentThemeSlot, emptySession, kyivDate, markTheme, readState, saveState } from './state.js';
+import {
+  currentCarouselSlot,
+  currentThemeSlot,
+  emptySession,
+  kyivDate,
+  markTheme,
+  readState,
+  saveState,
+} from './state.js';
 
 const LOW_POOL_THRESHOLD = 10;
 
@@ -55,8 +63,42 @@ export async function startNewSession(state) {
   return theme;
 }
 
+// Фото-карусель (обідній слот): надсилає нову тему з КАРУСЕЛЬНИМ промптом і
+// позначає її використаною, але НЕ відкриває відео-сесію — власник генерує
+// 6 фото й постить каруселлю в TikTok/Instagram вручну, без озвучки й монтажу.
+export async function sendCarouselTheme(state) {
+  const usedTitles = state.themes
+    .filter((theme) => theme.status === 'done' || theme.status === 'rejected')
+    .map((theme) => theme.title);
+  const theme = await generateTheme(usedTitles);
+
+  const left = remainingFacts([...usedTitles, theme]).length;
+  if (left > 0 && left <= LOW_POOL_THRESHOLD) {
+    await sendMessage(ownerChatId(), `⚠️ У пулі перевірених фактів залишилось ${left}. Час поповнити список!`);
+  }
+
+  const template = await readFile(new URL('../prompt.carousel.template.txt', import.meta.url), 'utf8');
+  await sendMessage(ownerChatId(), `🖼 Тема для фото-каруселі (TikTok + Instagram):`);
+  await sendMessage(ownerChatId(), template.replaceAll('{{TEMA}}', theme));
+
+  const source = FACTS_POOL.some((fact) => fact.text === theme) ? 'pool' : 'gpt';
+  // status 'done' — щоб тема не повторювалась; kind фіксує, що це карусель.
+  state.themes.push({ title: theme, status: 'done', date: kyivDate(), source, kind: 'carousel' });
+  return theme;
+}
+
 async function main() {
   const state = await readState();
+
+  // Обідній слот — фото-карусель (окремо від відео-тем, без відео-сесії).
+  const carouselSlot = currentCarouselSlot();
+  if (carouselSlot) {
+    if (state.last_carousel_slot === carouselSlot) return; // вже надіслано цього слота
+    const theme = await sendCarouselTheme(state);
+    state.last_carousel_slot = carouselSlot;
+    await saveState(state, `themes: тема каруселі «${theme}»`);
+    return;
+  }
 
   // Тему цього слота вже надіслано (можливо, self-healing у check.js) —
   // запізнілий плановий запуск не має дублювати її.
