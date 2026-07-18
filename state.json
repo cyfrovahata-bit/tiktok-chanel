@@ -75,17 +75,23 @@
       "date": "2026-07-18",
       "source": "pool",
       "kind": "carousel"
+    },
+    {
+      "title": "Випити 6 літрів води за короткий час небезпечно для здоров'я — може викликати гостру нестачу солей у крові.",
+      "status": "pending",
+      "date": "2026-07-18",
+      "source": "pool"
     }
   ],
   "session": {
-    "active": false,
-    "theme": null,
-    "prompt_message_id": null,
+    "active": true,
+    "theme": "Випити 6 літрів води за короткий час небезпечно для здоров'я — може викликати гостру нестачу солей у крові.",
+    "prompt_message_id": 169,
     "photos": [],
     "script": null,
     "archive": null,
-    "window_end": null
+    "window_end": "2026-07-18T18:26:49.215Z"
   },
-  "last_theme_slot": "2026-07-18-am",
+  "last_theme_slot": "2026-07-18-pm",
   "last_carousel_slot": "2026-07-18-noon"
 }
