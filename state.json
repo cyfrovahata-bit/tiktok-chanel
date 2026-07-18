@@ -1,5 +1,5 @@
 {
-  "last_update_id": 954000774,
+  "last_update_id": 954000775,
   "themes": [
     {
       "title": "Найбільший орган в тілі людини — це шкіра, і вона може вагою до 10 кг.",
@@ -65,7 +65,7 @@
     },
     {
       "title": "Найдовша печера Європи й Азії — «Оптимістична» — у Тернопільській області.",
-      "status": "pending",
+      "status": "done",
       "date": "2026-07-18",
       "source": "pool"
     },
@@ -78,13 +78,13 @@
     }
   ],
   "session": {
-    "active": true,
-    "theme": "Найдовша печера Європи й Азії — «Оптимістична» — у Тернопільській області.",
+    "active": false,
+    "theme": null,
     "prompt_message_id": null,
     "photos": [],
     "script": null,
     "archive": null,
-    "window_end": "2026-07-18T17:21:10.568134Z"
+    "window_end": null
   },
   "last_theme_slot": "2026-07-18-am",
   "last_carousel_slot": "2026-07-18-noon"
