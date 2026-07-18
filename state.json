@@ -1,5 +1,5 @@
 {
-  "last_update_id": 954000775,
+  "last_update_id": 954000776,
   "themes": [
     {
       "title": "Найбільший орган в тілі людини — це шкіра, і вона може вагою до 10 кг.",
@@ -78,19 +78,19 @@
     },
     {
       "title": "Випити 6 літрів води за короткий час небезпечно для здоров'я — може викликати гостру нестачу солей у крові.",
-      "status": "pending",
+      "status": "done",
       "date": "2026-07-18",
       "source": "pool"
     }
   ],
   "session": {
-    "active": true,
-    "theme": "Випити 6 літрів води за короткий час небезпечно для здоров'я — може викликати гостру нестачу солей у крові.",
+    "active": false,
+    "theme": null,
     "prompt_message_id": null,
     "photos": [],
     "script": null,
     "archive": null,
-    "window_end": "2026-07-19T00:08:33.323817Z"
+    "window_end": null
   },
   "last_theme_slot": "2026-07-18-pm",
   "last_carousel_slot": "2026-07-18-noon"
