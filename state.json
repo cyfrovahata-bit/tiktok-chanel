@@ -68,6 +68,13 @@
       "status": "pending",
       "date": "2026-07-18",
       "source": "pool"
+    },
+    {
+      "title": "Перші джинси мали лише чотири кишені — одна крихітна була саме для кишенькового годинника.",
+      "status": "done",
+      "date": "2026-07-18",
+      "source": "pool",
+      "kind": "carousel"
     }
   ],
   "session": {
@@ -79,5 +86,6 @@
     "archive": null,
     "window_end": "2026-07-18T10:26:39.454Z"
   },
-  "last_theme_slot": "2026-07-18-am"
+  "last_theme_slot": "2026-07-18-am",
+  "last_carousel_slot": "2026-07-18-noon"
 }
