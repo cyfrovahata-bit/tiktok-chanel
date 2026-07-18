@@ -65,7 +65,7 @@
     },
     {
       "title": "Найдовша печера Європи й Азії — «Оптимістична» — у Тернопільській області.",
-      "status": "skipped",
+      "status": "pending",
       "date": "2026-07-18",
       "source": "pool"
     },
@@ -78,13 +78,13 @@
     }
   ],
   "session": {
-    "active": false,
-    "theme": null,
+    "active": true,
+    "theme": "Найдовша печера Європи й Азії — «Оптимістична» — у Тернопільській області.",
     "prompt_message_id": null,
     "photos": [],
     "script": null,
     "archive": null,
-    "window_end": null
+    "window_end": "2026-07-18T17:21:10.568134Z"
   },
   "last_theme_slot": "2026-07-18-am",
   "last_carousel_slot": "2026-07-18-noon"
