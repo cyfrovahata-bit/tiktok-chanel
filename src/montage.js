@@ -14,6 +14,20 @@ export function slideshowDuration(count) {
   return (count - 1) * (SLIDE_SECONDS - FADE_SECONDS) + SLIDE_SECONDS;
 }
 
+// Момент (с), коли кожен слайд починає з'являтися: слайд i (0-based) — на
+// (SLIDE-FADE)*i. Використовується для прив'язки озвучки до слайдів.
+export function slideStartTimes(count) {
+  return Array.from({ length: count }, (_, i) => (SLIDE_SECONDS - FADE_SECONDS) * i);
+}
+
+// Скільки часу (с) «звучить» кожен слайд до появи наступного: 3.5 с для всіх,
+// крім останнього, який тримається до кінця відео (4 с).
+export function slideSlotDurations(count) {
+  const starts = slideStartTimes(count);
+  const total = slideshowDuration(count);
+  return starts.map((start, i) => (i < count - 1 ? starts[i + 1] - start : total - start));
+}
+
 export function buildFilterComplex(count) {
   const parts = [];
   for (let i = 0; i < count; i++) {

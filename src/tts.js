@@ -5,7 +5,10 @@
 // Основний рушій задається TTS_ENGINE у check.yml; якщо він падає,
 // автоматично пробуються наступні.
 import { execFile } from 'node:child_process';
-import { rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, rename, unlink, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { slideStartTimes, slideSlotDurations } from './montage.js';
 
 // Виклик передає РЕАЛЬНУ довжину відео (slideshowDuration під фактичну
 // кількість слайдів). Голос має закінчуватися за END_MARGIN секунд до кінця
@@ -97,24 +100,133 @@ function matchCase(replacement, original) {
   return replacement;
 }
 
-export async function synthesizeVoiceover(text, outputPath, videoSeconds = DEFAULT_VIDEO_SECONDS) {
-  text = fixPronunciation(text);
-  const targetSeconds = videoSeconds - END_MARGIN;
+// Прогін рушіїв із фолбеком (без підгонки часу).
+async function runEngines(text, outputPath, targetSeconds) {
   const primary = ENGINES[process.env.TTS_ENGINE] ? process.env.TTS_ENGINE : 'openai';
   const order = [primary, ...Object.keys(ENGINES).filter((name) => name !== primary)];
   let lastError;
   for (const name of order) {
     try {
       await ENGINES[name](text, outputPath, targetSeconds);
-      // Фінальна підгонка синхрону під ціль (без зміни тону).
-      await fitToVideo(outputPath, targetSeconds);
-      return outputPath;
+      return;
     } catch (error) {
       lastError = error;
       console.error(`TTS ${name} не вдався: ${error.message}`);
     }
   }
   throw lastError;
+}
+
+// Головний вхід. Якщо передано slideCount і речень вистачає — синтезує озвучку
+// З ПРИВ'ЯЗКОЮ ДО СЛАЙДІВ (кожне речення починається з початком свого слайда).
+// Інакше — суцільна начитка, підігнана під довжину відео (старий шлях).
+export async function synthesizeVoiceover(
+  text,
+  outputPath,
+  videoSeconds = DEFAULT_VIDEO_SECONDS,
+  slideCount = null,
+) {
+  text = fixPronunciation(text);
+  const targetSeconds = videoSeconds - END_MARGIN;
+  const sentences = slideCount ? splitSentences(text) : [];
+  // Прив'язка можлива, лише коли речень не менше, ніж слайдів (інакше якісь
+  // слайди лишились би без озвучки) — тоді відкат на суцільну начитку.
+  if (slideCount && sentences.length >= slideCount) {
+    try {
+      await synthesizeAligned(groupSentences(sentences, slideCount), slideCount, outputPath);
+      return outputPath;
+    } catch (error) {
+      // Прив'язка не критична: якщо щось пішло не так — не лишаємо відео без
+      // звуку, а відкочуємось на суцільну начитку.
+      console.error(`Прив'язка до слайдів не вдалась (${error.message}); суцільна начитка.`);
+    }
+  }
+  await runEngines(text, outputPath, targetSeconds);
+  await fitToVideo(outputPath, targetSeconds);
+  return outputPath;
+}
+
+// Розбиває текст на речення (крапка/оклик/знак питання/трикрапка).
+function splitSentences(text) {
+  const matches = text.replace(/\s+/g, ' ').trim().match(/[^.!?…]+[.!?…]+/g);
+  return (matches || [text.trim()]).map((s) => s.trim()).filter(Boolean);
+}
+
+// Групує речення рівно в N груп (по слайдах), зберігаючи порядок: перші N-1
+// слайдів — по реченню, останній забирає всі зайві (напр. подвійна кінцівка
+// «питання + поглянь ще раз» лягає на фінальний слайд).
+function groupSentences(sentences, n) {
+  const groups = [];
+  for (let i = 0; i < n - 1; i++) groups.push(sentences[i] || '');
+  groups.push(sentences.slice(n - 1).join(' '));
+  return groups;
+}
+
+// Синтезує кожну групу-речення окремо і ставить її на таймлайн так, щоб вона
+// починалася з початком свого слайда (adelay), потім змішує (amix). Речення,
+// яке не влазить у свій слот, локально пришвидшується; коротше — лишає
+// природну паузу до наступного слайда (звідси відчуття синхрону з кадрами).
+async function synthesizeAligned(groups, slideCount, outputPath) {
+  const starts = slideStartTimes(slideCount);
+  const slots = slideSlotDurations(slideCount);
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'tts-aligned-'));
+  const inputs = [];
+  const filters = [];
+  let idx = 0;
+  for (let i = 0; i < slideCount; i++) {
+    const clipText = (groups[i] || '').trim();
+    if (!clipText) continue;
+    const clip = path.join(dir, `clip${i}.mp3`);
+    await runEngines(clipText, clip, slots[i]);
+    await trimLeadingSilence(clip);
+    await fitClipToSlot(clip, slots[i]);
+    inputs.push('-i', clip);
+    const delayMs = Math.round(starts[i] * 1000);
+    filters.push(`[${idx}:a]adelay=${delayMs}:all=1[a${idx}]`);
+    idx++;
+  }
+  if (idx === 0) throw new Error('Порожня начитка для всіх слайдів');
+  let filterComplex;
+  let mapLabel;
+  if (idx === 1) {
+    filterComplex = filters[0];
+    mapLabel = '[a0]';
+  } else {
+    const mixIns = Array.from({ length: idx }, (_, k) => `[a${k}]`).join('');
+    filterComplex = `${filters.join(';')};${mixIns}amix=inputs=${idx}:normalize=0[out]`;
+    mapLabel = '[out]';
+  }
+  await run('ffmpeg', [
+    '-y', ...inputs,
+    '-filter_complex', filterComplex,
+    '-map', mapLabel,
+    '-c:a', 'libmp3lame',
+    outputPath,
+  ]);
+  return outputPath;
+}
+
+// Прибирає тишу на початку кліпу — щоб слово стартувало точно на початку слайда.
+async function trimLeadingSilence(clip) {
+  const out = `${clip}.trim.mp3`;
+  await run('ffmpeg', [
+    '-y', '-i', clip,
+    '-af', 'silenceremove=start_periods=1:start_duration=0:start_threshold=-45dB',
+    out,
+  ]);
+  await rename(out, clip);
+}
+
+// Пришвидшує кліп, лише якщо він довший за свій слайд-слот (щоб не наповз на
+// наступний слайд). Коротший лишаємо як є — пауза до наступного слайда природна.
+async function fitClipToSlot(clip, slotSeconds) {
+  const duration = await audioDuration(clip);
+  const maxDuration = slotSeconds - 0.15;
+  if (duration <= maxDuration) return;
+  const factor = Math.min(duration / maxDuration, 1.6);
+  const out = `${clip}.fit.mp3`;
+  await run('ffmpeg', ['-y', '-i', clip, '-filter:a', `atempo=${factor.toFixed(3)}`, out]);
+  await rename(out, clip);
 }
 
 // Підганяє начитку під targetSeconds atempo'ом (тон зберігається): задовгу

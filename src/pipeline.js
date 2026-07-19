@@ -35,7 +35,7 @@ export async function assembleVideo({ photoPaths, theme, script = null, withVoic
       const slideCount = photoPaths.length;
       const videoSeconds = slideshowDuration(slideCount);
       const narration = await generateNarration(theme, script, slideCount);
-      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'), videoSeconds);
+      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'), videoSeconds, slideCount);
       videoPath = await mixAudio(silentPath, voicePath, path.join(workDir, 'voiced.mp4'));
     } catch (error) {
       // Озвучка не критична — відео піде без звуку (та сама політика, що в боті).

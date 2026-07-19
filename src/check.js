@@ -153,7 +153,8 @@ async function produceVideo(state) {
       // (напр. перевірити безшовність петлі), а не відновлювати з пам'яті.
       console.log(`Начитка (${narration.trim().split(/\s+/).length} слів):\n${narration}`);
       await writeFile(path.join(LAST_VIDEO_DIR, 'narration.txt'), narration).catch(() => {});
-      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'), videoSeconds);
+      // slideCount вмикає прив'язку озвучки до слайдів (речення = слайд).
+      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'), videoSeconds, slideCount);
       finalVideoPath = await mixAudio(outputPath, voicePath, path.join(workDir, 'out-voiced.mp4'));
     } catch (error) {
       if (error.stderr) console.error(error.stderr);

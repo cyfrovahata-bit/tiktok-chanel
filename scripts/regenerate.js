@@ -27,7 +27,7 @@ console.log(`Перегенерація: «${theme}» (${photos.length} слай
 await buildSlideshow(photos, '/tmp/regen-silent.mp4');
 const narration = await generateNarration(theme, script, photos.length);
 console.log(`Начитка (${narration.trim().split(/\s+/).length} слів):\n${narration}\n`);
-await synthesizeVoiceover(narration, '/tmp/regen-voice.mp3', slideshowDuration(photos.length));
+await synthesizeVoiceover(narration, '/tmp/regen-voice.mp3', slideshowDuration(photos.length), photos.length);
 await mixAudio('/tmp/regen-silent.mp4', '/tmp/regen-voice.mp3', '/tmp/regen-final.mp4');
 
 const texts = await generatePostTexts(theme);
