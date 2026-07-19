@@ -81,18 +81,24 @@
       "status": "done",
       "date": "2026-07-18",
       "source": "pool"
+    },
+    {
+      "title": "У Китаї є один будинок, де живе майже 20 тисяч людей — з ресторанами, басейнами й салонами всередині, наче ціле місто під одним дахом.",
+      "status": "pending",
+      "date": "2026-07-19",
+      "source": "pool"
     }
   ],
   "session": {
-    "active": false,
-    "theme": null,
-    "prompt_message_id": null,
+    "active": true,
+    "theme": "У Китаї є один будинок, де живе майже 20 тисяч людей — з ресторанами, басейнами й салонами всередині, наче ціле місто під одним дахом.",
+    "prompt_message_id": 180,
     "photos": [],
     "script": null,
     "archive": null,
-    "window_end": null
+    "window_end": "2026-07-19T10:26:07.670Z"
   },
-  "last_theme_slot": "2026-07-18-pm",
+  "last_theme_slot": "2026-07-19-am",
   "last_carousel_slot": "2026-07-18-noon",
-  "next_theme": "У Китаї є один будинок, де живе майже 20 тисяч людей — з ресторанами, басейнами й салонами всередині, наче ціле місто під одним дахом."
+  "next_theme": null
 }
