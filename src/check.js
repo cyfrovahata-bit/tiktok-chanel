@@ -4,7 +4,7 @@ import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os';
 import path from 'node:path';
 import { generateNarration, generatePostTexts } from './openai.js';
-import { buildSlideshow, mixAudio } from './montage.js';
+import { buildSlideshow, mixAudio, slideshowDuration } from './montage.js';
 import { synthesizeVoiceover } from './tts.js';
 import { extractPhotoArchive } from './archive.js';
 import { currentThemeSlot, emptySession, markTheme, readState, saveState } from './state.js';
@@ -72,7 +72,7 @@ function collectMessage(state, message) {
       doc.mime_type === 'application/x-zip-compressed' ||
       /\.zip$/i.test(doc.file_name || ''));
   if (isZip) {
-    // Архів .zip із 6 фото (1..6) — самодостатній для монтажу. Беремо
+    // Архів .zip із фото 1..N — самодостатній для монтажу. Беремо
     // найсвіжіший, якщо власник надіслав кілька.
     state.session.archive = doc.file_id;
   } else if (Array.isArray(message.photo) && message.photo.length > 0) {
@@ -144,8 +144,12 @@ async function produceVideo(state) {
   let finalVideoPath = outputPath;
   if (process.env.ENABLE_TTS === '1') {
     try {
-      const narration = await generateNarration(theme, script);
-      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'));
+      // Ціль озвучки прив'язана до фактичної довжини відео (кількість
+      // слайдів гнучка, 5–8), із запасом ~1.5 с, щоб голос точно вмістився.
+      const slideCount = photoPaths.length;
+      const maxAudioSeconds = slideshowDuration(slideCount) - 1.5;
+      const narration = await generateNarration(theme, script, slideCount);
+      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'), maxAudioSeconds);
       finalVideoPath = await mixAudio(outputPath, voicePath, path.join(workDir, 'out-voiced.mp4'));
     } catch (error) {
       if (error.stderr) console.error(error.stderr);
@@ -249,7 +253,7 @@ async function run(state) {
     }
   }
 
-  // Архів .zip самодостатній: у ньому вже 6 фото (1..6) і, за наявності,
+  // Архів .zip самодостатній: у ньому вже фото 1..N і, за наявності,
   // script.txt для озвучки — монтуємо одразу, не чекаючи окремого тексту.
   if (state.session.archive) {
     await produceVideo(state);

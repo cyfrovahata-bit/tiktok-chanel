@@ -5,8 +5,8 @@
 // власником не потрібно.
 // Запуск: Actions → regenerate → Run workflow.
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
-import { buildSlideshow, mixAudio } from '../src/montage.js';
+import { readFile, readdir } from 'node:fs/promises';
+import { buildSlideshow, mixAudio, slideshowDuration } from '../src/montage.js';
 import { synthesizeVoiceover } from '../src/tts.js';
 import { generateNarration, generatePostTexts } from '../src/openai.js';
 import { ownerChatId, sendMessage, sendVideo } from '../src/telegram.js';
@@ -14,14 +14,19 @@ import { ownerChatId, sendMessage, sendVideo } from '../src/telegram.js';
 const DIR = 'last-video';
 const theme = (await readFile(path.join(DIR, 'theme.txt'), 'utf8')).trim();
 const script = (await readFile(path.join(DIR, 'script.txt'), 'utf8')).trim() || null;
-const photos = [1, 2, 3, 4, 5, 6].map((i) => path.join(DIR, `${i}.jpg`));
+// Кількість фото гнучка (5–8) — беремо всі 1.jpg, 2.jpg… у знімку по порядку.
+const files = await readdir(DIR);
+const photos = files
+  .filter((name) => /^\d+\.jpg$/.test(name))
+  .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
+  .map((name) => path.join(DIR, name));
 const chatId = ownerChatId();
 
-console.log(`Перегенерація: «${theme}»`);
+console.log(`Перегенерація: «${theme}» (${photos.length} слайдів)`);
 
 await buildSlideshow(photos, '/tmp/regen-silent.mp4');
-const narration = await generateNarration(theme, script);
-await synthesizeVoiceover(narration, '/tmp/regen-voice.mp3');
+const narration = await generateNarration(theme, script, photos.length);
+await synthesizeVoiceover(narration, '/tmp/regen-voice.mp3', slideshowDuration(photos.length) - 1.5);
 await mixAudio('/tmp/regen-silent.mp4', '/tmp/regen-voice.mp3', '/tmp/regen-final.mp4');
 
 const texts = await generatePostTexts(theme);

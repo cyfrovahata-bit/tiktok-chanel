@@ -7,8 +7,9 @@
 import { execFile } from 'node:child_process';
 import { rename, unlink, writeFile } from 'node:fs/promises';
 
-// Відео триває 21.5 с. Цільова довжина озвучки — до 20 с: голос має
-// закінчитися трохи раніше за відео і не обганяти слайди.
+// Дефолтна ціль на випадок, коли довжину відео не передано (5 слайдів → 18 с,
+// 6 → 21.5, 8 → 28.5). Виклик із check.js/pipeline.js передає РЕАЛЬНУ ціль під
+// фактичну кількість слайдів, щоб коротше відео не обрізало озвучку.
 const MAX_AUDIO_SECONDS = 20.0;
 
 // cedar і marin — нові голоси, які OpenAI рекомендує як найякісніші.
@@ -85,17 +86,17 @@ function matchCase(replacement, original) {
   return replacement;
 }
 
-export async function synthesizeVoiceover(text, outputPath) {
+export async function synthesizeVoiceover(text, outputPath, maxAudioSeconds = MAX_AUDIO_SECONDS) {
   text = fixPronunciation(text);
   const primary = ENGINES[process.env.TTS_ENGINE] ? process.env.TTS_ENGINE : 'openai';
   const order = [primary, ...Object.keys(ENGINES).filter((name) => name !== primary)];
   let lastError;
   for (const name of order) {
     try {
-      await ENGINES[name](text, outputPath);
+      await ENGINES[name](text, outputPath, maxAudioSeconds);
       // Фінальна гарантія синхрону: якщо начитка довша за відео —
       // прискорюємо її atempo (без зміни тону) рівно під довжину відео.
-      await fitToVideo(outputPath);
+      await fitToVideo(outputPath, maxAudioSeconds);
       return outputPath;
     } catch (error) {
       lastError = error;
@@ -105,14 +106,14 @@ export async function synthesizeVoiceover(text, outputPath) {
   throw lastError;
 }
 
-async function fitToVideo(outputPath) {
+async function fitToVideo(outputPath, maxAudioSeconds = MAX_AUDIO_SECONDS) {
   const duration = await audioDuration(outputPath);
-  if (duration <= MAX_AUDIO_SECONDS) return;
+  if (duration <= maxAudioSeconds) return;
   // Стеля 1.5 (а не 1.2): драматична начитка ElevenLabs v3 із паузами
   // буває значно довшою за відео, і обрізаний фінал «Підписуйся» — гірше
   // за трохи швидший темп. При 1.2 начитка ~28 с не вміщалась у 21.5-с
   // відео; 1.5 стискає її під ціль ~19.8 с із запасом до кінця відео.
-  const factor = Math.min(duration / (MAX_AUDIO_SECONDS - 0.2), 1.5);
+  const factor = Math.min(duration / (maxAudioSeconds - 0.2), 1.5);
   const fitted = `${outputPath}.fit.mp3`;
   await run('ffmpeg', ['-y', '-i', outputPath, '-filter:a', `atempo=${factor.toFixed(3)}`, fitted]);
   await rename(fitted, outputPath);
@@ -123,7 +124,7 @@ async function fitToVideo(outputPath) {
 // ([excited], [whispers]...) у режимі Creative (stability 0.0): максимум
 // живої гри голосом. Для старої Multilingual v2 — класичні налаштування
 // розповідної начитки.
-async function elevenLabsTts(text, outputPath, retry) {
+async function elevenLabsTts(text, outputPath, maxAudioSeconds = MAX_AUDIO_SECONDS, retry) {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) throw new Error('Не задано ELEVENLABS_API_KEY');
   const voiceId = process.env.TTS_ELEVEN_VOICE_ID || 'N2lVS1w4EtoT3dr4eOWO'; // Callum — характерний, не заїжджений
@@ -150,14 +151,14 @@ async function elevenLabsTts(text, outputPath, retry) {
   // v2 при задовгій начитці перечитує швидше (природніше за atempo);
   // для v3 параметра швидкості немає — підганяння зробить fitToVideo.
   const duration = await audioDuration(outputPath);
-  if (!retry && !isV3 && duration > MAX_AUDIO_SECONDS) {
-    const factor = Math.min(duration / (MAX_AUDIO_SECONDS - 0.3), 1.2);
-    return elevenLabsTts(text, outputPath, Number(factor.toFixed(2)));
+  if (!retry && !isV3 && duration > maxAudioSeconds) {
+    const factor = Math.min(duration / (maxAudioSeconds - 0.3), 1.2);
+    return elevenLabsTts(text, outputPath, maxAudioSeconds, Number(factor.toFixed(2)));
   }
   return outputPath;
 }
 
-async function openaiTts(text, outputPath, speed = 1.0) {
+async function openaiTts(text, outputPath, maxAudioSeconds = MAX_AUDIO_SECONDS, speed = 1.0) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('Не задано OPENAI_API_KEY');
   const response = await fetch('https://api.openai.com/v1/audio/speech', {
@@ -179,9 +180,9 @@ async function openaiTts(text, outputPath, speed = 1.0) {
 
   // Якщо начитка довша за відео — один раз перечитуємо швидше.
   const duration = await audioDuration(outputPath);
-  if (speed === 1.0 && duration > MAX_AUDIO_SECONDS) {
-    const factor = Math.min(duration / (MAX_AUDIO_SECONDS - 0.3), 1.35);
-    return openaiTts(text, outputPath, Number(factor.toFixed(2)));
+  if (speed === 1.0 && duration > maxAudioSeconds) {
+    const factor = Math.min(duration / (maxAudioSeconds - 0.3), 1.35);
+    return openaiTts(text, outputPath, maxAudioSeconds, Number(factor.toFixed(2)));
   }
   return outputPath;
 }

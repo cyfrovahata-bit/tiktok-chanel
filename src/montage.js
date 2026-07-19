@@ -7,6 +7,13 @@ const FPS = 25;
 const SLIDE_SECONDS = 4;
 const FADE_SECONDS = 0.5;
 
+// Тривалість готового слайдшоу в секундах для N слайдів. Кожен наступний
+// слайд додає (SLIDE-FADE) секунд, бо сусідні кадри перекриваються xfade'ом.
+// N=6 → 21.5 с (як було зашито раніше).
+export function slideshowDuration(count) {
+  return (count - 1) * (SLIDE_SECONDS - FADE_SECONDS) + SLIDE_SECONDS;
+}
+
 export function buildFilterComplex(count) {
   const parts = [];
   for (let i = 0; i < count; i++) {

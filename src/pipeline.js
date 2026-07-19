@@ -10,7 +10,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
-import { buildSlideshow, mixAudio } from './montage.js';
+import { buildSlideshow, mixAudio, slideshowDuration } from './montage.js';
 import { synthesizeVoiceover } from './tts.js';
 import { generateNarration, generatePostTexts } from './openai.js';
 
@@ -32,8 +32,10 @@ export async function assembleVideo({ photoPaths, theme, script = null, withVoic
   let videoPath = silentPath;
   if (withVoice) {
     try {
-      const narration = await generateNarration(theme, script);
-      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'));
+      const slideCount = photoPaths.length;
+      const maxAudioSeconds = slideshowDuration(slideCount) - 1.5;
+      const narration = await generateNarration(theme, script, slideCount);
+      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'), maxAudioSeconds);
       videoPath = await mixAudio(silentPath, voicePath, path.join(workDir, 'voiced.mp4'));
     } catch (error) {
       // Озвучка не критична — відео піде без звуку (та сама політика, що в боті).
