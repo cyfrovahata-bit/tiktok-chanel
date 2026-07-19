@@ -24,11 +24,14 @@ const chatId = ownerChatId();
 
 console.log(`Перегенерація: «${theme}» (${photos.length} слайдів)`);
 
-await buildSlideshow(photos, '/tmp/regen-silent.mp4');
+// Озвучка ПЕРЕД монтажем: повертає тривалості слайдів, під які монтуємо відео.
 const narration = await generateNarration(theme, script, photos.length);
 console.log(`Начитка (${narration.trim().split(/\s+/).length} слів):\n${narration}\n`);
-await synthesizeVoiceover(narration, '/tmp/regen-voice.mp3', slideshowDuration(photos.length), photos.length);
-await mixAudio('/tmp/regen-silent.mp4', '/tmp/regen-voice.mp3', '/tmp/regen-final.mp4');
+const { voicePath, slideDurations } = await synthesizeVoiceover(
+  narration, '/tmp/regen-voice.mp3', slideshowDuration(photos.length), photos.length,
+);
+await buildSlideshow(photos, '/tmp/regen-silent.mp4', slideDurations ?? photos.length);
+await mixAudio('/tmp/regen-silent.mp4', voicePath, '/tmp/regen-final.mp4');
 
 const texts = await generatePostTexts(theme);
 

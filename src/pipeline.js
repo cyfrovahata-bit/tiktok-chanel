@@ -27,19 +27,34 @@ export async function assembleVideo({ photoPaths, theme, script = null, withVoic
   }
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'webvideo-'));
   const silentPath = path.join(workDir, 'silent.mp4');
-  await buildSlideshow(photoPaths, silentPath);
 
-  let videoPath = silentPath;
+  // Озвучка ПЕРЕД монтажем: у режимі прив'язки вона повертає тривалості
+  // слайдів, під які монтується відео.
+  let voicePath = null;
+  let slideDurations = null;
   if (withVoice) {
     try {
       const slideCount = photoPaths.length;
       const videoSeconds = slideshowDuration(slideCount);
       const narration = await generateNarration(theme, script, slideCount);
-      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'), videoSeconds, slideCount);
-      videoPath = await mixAudio(silentPath, voicePath, path.join(workDir, 'voiced.mp4'));
+      const result = await synthesizeVoiceover(
+        narration, path.join(workDir, 'voice.mp3'), videoSeconds, slideCount,
+      );
+      voicePath = result.voicePath;
+      slideDurations = result.slideDurations;
     } catch (error) {
       // Озвучка не критична — відео піде без звуку (та сама політика, що в боті).
       console.error('Озвучка не вдалася, відео без звуку:', error.message);
+    }
+  }
+
+  await buildSlideshow(photoPaths, silentPath, slideDurations ?? photoPaths.length);
+  let videoPath = silentPath;
+  if (voicePath) {
+    try {
+      videoPath = await mixAudio(silentPath, voicePath, path.join(workDir, 'voiced.mp4'));
+    } catch (error) {
+      console.error('Не вдалося накласти звук, відео без нього:', error.message);
     }
   }
 

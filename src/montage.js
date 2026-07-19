@@ -4,31 +4,36 @@ import { execFile } from 'node:child_process';
 const WIDTH = 1080;
 const HEIGHT = 1920;
 const FPS = 25;
-const SLIDE_SECONDS = 4;
-const FADE_SECONDS = 0.5;
+export const DEFAULT_SLIDE_SECONDS = 4;
+export const FADE_SECONDS = 0.5;
 
-// Тривалість готового слайдшоу в секундах для N слайдів. Кожен наступний
-// слайд додає (SLIDE-FADE) секунд, бо сусідні кадри перекриваються xfade'ом.
-// N=6 → 21.5 с (як було зашито раніше).
-export function slideshowDuration(count) {
-  return (count - 1) * (SLIDE_SECONDS - FADE_SECONDS) + SLIDE_SECONDS;
+// Приводить аргумент до масиву тривалостей слайдів (с). Число → рівні слайди
+// по DEFAULT_SLIDE_SECONDS; масив → його ж (тривалість кожного слайда окремо,
+// коли відео підлаштовується під озвучку).
+function toDurations(slidesOrCount) {
+  if (Array.isArray(slidesOrCount)) return slidesOrCount;
+  return Array.from({ length: slidesOrCount }, () => DEFAULT_SLIDE_SECONDS);
 }
 
-// Момент (с), коли кожен слайд починає з'являтися: слайд i (0-based) — на
-// (SLIDE-FADE)*i. Використовується для прив'язки озвучки до слайдів.
-export function slideStartTimes(count) {
-  return Array.from({ length: count }, (_, i) => (SLIDE_SECONDS - FADE_SECONDS) * i);
+// Загальна тривалість слайдшоу: сума тривалостей мінус перекриття xfade'ами.
+export function slideshowDuration(slidesOrCount) {
+  const d = toDurations(slidesOrCount);
+  return d.reduce((a, b) => a + b, 0) - (d.length - 1) * FADE_SECONDS;
 }
 
-// Скільки часу (с) «звучить» кожен слайд до появи наступного: 3.5 с для всіх,
-// крім останнього, який тримається до кінця відео (4 с).
-export function slideSlotDurations(count) {
-  const starts = slideStartTimes(count);
-  const total = slideshowDuration(count);
-  return starts.map((start, i) => (i < count - 1 ? starts[i + 1] - start : total - start));
+// Момент (с), коли кожен слайд починає з'являтися (= offset відповідного
+// xfade). o[0]=0; o[i]=o[i-1]+d[i-1]-FADE. Це і час старту озвучки слайда.
+export function slideOffsets(slidesOrCount) {
+  const d = toDurations(slidesOrCount);
+  const offsets = [0];
+  for (let i = 1; i < d.length; i++) offsets.push(offsets[i - 1] + d[i - 1] - FADE_SECONDS);
+  return offsets;
 }
 
-export function buildFilterComplex(count) {
+export function buildFilterComplex(slidesOrCount) {
+  const durations = toDurations(slidesOrCount);
+  const offsets = slideOffsets(durations);
+  const count = durations.length;
   const parts = [];
   for (let i = 0; i < count; i++) {
     parts.push(
@@ -36,8 +41,8 @@ export function buildFilterComplex(count) {
       // стороні + кроп по центру (важливий контент за промптом — у центральних 80%).
       `[${i}:v]scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=increase,` +
         `crop=${WIDTH}:${HEIGHT},setsar=1,` +
-        // Ken Burns: повільний zoom-in до 1.08 за 4 с (100 кадрів при 25 fps).
-        `zoompan=z='min(zoom+0.0008,1.08)':d=${SLIDE_SECONDS * FPS}:` +
+        // Ken Burns: повільний zoom-in до 1.08; тривалість слайда — своя.
+        `zoompan=z='min(zoom+0.0008,1.08)':d=${Math.round(durations[i] * FPS)}:` +
         `x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${WIDTH}x${HEIGHT}:fps=${FPS},` +
         // Однакова часова база потрібна для xfade.
         `settb=AVTB[v${i}]`,
@@ -46,23 +51,24 @@ export function buildFilterComplex(count) {
   let previous = 'v0';
   for (let i = 1; i < count; i++) {
     const output = i === count - 1 ? 'vout' : `x${i}`;
-    const offset = (SLIDE_SECONDS - FADE_SECONDS) * i; // 3.5, 7.0, 10.5, 14.0, 17.5
     parts.push(
-      `[${previous}][v${i}]xfade=transition=fade:duration=${FADE_SECONDS}:offset=${offset}[${output}]`,
+      `[${previous}][v${i}]xfade=transition=fade:duration=${FADE_SECONDS}:offset=${offsets[i].toFixed(3)}[${output}]`,
     );
     previous = output;
   }
   return parts.join(';');
 }
 
-export async function buildSlideshow(photoPaths, outputPath) {
+// slides — або кількість фото (рівні слайди), або масив тривалостей слайдів
+// у секундах (коли відео підлаштовується під довжину озвучки кожного слайда).
+export async function buildSlideshow(photoPaths, outputPath, slides = photoPaths.length) {
   if (photoPaths.length < 2) {
     throw new Error(`Для монтажу треба мінімум 2 фото, отримано ${photoPaths.length}`);
   }
   const args = ['-y'];
   for (const photoPath of photoPaths) args.push('-i', photoPath);
   args.push(
-    '-filter_complex', buildFilterComplex(photoPaths.length),
+    '-filter_complex', buildFilterComplex(slides),
     '-map', '[vout]',
     '-c:v', 'libx264',
     '-pix_fmt', 'yuv420p',

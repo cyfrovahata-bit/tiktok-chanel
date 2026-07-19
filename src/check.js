@@ -26,13 +26,16 @@ const LAST_VIDEO_DIR = 'last-video';
 // Знімок матеріалів останнього змонтованого відео (фото + сценарій + тема) —
 // дозволяє scripts/regenerate.js перезібрати відео (наприклад, після
 // виправлення вимови) без повторного надсилання фото власником.
-async function saveLastVideoSnapshot(photoPaths, theme, script) {
+async function saveLastVideoSnapshot(photoPaths, theme, script, narration) {
   await mkdir(LAST_VIDEO_DIR, { recursive: true });
   for (const [index, photoPath] of photoPaths.entries()) {
     await copyFile(photoPath, path.join(LAST_VIDEO_DIR, `${index + 1}.jpg`));
   }
   await writeFile(path.join(LAST_VIDEO_DIR, 'theme.txt'), theme);
   await writeFile(path.join(LAST_VIDEO_DIR, 'script.txt'), script || '');
+  // Реальний текст начитки — щоб перечитати (напр. перевірити петлю), а не
+  // відновлювати з пам'яті.
+  await writeFile(path.join(LAST_VIDEO_DIR, 'narration.txt'), narration || '');
 }
 
 async function handleCallback(state, callbackQuery) {
@@ -99,7 +102,7 @@ async function produceVideo(state) {
   try {
     if (state.session.archive) {
       // Архів .zip: завантажуємо документ і розпаковуємо (сувора звірка
-      // імен 1..6 усередині archive.js — захист від чужих фото).
+      // імен 1..N усередині archive.js — захист від чужих фото).
       const remotePath = await getFile(state.session.archive);
       const zipPath = path.join(workDir, 'archive.zip');
       await downloadFile(remotePath, zipPath);
@@ -117,13 +120,50 @@ async function produceVideo(state) {
         photoPaths.push(localPath);
       }
     }
-    await buildSlideshow(photoPaths, outputPath);
+  } catch (error) {
+    console.error(error);
+    await sendMessage(chatId, `Помилка з фото: ${error.message}`);
+    // Помилка розпакування архіву (напр. чуже фото) — скидаємо архів, щоб
+    // власник міг надіслати виправлений; сесія лишається активною.
+    if (state.session.archive) state.session.archive = null;
+    await saveState(state, 'check: помилка з фото, сесія активна');
+    process.exitCode = 1;
+    return;
+  }
+
+  // Озвучка ПЕРЕД монтажем: у режимі прив'язки до слайдів вона повертає
+  // тривалості слайдів (slideDurations), під які монтується відео. Озвучка
+  // вимкнена, поки в check.yml не задано ENABLE_TTS: "1". Будь-яка помилка
+  // озвучки не блокує публікацію — відео піде без звуку (рівні слайди).
+  let voicePath = null;
+  let slideDurations = null;
+  let narration = null;
+  if (process.env.ENABLE_TTS === '1') {
+    try {
+      const slideCount = photoPaths.length;
+      const videoSeconds = slideshowDuration(slideCount);
+      narration = await generateNarration(theme, script, slideCount);
+      console.log(`Начитка (${narration.trim().split(/\s+/).length} слів):\n${narration}`);
+      // slideCount вмикає прив'язку озвучки до слайдів (речення = слайд).
+      const result = await synthesizeVoiceover(
+        narration, path.join(workDir, 'voice.mp3'), videoSeconds, slideCount,
+      );
+      voicePath = result.voicePath;
+      slideDurations = result.slideDurations;
+    } catch (error) {
+      if (error.stderr) console.error(error.stderr);
+      console.error('Озвучка не вдалася, надсилаю відео без звуку:', error);
+    }
+  }
+
+  // Монтаж під озвучку: slideDurations (тривалості кожного слайда) або, якщо
+  // прив'язки нема, рівні слайди за кількістю фото.
+  try {
+    await buildSlideshow(photoPaths, outputPath, slideDurations ?? photoPaths.length);
   } catch (error) {
     if (error.stderr) console.error(error.stderr);
     console.error(error);
     await sendMessage(chatId, `Помилка монтажу: ${error.message}`);
-    // Помилка розпакування архіву (напр. чуже фото) — скидаємо архів, щоб
-    // власник міг надіслати виправлений; сесія лишається активною.
     if (state.session.archive) state.session.archive = null;
     await saveState(state, 'check: помилка монтажу, сесія активна');
     process.exitCode = 1;
@@ -131,34 +171,21 @@ async function produceVideo(state) {
   }
 
   // Знімок для можливої перегенерації (scripts/regenerate.js) — власник
-  // може попросити перезібрати відео (виправити слово, тощо) без
-  // повторного надсилання фото. Некритично: помилка тут не має нічого зупиняти.
+  // може попросити перезібрати відео без повторного надсилання фото.
+  // Некритично: помилка тут не має нічого зупиняти.
   try {
-    await saveLastVideoSnapshot(photoPaths, theme, script);
+    await saveLastVideoSnapshot(photoPaths, theme, script, narration);
   } catch (error) {
     console.error('Не вдалося зберегти знімок для перегенерації:', error);
   }
 
-  // Озвучка вимкнена, поки в check.yml не задано ENABLE_TTS: "1".
-  // Будь-яка помилка озвучки не блокує публікацію — відео піде без звуку.
   let finalVideoPath = outputPath;
-  if (process.env.ENABLE_TTS === '1') {
+  if (voicePath) {
     try {
-      // Передаємо фактичну довжину відео (кількість слайдів гнучка, 5–8) —
-      // tts підганяє озвучку під неї (прискорює задовгу, сповільнює закоротку).
-      const slideCount = photoPaths.length;
-      const videoSeconds = slideshowDuration(slideCount);
-      const narration = await generateNarration(theme, script, slideCount);
-      // Зберігаємо й логуємо реальний текст начитки — щоб можна було перечитати
-      // (напр. перевірити безшовність петлі), а не відновлювати з пам'яті.
-      console.log(`Начитка (${narration.trim().split(/\s+/).length} слів):\n${narration}`);
-      await writeFile(path.join(LAST_VIDEO_DIR, 'narration.txt'), narration).catch(() => {});
-      // slideCount вмикає прив'язку озвучки до слайдів (речення = слайд).
-      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'), videoSeconds, slideCount);
       finalVideoPath = await mixAudio(outputPath, voicePath, path.join(workDir, 'out-voiced.mp4'));
     } catch (error) {
       if (error.stderr) console.error(error.stderr);
-      console.error('Озвучка не вдалася, надсилаю відео без звуку:', error);
+      console.error('Не вдалося накласти звук, надсилаю без нього:', error);
     }
   }
 
