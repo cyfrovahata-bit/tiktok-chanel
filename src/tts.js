@@ -178,7 +178,7 @@ async function synthesizeAligned(groups, slideCount, outputPath) {
     if (!clipText) continue;
     const clip = path.join(dir, `clip${i}.mp3`);
     await runEngines(clipText, clip, slots[i]);
-    await trimLeadingSilence(clip);
+    await trimSilence(clip);
     clips.push({ path: clip, slide: i });
   }
   if (clips.length === 0) throw new Error('Порожня начитка для всіх слайдів');
@@ -225,14 +225,14 @@ async function synthesizeAligned(groups, slideCount, outputPath) {
   return outputPath;
 }
 
-// Прибирає тишу на початку кліпу — щоб слово стартувало точно на початку слайда.
-async function trimLeadingSilence(clip) {
+// Прибирає тишу з ОБОХ кінців кліпу: спереду — щоб слово стартувало точно на
+// початку слайда; ззаду — щоб репліка не тягнулася паузою у чужий слот (це і
+// скорочує кліп, тримаючи темп натуральним). Трюк: обрізати початок, розвернути,
+// обрізати початок ще раз (=кінець), розвернути назад.
+async function trimSilence(clip) {
   const out = `${clip}.trim.mp3`;
-  await run('ffmpeg', [
-    '-y', '-i', clip,
-    '-af', 'silenceremove=start_periods=1:start_duration=0:start_threshold=-45dB',
-    out,
-  ]);
+  const trim = 'silenceremove=start_periods=1:start_duration=0:start_threshold=-40dB';
+  await run('ffmpeg', ['-y', '-i', clip, '-af', `${trim},areverse,${trim},areverse`, out]);
   await rename(out, clip);
 }
 
