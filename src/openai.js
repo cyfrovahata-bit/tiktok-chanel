@@ -167,11 +167,39 @@ ${source}
   // й точне виконання інструкцій, ніж творча різноманітність — так модель
   // надійніше вкладається в ліміт слів.
   const narration = await chat(prompt, { temperature: 0.4 });
-  // Детермінований запобіжник: gpt-4o-mini часто перебирає ліміт слів попри
-  // інструкцію. Якщо начитка суттєво задовга — один раз просимо стиснути.
-  // Це тримає ЦЕНТРАЛЬНУ довжину близькою до цілі, щоб фіт майже не мусив
-  // прискорювати (саме прискорення й звучало квапливо).
-  return enforceWordBudget(narration, maxWords);
+  // Два детермінованих запобіжники (gpt-4o-mini часто не тримає інструкцію):
+  // 1) стискаємо, якщо суттєво задовге; 2) вирівнюємо кількість речень під
+  // слайди — інакше прив'язка до слайдів тихо відкочується на суцільний режим.
+  const budgeted = await enforceWordBudget(narration, maxWords);
+  return enforceSentenceCount(budgeted, slideCount);
+}
+
+// Розбиває на речення (та сама логіка, що в tts.js) — для звірки кількості.
+function splitIntoSentences(text) {
+  const matches = text.replace(/\s+/g, ' ').trim().match(/[^.!?…]+[.!?…]+/g);
+  return (matches || [text.trim()]).map((s) => s.trim()).filter(Boolean);
+}
+
+// Начитка мусить мати РІВНО по реченню на слайд, інакше tts не зможе
+// прив'язати її до слайдів. Якщо кількість не збіглась — один раз просимо
+// GPT переписати рівно потрібною кількістю речень.
+async function enforceSentenceCount(text, slideCount) {
+  if (splitIntoSentences(text).length === slideCount) return text;
+  const prompt = `Перепиши цей текст озвучки РІВНО ${slideCount} реченнями — по одному
+короткому реченню (~6 слів) на кожен слайд, у тому ж порядку й змісті, ВСІ
+приблизно однакової довжини. Перше — сильний зачин-твердження; ОСТАННЄ (${slideCount}-е)
+речення — рівно «А ви знали?». Не додавай нічого нового, НЕ згадуй підписку.
+Числа — словами. Відповідь — лише текст:
+
+${text}`;
+  try {
+    const fixed = await chat(prompt, { temperature: 0.3 });
+    const joined = fixed.split('\n').filter((l) => l.trim()).join(' ').trim();
+    return splitIntoSentences(joined).length === slideCount ? joined : text;
+  } catch (error) {
+    console.error('Не вдалося вирівняти кількість речень:', error.message);
+    return text;
+  }
 }
 
 // Рахує слова; якщо помітно більше за ліміт — одним викликом просить GPT
