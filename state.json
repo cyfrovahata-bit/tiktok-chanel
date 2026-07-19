@@ -87,18 +87,24 @@
       "status": "done",
       "date": "2026-07-19",
       "source": "pool"
+    },
+    {
+      "title": "ДНК теоретично може зберігати до 215 петабайт інформації на один грам.",
+      "status": "pending",
+      "date": "2026-07-19",
+      "source": "pool"
     }
   ],
   "session": {
-    "active": false,
-    "theme": null,
-    "prompt_message_id": null,
+    "active": true,
+    "theme": "ДНК теоретично може зберігати до 215 петабайт інформації на один грам.",
+    "prompt_message_id": 250,
     "photos": [],
     "script": null,
     "archive": null,
-    "window_end": null
+    "window_end": "2026-07-19T18:26:03.312Z"
   },
-  "last_theme_slot": "2026-07-19-am",
+  "last_theme_slot": "2026-07-19-pm",
   "last_carousel_slot": "2026-07-18-noon",
   "next_theme": null
 }
