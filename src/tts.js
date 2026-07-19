@@ -186,12 +186,14 @@ async function synthesizeAligned(groups, slideCount, outputPath) {
   // 2) ЄДИНИЙ темп для ВСІХ слайдів — щоб швидкість голосу не стрибала між
   // кадрами. Коефіцієнт = найбільше перевищення слота серед усіх речень
   // (тільки прискорення, стеля 1.6). Якщо всі влазять — 1.0 (без змін).
-  let factor = 1.0;
+  // Підлога 1.15 — щоб голос звучав жвавіше за натуральний (натуральний темп
+  // сприймався як заповільний). Стеля 1.45 — щоб не скотитись у квапливість.
+  let factor = 1.15;
   for (const clip of clips) {
     const duration = await audioDuration(clip.path);
     factor = Math.max(factor, duration / (slots[clip.slide] - 0.15));
   }
-  factor = Math.min(factor, 1.6);
+  factor = Math.min(factor, 1.45);
   console.log(`Прив'язка до слайдів: єдиний темп ${factor.toFixed(2)}× для всіх ${clips.length} реплік`);
 
   // 3) Застосовуємо той самий темп до кожного кліпу й ставимо на таймлайн.
