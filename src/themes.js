@@ -26,7 +26,15 @@ export async function startNewSession(state) {
   const usedTitles = state.themes
     .filter((theme) => theme.status === 'done' || theme.status === 'rejected')
     .map((theme) => theme.title);
-  const theme = await generateTheme(usedTitles);
+  // Закріплена тема (state.next_theme) має пріоритет — використовуємо її
+  // один раз і одразу знімаємо закріплення, далі знову звичайний вибір.
+  let theme;
+  if (state.next_theme) {
+    theme = state.next_theme;
+    state.next_theme = null;
+  } else {
+    theme = await generateTheme(usedTitles);
+  }
 
   // Пул перевірених фактів тане — попереджаємо власника, поки лишається
   // ще кілька, щоб було коли поповнити список (не після того, як скінчиться).
