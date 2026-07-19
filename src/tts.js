@@ -170,22 +170,41 @@ async function synthesizeAligned(groups, slideCount, outputPath) {
   const starts = slideStartTimes(slideCount);
   const slots = slideSlotDurations(slideCount);
   const dir = await mkdtemp(path.join(os.tmpdir(), 'tts-aligned-'));
-  const inputs = [];
-  const filters = [];
-  let idx = 0;
+
+  // 1) Синтезуємо кожне речення окремо й обрізаємо передню тишу.
+  const clips = [];
   for (let i = 0; i < slideCount; i++) {
     const clipText = (groups[i] || '').trim();
     if (!clipText) continue;
     const clip = path.join(dir, `clip${i}.mp3`);
     await runEngines(clipText, clip, slots[i]);
     await trimLeadingSilence(clip);
-    await fitClipToSlot(clip, slots[i]);
-    inputs.push('-i', clip);
-    const delayMs = Math.round(starts[i] * 1000);
+    clips.push({ path: clip, slide: i });
+  }
+  if (clips.length === 0) throw new Error('Порожня начитка для всіх слайдів');
+
+  // 2) ЄДИНИЙ темп для ВСІХ слайдів — щоб швидкість голосу не стрибала між
+  // кадрами. Коефіцієнт = найбільше перевищення слота серед усіх речень
+  // (тільки прискорення, стеля 1.6). Якщо всі влазять — 1.0 (без змін).
+  let factor = 1.0;
+  for (const clip of clips) {
+    const duration = await audioDuration(clip.path);
+    factor = Math.max(factor, duration / (slots[clip.slide] - 0.15));
+  }
+  factor = Math.min(factor, 1.6);
+  console.log(`Прив'язка до слайдів: єдиний темп ${factor.toFixed(2)}× для всіх ${clips.length} реплік`);
+
+  // 3) Застосовуємо той самий темп до кожного кліпу й ставимо на таймлайн.
+  const inputs = [];
+  const filters = [];
+  let idx = 0;
+  for (const clip of clips) {
+    if (factor > 1.001) await applyTempo(clip.path, factor);
+    inputs.push('-i', clip.path);
+    const delayMs = Math.round(starts[clip.slide] * 1000);
     filters.push(`[${idx}:a]adelay=${delayMs}:all=1[a${idx}]`);
     idx++;
   }
-  if (idx === 0) throw new Error('Порожня начитка для всіх слайдів');
   let filterComplex;
   let mapLabel;
   if (idx === 1) {
@@ -217,14 +236,10 @@ async function trimLeadingSilence(clip) {
   await rename(out, clip);
 }
 
-// Пришвидшує кліп, лише якщо він довший за свій слайд-слот (щоб не наповз на
-// наступний слайд). Коротший лишаємо як є — пауза до наступного слайда природна.
-async function fitClipToSlot(clip, slotSeconds) {
-  const duration = await audioDuration(clip);
-  const maxDuration = slotSeconds - 0.15;
-  if (duration <= maxDuration) return;
-  const factor = Math.min(duration / maxDuration, 1.6);
-  const out = `${clip}.fit.mp3`;
+// Застосовує заданий темп (atempo, тон зберігається) до кліпу — тим самим
+// коефіцієнтом для всіх реплік, щоб швидкість між слайдами була однакова.
+async function applyTempo(clip, factor) {
+  const out = `${clip}.t.mp3`;
   await run('ffmpeg', ['-y', '-i', clip, '-filter:a', `atempo=${factor.toFixed(3)}`, out]);
   await rename(out, clip);
 }
