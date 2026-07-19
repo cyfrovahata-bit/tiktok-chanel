@@ -1,5 +1,5 @@
 {
-  "last_update_id": 954000777,
+  "last_update_id": 954000778,
   "themes": [
     {
       "title": "Найбільший орган в тілі людини — це шкіра, і вона може вагою до 10 кг.",
@@ -90,19 +90,19 @@
     },
     {
       "title": "ДНК теоретично може зберігати до 215 петабайт інформації на один грам.",
-      "status": "pending",
+      "status": "done",
       "date": "2026-07-19",
       "source": "pool"
     }
   ],
   "session": {
-    "active": true,
-    "theme": "ДНК теоретично може зберігати до 215 петабайт інформації на один грам.",
-    "prompt_message_id": 250,
+    "active": false,
+    "theme": null,
+    "prompt_message_id": null,
     "photos": [],
     "script": null,
     "archive": null,
-    "window_end": "2026-07-19T18:26:03.312Z"
+    "window_end": null
   },
   "last_theme_slot": "2026-07-19-pm",
   "last_carousel_slot": "2026-07-18-noon",
