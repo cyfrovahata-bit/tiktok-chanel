@@ -1,5 +1,5 @@
 {
-  "last_update_id": 954000776,
+  "last_update_id": 954000777,
   "themes": [
     {
       "title": "Найбільший орган в тілі людини — це шкіра, і вона може вагою до 10 кг.",
@@ -84,19 +84,19 @@
     },
     {
       "title": "У Китаї є один будинок, де живе майже 20 тисяч людей — з ресторанами, басейнами й салонами всередині, наче ціле місто під одним дахом.",
-      "status": "pending",
+      "status": "done",
       "date": "2026-07-19",
       "source": "pool"
     }
   ],
   "session": {
-    "active": true,
-    "theme": "У Китаї є один будинок, де живе майже 20 тисяч людей — з ресторанами, басейнами й салонами всередині, наче ціле місто під одним дахом.",
-    "prompt_message_id": 180,
+    "active": false,
+    "theme": null,
+    "prompt_message_id": null,
     "photos": [],
     "script": null,
     "archive": null,
-    "window_end": "2026-07-19T10:26:07.670Z"
+    "window_end": null
   },
   "last_theme_slot": "2026-07-19-am",
   "last_carousel_slot": "2026-07-18-noon",
