@@ -149,6 +149,10 @@ async function produceVideo(state) {
       const slideCount = photoPaths.length;
       const videoSeconds = slideshowDuration(slideCount);
       const narration = await generateNarration(theme, script, slideCount);
+      // Зберігаємо й логуємо реальний текст начитки — щоб можна було перечитати
+      // (напр. перевірити безшовність петлі), а не відновлювати з пам'яті.
+      console.log(`Начитка (${narration.trim().split(/\s+/).length} слів):\n${narration}`);
+      await writeFile(path.join(LAST_VIDEO_DIR, 'narration.txt'), narration).catch(() => {});
       const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'), videoSeconds);
       finalVideoPath = await mixAudio(outputPath, voicePath, path.join(workDir, 'out-voiced.mp4'));
     } catch (error) {
