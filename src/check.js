@@ -144,12 +144,12 @@ async function produceVideo(state) {
   let finalVideoPath = outputPath;
   if (process.env.ENABLE_TTS === '1') {
     try {
-      // Ціль озвучки прив'язана до фактичної довжини відео (кількість
-      // слайдів гнучка, 5–8), із запасом ~1.5 с, щоб голос точно вмістився.
+      // Передаємо фактичну довжину відео (кількість слайдів гнучка, 5–8) —
+      // tts підганяє озвучку під неї (прискорює задовгу, сповільнює закоротку).
       const slideCount = photoPaths.length;
-      const maxAudioSeconds = slideshowDuration(slideCount) - 1.5;
+      const videoSeconds = slideshowDuration(slideCount);
       const narration = await generateNarration(theme, script, slideCount);
-      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'), maxAudioSeconds);
+      const voicePath = await synthesizeVoiceover(narration, path.join(workDir, 'voice.mp3'), videoSeconds);
       finalVideoPath = await mixAudio(outputPath, voicePath, path.join(workDir, 'out-voiced.mp4'));
     } catch (error) {
       if (error.stderr) console.error(error.stderr);
