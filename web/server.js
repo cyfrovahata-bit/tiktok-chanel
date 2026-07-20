@@ -79,9 +79,11 @@ async function refreshCache() {
 }
 
 // Готові до публікації: DONE-рядки, для яких у Drive вже є відео.
+// Найновіші (внизу таблиці) — зверху списку.
 function queueFrom(c) {
   return c.done
     .filter((it) => c.videos.has(videoName(it.id)))
+    .reverse()
     .map((it) => ({
       id: it.id,
       title: it.title,

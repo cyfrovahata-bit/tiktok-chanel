@@ -59,9 +59,28 @@
       border: 1px solid var(--border);
       border-radius: var(--radius);
       overflow: hidden;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
       box-shadow: var(--shadow);
     }
+    /* Шапка картки — завжди видима, клік згортає/розгортає. */
+    .card-head {
+      display: flex; align-items: center; gap: 11px;
+      padding: 14px 15px; cursor: pointer; user-select: none;
+    }
+    .dot { width: 11px; height: 11px; flex: 0 0 11px; border-radius: 50%; position: relative; }
+    .dot.pending { background: #f5b60a; box-shadow: 0 0 0 4px color-mix(in srgb, #f5b60a 22%, transparent); }
+    .dot.pending::after {
+      content: ''; position: absolute; inset: 0; border-radius: 50%;
+      background: #f5b60a; animation: pulse 1.8s ease-out infinite;
+    }
+    @keyframes pulse { 0% { transform: scale(1); opacity: .6; } 100% { transform: scale(2.4); opacity: 0; } }
+    .head-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; line-height: 1.35; }
+    .chev { flex: 0 0 auto; color: var(--muted); transition: transform .2s; font-size: 13px; }
+    .card.open .chev { transform: rotate(90deg); }
+    .card-body-wrap { display: none; }
+    .card.open .card-body-wrap { display: block; }
+    @media (prefers-reduced-motion: reduce) { .dot.pending::after { animation: none; } }
+
     .video-wrap { position: relative; background: #000; }
     .video-wrap video { width: 100%; display: block; max-height: 62vh; object-fit: contain; background: #000; }
     .card-body { padding: 14px 15px 16px; }
@@ -175,24 +194,46 @@
       return box;
     }
 
+    // Які картки розгорнуті (за id) — зберігається між оновленнями списку.
+    const expanded = new Set();
+    let expandInit = false;
+
     function queueCard(item) {
-      const card = el('div', 'card');
+      const card = el('div', 'card'); card.dataset.id = item.id;
+
+      // Шапка: жовтий кружечок «очікує публікації» + назва + шеврон.
+      const head = el('div', 'card-head');
+      head.appendChild(el('span', 'dot pending'));
+      head.appendChild(el('div', 'head-title', esc(item.title)));
+      head.appendChild(el('span', 'chev', '▶'));
+      card.appendChild(head);
+
+      const wrap = el('div', 'card-body-wrap');
       const vw = el('div', 'video-wrap');
-      const v = el('video'); v.src = item.videoUrl; v.controls = true; v.playsInline = true; v.preload = 'metadata';
-      vw.appendChild(v); card.appendChild(vw);
+      const v = el('video'); v.controls = true; v.playsInline = true; v.preload = 'none';
+      v.dataset.src = item.videoUrl; // джерело вантажимо лише коли розгорнуто
+      vw.appendChild(v); wrap.appendChild(vw);
 
       const body = el('div', 'card-body');
       if (item.theme) body.appendChild(el('div', 'kicker', esc(item.theme)));
       body.appendChild(copyable({ label: 'Назва', icon: '📌', main: item.title }));
       body.appendChild(copyable({ label: 'Опис + хештеги', icon: '📝', main: item.description, isDesc: true }));
-
       const actions = el('div', 'actions');
       const dl = el('a', 'btn secondary', '⬇️ Відео'); dl.href = item.videoUrl; dl.download = `${item.id}.mp4`;
       const pub = el('button', 'btn primary', '✅ Опубліковано');
-      pub.addEventListener('click', () => publish(item, card, pub));
+      pub.addEventListener('click', (e) => { e.stopPropagation(); publish(item, card, pub); });
       actions.appendChild(dl); actions.appendChild(pub);
       body.appendChild(actions);
-      card.appendChild(body);
+      wrap.appendChild(body);
+      card.appendChild(wrap);
+
+      const setOpen = (open) => {
+        card.classList.toggle('open', open);
+        if (open) { expanded.add(item.id); if (!v.src) v.src = v.dataset.src; }
+        else expanded.delete(item.id);
+      };
+      head.addEventListener('click', () => setOpen(!card.classList.contains('open')));
+      if (expanded.has(item.id)) setOpen(true);
       return card;
     }
 
@@ -232,6 +273,8 @@
 
       const q = state.queue || [];
       $('#count').textContent = q.length ? `${q.length} до публікації` : '';
+      // За замовчуванням розгортаємо лише найновішу картку; решта — згорнуті.
+      if (!expandInit && q.length) { expanded.add(q[0].id); expandInit = true; }
 
       if (q.length) {
         app.appendChild(el('h2', 'section', 'До публікації'));
