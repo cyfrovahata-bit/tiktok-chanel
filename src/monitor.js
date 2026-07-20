@@ -20,8 +20,29 @@ import { extractPhotoArchive } from './archive.js';
 import { assembleVideo } from './pipeline.js';
 import { sendMessage, ownerChatId } from './telegram.js';
 
-const POLL_MS = Number(process.env.POLL_INTERVAL_MS) || 5 * 60 * 1000; // 5 хв
+// Розумний розклад: часто у «вікнах» появи тем (ChatGPT пише ~09:50 і ~17:50
+// Київ), рідко — решту доби. Так менше зайвих звернень до Google API, а
+// результат той самий.
+const FAST_MS = Number(process.env.POLL_FAST_MS) || 5 * 60 * 1000;   // у вікні
+const SLOW_MS = Number(process.env.POLL_SLOW_MS) || 30 * 60 * 1000;  // поза вікном
 const MAX_ATTEMPTS = 3;
+
+// Хвилини від початку доби за київським часом.
+function kyivMinuteOfDay(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(now);
+  const h = Number(parts.find((p) => p.type === 'hour').value);
+  const m = Number(parts.find((p) => p.type === 'minute').value);
+  return h * 60 + m;
+}
+
+// Активні вікна: ранкове 09:30–11:30 і вечірнє 17:30–19:30 (Київ) — трохи
+// ширші за час запуску ChatGPT, бо генерація може затриматись.
+function inActiveWindow(now = new Date()) {
+  const m = kyivMinuteOfDay(now);
+  return (m >= 9 * 60 + 30 && m <= 11 * 60 + 30) || (m >= 17 * 60 + 30 && m <= 19 * 60 + 30);
+}
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://tiktok-chanel-production.up.railway.app').replace(/\/$/, '');
 
 // Спроби на кожен ID у межах життя процесу (щоб не спамити «знайшов тему»
@@ -101,22 +122,27 @@ export async function pollOnce() {
   return items.length;
 }
 
-// Нескінченний цикл моніторингу для процесу на Railway.
+// Цикл моніторингу для процесу на Railway. Сам себе переплановує: наступний
+// прохід — через FAST_MS у вікні появи тем, інакше через SLOW_MS.
 export function startMonitor() {
   let running = false;
+  let timer = null;
   const tick = async () => {
-    if (running) return;
-    running = true;
-    try {
-      const n = await pollOnce();
-      console.log(`[monitor] перевірено чергу: ${n} готових DONE у таблиці`);
-    } catch (error) {
-      console.error('[monitor] цикл упав:', error.message);
-    } finally {
-      running = false;
+    if (!running) {
+      running = true;
+      try {
+        const n = await pollOnce();
+        console.log(`[monitor] перевірено чергу: ${n} готових DONE`);
+      } catch (error) {
+        console.error('[monitor] цикл упав:', error.message);
+      } finally {
+        running = false;
+      }
     }
+    const next = inActiveWindow() ? FAST_MS : SLOW_MS;
+    timer = setTimeout(tick, next);
   };
-  console.log(`[monitor] старт, інтервал ${Math.round(POLL_MS / 1000)} с`);
-  tick();
-  return setInterval(tick, POLL_MS);
+  console.log(`[monitor] старт (вікно: ${Math.round(FAST_MS / 60000)} хв, поза вікном: ${Math.round(SLOW_MS / 60000)} хв)`);
+  tick(); // перший прохід одразу (ловить усе, що з'явилось під час простою)
+  return { stop: () => timer && clearTimeout(timer) };
 }
