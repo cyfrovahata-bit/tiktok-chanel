@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished } from '../src/sheets.js';
 import { listVideos, streamVideo, videoName, videoFolderId } from '../src/videos.js';
 import { startMonitor, pollOnce } from '../src/monitor.js';
-import { googleConfigured, serviceAccountStatus } from '../src/google-auth.js';
+import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -163,13 +163,55 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { checked: n });
     }
 
+    // OAuth: крок 1 — відправляємо власника на згоду Google.
+    if (req.method === 'GET' && pathname === '/oauth/start') {
+      if (!oauthConfigured()) {
+        res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
+        res.end('<h2>Спершу задай GOOGLE_OAUTH_CLIENT_ID і GOOGLE_OAUTH_CLIENT_SECRET у Railway.</h2>');
+        return;
+      }
+      res.writeHead(302, { location: consentUrl() });
+      res.end();
+      return;
+    }
+
+    // OAuth: крок 2 — Google повертає code; міняємо на refresh_token і
+    // показуємо його, щоб вставити у змінну GOOGLE_OAUTH_REFRESH_TOKEN.
+    if (req.method === 'GET' && pathname === '/oauth/callback') {
+      const code = url.searchParams.get('code');
+      const err = url.searchParams.get('error');
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      if (err || !code) { res.end(`<h2>Помилка згоди: ${err || 'немає code'}</h2>`); return; }
+      try {
+        const tokens = await exchangeCode(code);
+        const rt = tokens.refresh_token;
+        if (!rt) {
+          res.end('<h2>Google не повернув refresh_token.</h2><p>Відклич доступ на myaccount.google.com/permissions і спробуй /oauth/start ще раз (потрібен prompt=consent).</p>');
+          return;
+        }
+        res.end(
+          '<div style="font-family:system-ui;max-width:640px;margin:40px auto;padding:0 16px;line-height:1.6">' +
+          '<h2>✅ Готово!</h2>' +
+          '<p>Скопіюй цей <b>refresh token</b> і встав у Railway як змінну <code>GOOGLE_OAUTH_REFRESH_TOKEN</code>, потім збережи (буде редеплой):</p>' +
+          `<textarea readonly style="width:100%;height:90px;font-family:monospace;font-size:13px;padding:10px" onclick="this.select()">${rt}</textarea>` +
+          '<p style="color:#888">Цю сторінку більше нікому не показуй — токен дає доступ до твого Google.</p>' +
+          '</div>',
+        );
+      } catch (error) {
+        res.end(`<h2>Не вдалося обміняти code: ${error.message}</h2>`);
+      }
+      return;
+    }
+
     if (req.method === 'GET' && pathname === '/healthz') {
-      const sa = serviceAccountStatus();
+      const g = googleStatus();
       return json(res, 200, {
         ok: true,
         googleReady: googleConfigured(),
-        serviceAccount: sa.email,
-        serviceAccountError: sa.error,
+        googleMode: g.mode,
+        canUpload: g.canUpload,
+        googleError: g.error,
+        serviceAccount: g.email || null,
         videoFolderSet: Boolean(videoFolderId()),
       });
     }
