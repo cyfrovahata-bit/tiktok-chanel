@@ -99,6 +99,13 @@
       "status": "done",
       "date": "2026-07-20",
       "source": "pool"
+    },
+    {
+      "title": "Ви моргаєте близько 15 000 разів на день — очі заплющені майже 10% часу неспання.",
+      "status": "done",
+      "date": "2026-07-20",
+      "source": "pool",
+      "kind": "carousel"
     }
   ],
   "session": {
@@ -111,6 +118,6 @@
     "window_end": null
   },
   "last_theme_slot": "2026-07-20-am",
-  "last_carousel_slot": "2026-07-18-noon",
+  "last_carousel_slot": "2026-07-20-noon",
   "next_theme": null
 }
