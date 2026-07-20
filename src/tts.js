@@ -277,12 +277,16 @@ async function elevenLabsTts(text, outputPath, targetSeconds = DEFAULT_TARGET_SE
     : { stability: 0.45, similarity_boost: 0.8, style: 0.4, use_speaker_boost: true, ...(retry ? { speed: retry } : {}) };
   // v2-моделі читають теги вголос — прибираємо їх.
   const input = isV3 ? text : text.replace(/\[[a-z ]+\]/gi, '').replace(/ {2,}/g, ' ').trim();
+  // Явно вказуємо українську: короткі ізольовані репліки (напр. «А ви знали?»)
+  // англійський голос Callum інакше читає з англійським акцентом.
   const response = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
     {
       method: 'POST',
       headers: { 'xi-api-key': key, 'content-type': 'application/json' },
-      body: JSON.stringify({ text: input, model_id: modelId, voice_settings: voiceSettings }),
+      body: JSON.stringify({
+        text: input, model_id: modelId, voice_settings: voiceSettings, language_code: 'uk',
+      }),
     },
   );
   if (!response.ok) {
