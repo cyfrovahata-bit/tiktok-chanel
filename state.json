@@ -93,18 +93,24 @@
       "status": "done",
       "date": "2026-07-19",
       "source": "pool"
+    },
+    {
+      "title": "Найстарішу карту світу — вирізьблену на бивні мамонта — знайшли в селі Межиріч на Черкащині, їй 14–15 тисяч років.",
+      "status": "pending",
+      "date": "2026-07-20",
+      "source": "pool"
     }
   ],
   "session": {
-    "active": false,
-    "theme": null,
-    "prompt_message_id": null,
+    "active": true,
+    "theme": "Найстарішу карту світу — вирізьблену на бивні мамонта — знайшли в селі Межиріч на Черкащині, їй 14–15 тисяч років.",
+    "prompt_message_id": 292,
     "photos": [],
     "script": null,
     "archive": null,
-    "window_end": null
+    "window_end": "2026-07-20T10:27:52.950Z"
   },
-  "last_theme_slot": "2026-07-19-pm",
+  "last_theme_slot": "2026-07-20-am",
   "last_carousel_slot": "2026-07-18-noon",
   "next_theme": null
 }
