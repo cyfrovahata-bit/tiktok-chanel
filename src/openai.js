@@ -106,7 +106,8 @@ export async function generateNarration(theme, script, slideCount = 6) {
 // сирі_секунди/1.4; сирі_секунди = слова/темп_мовлення.
 function slideNarrationWordCap(slideCount) {
   const TARGET_VIDEO = 27; // ціль із невеликим буфером під жорсткі 29 с
-  const FADE = 0.5, PAD = 0.5, TEMPO = 1.4, SPEECH_RATE = 1.6; // слів/с (сирих)
+  const FADE = 0.5, PAD = 0.5, SPEECH_RATE = 2.1; // слів/с (укр. голос читає жваво)
+  const TEMPO = Number(process.env.TTS_ALIGN_TEMPO) || 1.0; // синхронно з tts.js
   const overhead = FADE + PAD * slideCount;
   const audioAfterTempo = Math.max(6, TARGET_VIDEO - overhead);
   return Math.max(slideCount * 3, Math.round(audioAfterTempo * TEMPO * SPEECH_RATE));

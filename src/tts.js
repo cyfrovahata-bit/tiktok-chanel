@@ -17,10 +17,11 @@ const END_MARGIN = 0.6;
 const DEFAULT_VIDEO_SECONDS = 21.5; // 6 слайдів — дефолт, якщо довжину не передано
 const DEFAULT_TARGET_SECONDS = DEFAULT_VIDEO_SECONDS - END_MARGIN;
 
-// Прив'язка до слайдів: фіксована швидкість начитки, а тривалість показу
-// кожного слайда підлаштовується під його репліку (slide duration = аудіо +
-// FADE + пауза-подих). Так немає ні скоромовки, ні накладок, ні зайвих пауз.
-const ALIGN_TEMPO = 1.4;
+// Прив'язка до слайдів: НАТУРАЛЬНА швидкість начитки (1.0× — без прискорення),
+// а тривалість показу кожного слайда підлаштовується під його репліку
+// (slide duration = аудіо + FADE + пауза-подих). Можна перевизначити через
+// TTS_ALIGN_TEMPO (напр. 1.2 для трохи жвавіше).
+const ALIGN_TEMPO = Number(process.env.TTS_ALIGN_TEMPO) || 1.0;
 const SLIDE_PAD = 0.5;
 
 // Короткі ізольовані репліки (напр. «А ви знали?») англійський голос Callum
@@ -192,7 +193,7 @@ async function synthesizeAligned(groups, outputPath) {
     const clip = path.join(dir, `clip${clips.length}.mp3`);
     await synthClipGrounded(clipText, clip);
     await trimSilence(clip);
-    await applyTempo(clip, ALIGN_TEMPO);
+    if (Math.abs(ALIGN_TEMPO - 1.0) > 0.001) await applyTempo(clip, ALIGN_TEMPO);
     clips.push({ path: clip, duration: await audioDuration(clip) });
   }
 
