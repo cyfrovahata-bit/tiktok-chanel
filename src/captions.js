@@ -1,56 +1,35 @@
 // Генерація ASS-субтитрів: текст із script.txt накладається поверх чистих
 // картинок синхронно з озвучкою. Один рядок script.txt = один слайд.
 //
-// Поведінка (за ТЗ):
+// Поведінка:
 //  • слайд 1 — весь текст одразу з першого кадру (гачок читається миттєво);
-//  • слайди 2..N — рядок ділиться на 2–3 смислові частини по 2–4 слова, які
-//    з'являються послідовно (fade-in) і НАКОПИЧУЮТЬСЯ: уже показане не зникає,
-//    доки слайд не завершиться;
-//  • дуже короткий рядок (1–4 слова) — показуємо одразу повністю;
-//  • число підсвічуємо золотим.
+//  • слайди 2..N — ПО ОДНОМУ СЛОВУ, послідовно (fade-in), з накопиченням:
+//    уже показане не зникає, доки слайд не завершиться;
+//  • число, записане з пробілом-роздільником («15 000»), показуємо цілим,
+//    не по цифрових групах; число підсвічуємо золотим.
 //
 // Стабільність розкладки: увесь рядок присутній у ЄДИНОМУ ASS-івенті від
-// початку, невидимі частини лише прозорі (\alpha) і проявляються \t-анімацією.
+// початку, невидимі слова лише прозорі (\alpha) і проявляються \t-анімацією.
 // Тому libass рахує розкладку ОДИН раз — слова ніколи не «стрибають».
 import { slideOffsets, FADE_SECONDS } from './montage.js';
 
 // Хвіст у кінці слайда, коли повна фраза вже на екрані (= SLIDE_PAD у tts.js).
 const PAD_APPROX = 0.5;
-const FADE_IN_MS = 130; // тривалість появи частини
-
-// Короткі службові слова: ними НЕ можна завершувати частину (клеїмо до наступного).
-const GLUE = new Set([
-  'в', 'у', 'з', 'із', 'зі', 'до', 'від', 'для', 'по', 'за', 'під', 'над', 'при',
-  'про', 'через', 'між', 'на', 'і', 'й', 'та', 'а', 'але', 'що', 'як', 'це', 'цю',
-  'цей', 'ця', 'ці', 'те', 'той', 'не', 'ані', 'ще', 'вже', 'бо', 'щоб', 'аби',
-  'чи', 'його', 'її', 'їх', 'свій', 'цього', 'із-за', 'один', 'одна', 'одне',
-]);
+const FADE_IN_MS = 120; // тривалість появи слова
 
 function hasDigit(w) { return /\d/.test(w); }
-function norm(w) { return w.toLowerCase().replace(/[«»"'`.,!?:;—–…()-]/g, ''); }
+function isDigits(s) { return /^[\d\s]+$/.test(s); }
 
-// Ділить слова слайда на 2–3 частини ~по 3 слова, не розриваючи число з
-// наступним словом (одиницею) і не завершуючи частину службовим словом.
-function splitChunks(words) {
-  const target = 3;
-  const chunks = [];
-  let cur = [];
-  for (let i = 0; i < words.length; i++) {
-    cur.push(words[i]);
-    if (i === words.length - 1) break;
-    const canBreak = cur.length >= 2 && !GLUE.has(norm(words[i])) && !hasDigit(words[i]);
-    const remaining = words.length - 1 - i;
-    // Розбиваємо, коли частина досягла цілі АБО далі починається число
-    // (щоб число з одиницею відкривалось окремо, у момент, коли його читають).
-    const nextIsNumber = hasDigit(words[i + 1]);
-    if (canBreak && (cur.length >= target || nextIsNumber) && remaining >= 2) { chunks.push(cur); cur = []; }
+// Слова слайда → «атоми» показу: кожне слово окремо, АЛЕ сусідні суто-цифрові
+// токени зливаються в одне число («15» + «000» → «15 000»).
+function atomize(words) {
+  const atoms = [];
+  for (const w of words) {
+    const prev = atoms.length ? atoms[atoms.length - 1] : null;
+    if (/^\d+$/.test(w) && prev && isDigits(prev)) atoms[atoms.length - 1] = `${prev} ${w}`;
+    else atoms.push(w);
   }
-  if (cur.length) {
-    if (cur.length === 1 && chunks.length) chunks[chunks.length - 1] = chunks[chunks.length - 1].concat(cur);
-    else chunks.push(cur);
-  }
-  while (chunks.length > 3) { const last = chunks.pop(); chunks[chunks.length - 1] = chunks[chunks.length - 1].concat(last); }
-  return chunks;
+  return atoms;
 }
 
 function assTime(sec) {
@@ -74,23 +53,21 @@ function renderWord(word) {
   return escapeText(word);
 }
 
-// Текст ASS-івенту одного слайда з накопичувальною появою частин.
+// Текст ASS-івенту одного слайда з появою по одному слову.
 function slideText(line, isFirst, windowSec) {
   const words = line.trim().split(/\s+/).filter(Boolean);
-  const chunks = (isFirst || words.length <= 4) ? [words] : splitChunks(words);
+  // Слайд 1 — увесь гачок одразу, без анімації.
+  if (isFirst) return `{\\alpha&H00&}${words.map(renderWord).join(' ')}`;
+
+  const atoms = atomize(words);
   const total = words.length || 1;
-  let cum = 0;
+  let cumWords = 0;
   const parts = [];
-  for (let j = 0; j < chunks.length; j++) {
-    const chunk = chunks[j];
-    const revealSec = isFirst ? 0 : windowSec * (cum / total);
-    const tMs = Math.round(revealSec * 1000);
-    // Слайд 1 (і його єдина частина) — миттєво, без анімації. Решта — fade-in.
-    const tag = (isFirst && j === 0)
-      ? '{\\alpha&H00&}'
-      : `{\\alpha&HFF&\\t(${tMs},${tMs + FADE_IN_MS},\\alpha&H00&)}`;
-    parts.push(tag + chunk.map(renderWord).join(' '));
-    cum += chunk.length;
+  for (const atom of atoms) {
+    const tMs = Math.round(windowSec * (cumWords / total) * 1000);
+    const tag = `{\\alpha&HFF&\\t(${tMs},${tMs + FADE_IN_MS},\\alpha&H00&)}`;
+    parts.push(tag + renderWord(atom));
+    cumWords += atom.split(/\s+/).length; // атом-число може містити 2 токени
   }
   return parts.join(' ');
 }
@@ -104,7 +81,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,Oswald,100,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,1,0,1,6,4,8,170,170,380,1
+Style: Cap,Oswald,100,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,1,0,1,6,4,8,170,170,250,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -127,4 +104,4 @@ export function buildAss(lines, durations) {
 }
 
 // Експорт для тестів.
-export { splitChunks };
+export { atomize };
