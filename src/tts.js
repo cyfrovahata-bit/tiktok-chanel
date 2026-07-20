@@ -236,7 +236,12 @@ async function synthesizeAligned(groups, outputPath) {
 // а потім лишаємо тільки хвіст (від останньої паузи до кінця).
 async function synthClipGrounded(text, outputPath) {
   const wordCount = text.split(/\s+/).filter(Boolean).length;
-  if (wordCount > SHORT_CLIP_WORDS) {
+  // Розгін потрібен ЛИШЕ для англійських голосів (напр. Callum) — вони на
+  // коротких ізольованих репліках дають акцент. Для рідних українських голосів
+  // він зайвий (і ризикує зіпсувати кліп), тож за замовчуванням ВИМКНЕНИЙ;
+  // вмикається прапорцем TTS_UKR_CARRIER=1.
+  const useCarrier = process.env.TTS_UKR_CARRIER === '1' && wordCount <= SHORT_CLIP_WORDS;
+  if (!useCarrier) {
     await runEngines(text, outputPath, DEFAULT_TARGET_SECONDS);
     return;
   }
@@ -244,6 +249,9 @@ async function synthClipGrounded(text, outputPath) {
   try {
     await runEngines(`${UKR_CARRIER} ${text}`, tmp, DEFAULT_TARGET_SECONDS);
     await keepAfterLastSilence(tmp, outputPath);
+    // Захист: якщо хвіст вийшов майже порожнім (паузу знайдено не там) —
+    // краще синтезувати фразу напряму, ніж зіпсувати кліп.
+    if ((await audioDuration(outputPath)) < 0.4) throw new Error('хвіст після розгону надто короткий');
   } catch (error) {
     console.error(`Розгін для короткої репліки не вдався (${error.message}); синтезую окремо.`);
     await runEngines(text, outputPath, DEFAULT_TARGET_SECONDS);
