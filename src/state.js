@@ -54,20 +54,6 @@ export function currentThemeSlot(now = new Date()) {
   return null;
 }
 
-// Окремий слот для фото-каруселі (обід, 13:00–14:59 Київ). Навмисно ізольований
-// від currentThemeSlot: карусель НЕ відкриває відео-сесію, тож самолікування
-// check.js (яке дивиться лише на currentThemeSlot) її не чіпає й не перетворює
-// на відео. Дедуп — через окреме поле state.last_carousel_slot.
-export function currentCarouselSlot(now = new Date()) {
-  const hour = Number(
-    new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Kyiv', hour: '2-digit', hour12: false })
-      .formatToParts(now)
-      .find((part) => part.type === 'hour').value,
-  );
-  if (hour >= 13 && hour < 15) return `${kyivDate()}-noon`;
-  return null;
-}
-
 function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }

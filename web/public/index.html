@@ -2,163 +2,261 @@
 <html lang="uk">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Чи Ви Знали? — панель публікації</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Чи Ви Знали? — публікації</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    :root { --bg:#0f1020; --card:#1a1c33; --accent:#ffb020; --accent2:#8b2fc9; --text:#e8e8f0; --muted:#9a9ab0; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); line-height:1.5; }
-    header { padding:20px; background:linear-gradient(90deg,var(--accent2),var(--accent)); color:#fff; }
-    header h1 { margin:0; font-size:20px; }
-    main { max-width:820px; margin:0 auto; padding:20px; }
-    .theme { background:var(--card); border-radius:12px; margin-bottom:12px; overflow:hidden; }
-    .theme summary { padding:14px 16px; cursor:pointer; font-weight:600; list-style:none; }
-    .theme summary::-webkit-details-marker { display:none; }
-    .theme .body { padding:0 16px 16px; }
-    .cat { color:var(--muted); font-size:13px; font-weight:400; }
-    pre { background:#0c0d1a; padding:12px; border-radius:8px; white-space:pre-wrap; font-size:12px; max-height:200px; overflow:auto; }
-    button { background:var(--accent); color:#111; border:0; border-radius:8px; padding:10px 16px; font-weight:600; cursor:pointer; }
-    button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
-    button:disabled { opacity:.5; cursor:default; }
-    input[type=file] { margin:10px 0; color:var(--muted); }
-    label { display:block; margin:10px 0 4px; font-size:13px; color:var(--muted); }
-    input[type=text], textarea { width:100%; background:#0c0d1a; border:1px solid #2a2c48; border-radius:8px; color:var(--text); padding:8px; font-family:inherit; }
-    video { width:100%; max-width:280px; border-radius:12px; display:block; margin:12px auto; }
-    .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
-    .platforms label { display:inline-flex; align-items:center; gap:6px; margin-right:12px; color:var(--text); }
-    .badge { font-size:11px; padding:2px 8px; border-radius:20px; background:#2a2c48; color:var(--muted); }
-    .badge.on { background:#1f6f3f; color:#c6f6d5; }
-    .note { color:var(--muted); font-size:13px; }
-    .draft { background:#3a2a10; border:1px solid var(--accent); border-radius:8px; padding:10px 12px; margin-bottom:16px; font-size:13px; }
+    :root {
+      --bg: var(--tg-theme-bg-color, #0f1115);
+      --surface: var(--tg-theme-secondary-bg-color, #1a1d24);
+      --text: var(--tg-theme-text-color, #f2f4f8);
+      --muted: var(--tg-theme-hint-color, #8a93a6);
+      --link: var(--tg-theme-link-color, #7c9cff);
+      --accent: var(--tg-theme-button-color, #6c5ce7);
+      --accent-text: var(--tg-theme-button-text-color, #ffffff);
+      --ok: #2ecc71;
+      --border: color-mix(in srgb, var(--muted) 22%, transparent);
+      --radius: 18px;
+      --shadow: 0 8px 30px rgba(0,0,0,.18);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      padding: 0 14px calc(28px + env(safe-area-inset-bottom));
+      max-width: 620px;
+      margin: 0 auto;
+    }
+    header {
+      position: sticky; top: 0; z-index: 10;
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      backdrop-filter: saturate(1.4) blur(12px);
+      padding: 14px 2px 10px;
+      margin-bottom: 6px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .logo {
+      width: 42px; height: 42px; flex: 0 0 42px; border-radius: 13px;
+      display: grid; place-items: center; font-size: 22px;
+      background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #ff7ac6));
+      box-shadow: var(--shadow);
+    }
+    header h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
+    header p { font-size: 12.5px; margin: 1px 0 0; color: var(--muted); }
+    .count { margin-left: auto; font-size: 12px; color: var(--muted); text-align: right; }
+
+    h2.section {
+      font-size: 13px; text-transform: uppercase; letter-spacing: .8px;
+      color: var(--muted); margin: 22px 4px 10px; font-weight: 700;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+    }
+    .video-wrap { position: relative; background: #000; }
+    .video-wrap video { width: 100%; display: block; max-height: 62vh; object-fit: contain; background: #000; }
+    .card-body { padding: 14px 15px 16px; }
+
+    .kicker { font-size: 11.5px; color: var(--muted); letter-spacing: .3px; margin-bottom: 8px; }
+
+    .copyable {
+      position: relative; border: 1px solid var(--border); border-radius: 13px;
+      padding: 12px 13px; background: color-mix(in srgb, var(--bg) 45%, var(--surface));
+      cursor: pointer; transition: border-color .15s, transform .05s;
+      margin-bottom: 11px;
+    }
+    .copyable:active { transform: scale(.995); }
+    .copyable .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+    .copyable .title-text { font-size: 16.5px; font-weight: 650; line-height: 1.35; }
+    .copyable .desc-text { font-size: 14.5px; white-space: pre-wrap; word-break: break-word; color: color-mix(in srgb, var(--text) 92%, transparent); }
+    .copyable .tap { position: absolute; top: 10px; right: 12px; font-size: 11px; color: var(--link); font-weight: 600; }
+    .copyable.copied { border-color: var(--ok); }
+    .copyable.copied .tap { color: var(--ok); }
+
+    .actions { display: flex; gap: 10px; margin-top: 4px; }
+    .btn {
+      flex: 1; border: 0; border-radius: 13px; padding: 13px 14px;
+      font-size: 15px; font-weight: 650; cursor: pointer; font-family: inherit;
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      transition: transform .05s, opacity .15s;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn.secondary { background: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--text); text-decoration: none; }
+    .btn.primary { background: var(--accent); color: var(--accent-text); }
+    .btn.done { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .btn[disabled] { opacity: .55; pointer-events: none; }
+
+    .published-item {
+      display: flex; align-items: center; gap: 11px;
+      padding: 11px 13px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 13px; margin-bottom: 8px;
+    }
+    .published-item .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: 0 0 8px; }
+    .published-item .pi-text { min-width: 0; }
+    .published-item .pi-title { font-size: 14px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .published-item .pi-date { font-size: 12px; color: var(--muted); }
+
+    .empty { text-align: center; color: var(--muted); padding: 34px 20px; }
+    .empty .big { font-size: 34px; margin-bottom: 10px; }
+    .skeleton { height: 220px; border-radius: var(--radius); background: linear-gradient(100deg, var(--surface) 30%, color-mix(in srgb, var(--muted) 12%, var(--surface)) 50%, var(--surface) 70%); background-size: 200% 100%; animation: sh 1.3s infinite; margin-bottom: 16px; }
+    @keyframes sh { to { background-position: -200% 0; } }
+
+    .toast {
+      position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(20px);
+      background: var(--text); color: var(--bg); padding: 11px 18px; border-radius: 999px;
+      font-size: 14px; font-weight: 600; opacity: 0; pointer-events: none; transition: all .25s; z-index: 50; box-shadow: var(--shadow);
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .banner { background: color-mix(in srgb, #e67e22 20%, var(--surface)); border: 1px solid color-mix(in srgb, #e67e22 40%, transparent); color: var(--text); padding: 12px 14px; border-radius: 13px; font-size: 13.5px; margin: 10px 2px 4px; }
   </style>
 </head>
 <body>
-  <header><h1>💡 Чи Ви Знали? — панель публікації</h1></header>
-  <main>
-    <div class="draft">⚙️ Чернетка. Публікація по платформах — заглушки, поки не підключено API. Монтаж і прев'ю відео вже робочі.</div>
-
-    <h2>1. Обери тему</h2>
-    <div id="themes" class="note">Завантаження…</div>
-
-    <div id="work" style="display:none">
-      <h2>2. Завантаж фото та збери відео</h2>
-      <p class="note">Згенеруй фото своїм ШІ за скопійованим промтом. Попроси ШІ додатково: (1) одну зведену картинку, де видно всі 6 фото разом — для швидкого перегляду; (2) архів <b>.zip</b> із тими самими 6 фото окремо, названими <b>1, 2, 3, 4, 5, 6</b>. Перевір зведену картинку оком і завантаж архів — агент розпакує, звірить кожне фото окремо (щоб ШІ не підсунув чуже) і збере відео.</p>
-
-      <label>Варіант А — архів .zip (рекомендовано):</label>
-      <input type="file" id="zip" accept=".zip,application/zip" />
-      <div class="row"><button id="assembleZip">📦 Розпакувати й зібрати</button></div>
-
-      <label style="margin-top:16px">Варіант Б — 6 фото окремо:</label>
-      <input type="file" id="photos" accept="image/*" multiple />
-      <div class="row">
-        <button id="assemble">🎬 Зібрати відео</button>
-        <span id="status" class="note"></span>
-      </div>
-
-      <div id="preview" style="display:none">
-        <h2>3. Перевір і опублікуй</h2>
-        <video id="video" controls></video>
-        <label>Назва</label><input type="text" id="title" />
-        <label>Опис</label><textarea id="description" rows="5"></textarea>
-        <label>Хештеги</label><input type="text" id="hashtags" />
-        <div class="platforms" id="platforms"></div>
-        <div class="row">
-          <button id="publish">🚀 Опублікувати</button>
-          <button class="ghost" id="editBtn">✏️ Переробити</button>
-        </div>
-        <div id="editBox" style="display:none; margin-top:10px">
-          <label>Причина переробки (напр. «озвучка погана», «опис переробити»)</label>
-          <textarea id="reason" rows="2"></textarea>
-          <div class="row"><button id="regen">↻ Переробити</button></div>
-        </div>
-        <div id="result" class="note" style="margin-top:12px"></div>
-      </div>
+  <header>
+    <div class="logo">💡</div>
+    <div>
+      <h1>Чи Ви Знали?</h1>
+      <p>Публікація готових роликів</p>
     </div>
+    <div class="count" id="count"></div>
+  </header>
+
+  <div id="banner"></div>
+  <main id="app">
+    <div class="skeleton"></div>
+    <div class="skeleton" style="height:120px"></div>
   </main>
 
+  <div class="toast" id="toast"></div>
+
   <script>
-    let selectedTheme = null, selectedScript = null, currentId = null, platformsMeta = [];
+    const tg = window.Telegram?.WebApp;
+    if (tg) { tg.ready(); tg.expand(); }
+    const initData = tg?.initData || '';
+    const haptic = (t='light') => tg?.HapticFeedback?.impactOccurred?.(t);
+    const notify = (t='success') => tg?.HapticFeedback?.notificationOccurred?.(t);
+
+    const $ = (sel) => document.querySelector(sel);
+    const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+    function toast(msg) {
+      const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+      clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 1700);
+    }
+
+    async function copyText(text) {
+      try { await navigator.clipboard.writeText(text); }
+      catch {
+        const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+      }
+    }
+
+    function copyable({ label, icon, main, isDesc, raw }) {
+      const box = el('div', 'copyable');
+      box.appendChild(el('div', 'label', `${icon} ${label}`));
+      box.appendChild(el('div', isDesc ? 'desc-text' : 'title-text', esc(main)));
+      box.appendChild(el('div', 'tap', 'копіювати'));
+      box.addEventListener('click', async () => {
+        await copyText(raw ?? main);
+        box.classList.add('copied'); box.querySelector('.tap').textContent = 'скопійовано ✓';
+        haptic('light'); toast('Скопійовано');
+        setTimeout(() => { box.classList.remove('copied'); box.querySelector('.tap').textContent = 'копіювати'; }, 1600);
+      });
+      return box;
+    }
+
+    function queueCard(item) {
+      const card = el('div', 'card');
+      const vw = el('div', 'video-wrap');
+      const v = el('video'); v.src = item.videoUrl; v.controls = true; v.playsInline = true; v.preload = 'metadata';
+      vw.appendChild(v); card.appendChild(vw);
+
+      const body = el('div', 'card-body');
+      if (item.theme) body.appendChild(el('div', 'kicker', esc(item.theme)));
+      body.appendChild(copyable({ label: 'Назва', icon: '📌', main: item.title }));
+      body.appendChild(copyable({ label: 'Опис + хештеги', icon: '📝', main: item.description, isDesc: true }));
+
+      const actions = el('div', 'actions');
+      const dl = el('a', 'btn secondary', '⬇️ Відео'); dl.href = item.videoUrl; dl.download = `${item.id}.mp4`;
+      const pub = el('button', 'btn primary', '✅ Опубліковано');
+      pub.addEventListener('click', () => publish(item, card, pub));
+      actions.appendChild(dl); actions.appendChild(pub);
+      body.appendChild(actions);
+      card.appendChild(body);
+      return card;
+    }
+
+    async function publish(item, card, btn) {
+      if (!initData) { toast('Відкрий через Telegram, щоб публікувати'); return; }
+      btn.disabled = true; btn.textContent = 'Публікую…';
+      try {
+        const r = await fetch('/api/publish', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: item.id, initData }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Помилка');
+        btn.className = 'btn done'; btn.textContent = '✓ Опубліковано'; notify('success'); toast('Позначено як опубліковане');
+        setTimeout(load, 900);
+      } catch (e) {
+        btn.disabled = false; btn.className = 'btn primary'; btn.textContent = '✅ Опубліковано';
+        notify('error'); toast(e.message);
+      }
+    }
+
+    function publishedRow(it) {
+      const row = el('div', 'published-item');
+      row.appendChild(el('div', 'dot'));
+      const t = el('div', 'pi-text');
+      t.appendChild(el('div', 'pi-title', esc(it.title || it.theme)));
+      if (it.pubDate) t.appendChild(el('div', 'pi-date', esc(it.pubDate)));
+      row.appendChild(t);
+      return row;
+    }
+
+    function render(state) {
+      const app = $('#app'); app.innerHTML = '';
+      const banner = $('#banner'); banner.innerHTML = '';
+      if (!state.googleReady) banner.appendChild(el('div', 'banner', '⚙️ Google-доступ ще не налаштовано на сервері — черга поки порожня.'));
+
+      const q = state.queue || [];
+      $('#count').textContent = q.length ? `${q.length} до публікації` : '';
+
+      if (q.length) {
+        app.appendChild(el('h2', 'section', 'До публікації'));
+        q.forEach((item) => app.appendChild(queueCard(item)));
+      } else {
+        app.appendChild(el('div', 'empty', '<div class="big">✅</div>Немає нових роликів.<br>Щойно ChatGPT підготує тему — я пришлю сповіщення.'));
+      }
+
+      const p = state.published || [];
+      if (p.length) {
+        app.appendChild(el('h2', 'section', `Опубліковано · ${p.length}`));
+        p.slice(0, 40).forEach((it) => app.appendChild(publishedRow(it)));
+      }
+    }
 
     async function load() {
-      const { themes, platforms } = await (await fetch('/api/state')).json();
-      platformsMeta = platforms;
-      const box = document.getElementById('themes');
-      box.innerHTML = '';
-      themes.forEach((t) => {
-        const d = document.createElement('details');
-        d.className = 'theme';
-        d.innerHTML = `<summary>${t.theme} <span class="cat">· ${t.category} · ${t.recommendedPhotos} фото</span></summary>
-          <div class="body">
-            <pre>${t.prompt.replace(/</g, '&lt;')}</pre>
-            <div class="row">
-              <button class="copy">📋 Копіювати промт</button>
-              <button class="pick ghost">✅ Обрати цю тему</button>
-            </div>
-          </div>`;
-        d.querySelector('.copy').onclick = () => navigator.clipboard.writeText(t.prompt);
-        d.querySelector('.pick').onclick = () => { selectedTheme = t.theme; document.getElementById('work').style.display='block'; window.scrollTo(0, document.getElementById('work').offsetTop); };
-        box.appendChild(d);
-      });
+      try {
+        const r = await fetch('/api/state');
+        render(await r.json());
+      } catch (e) {
+        $('#app').innerHTML = `<div class="empty"><div class="big">⚠️</div>Не вдалося завантажити.<br>${esc(e.message)}</div>`;
+      }
     }
-
-    function fileToBase64(file) {
-      return new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsDataURL(file); });
-    }
-
-    document.getElementById('assemble').onclick = async () => {
-      const files = [...document.getElementById('photos').files];
-      if (files.length < 2) { alert('Завантаж хоча б 2 фото'); return; }
-      const status = document.getElementById('status');
-      status.textContent = 'Монтую відео… (може зайняти до хвилини)';
-      const photos = await Promise.all(files.map(fileToBase64));
-      const res = await fetch('/api/assemble', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ photos, theme: selectedTheme, script: selectedScript }) });
-      const data = await res.json();
-      if (data.error) { status.textContent = 'Помилка: ' + data.error; return; }
-      status.textContent = '';
-      showPreview(data);
-    };
-
-    function showPreview(data) {
-      currentId = data.id;
-      document.getElementById('preview').style.display = 'block';
-      document.getElementById('video').src = '/api/video/' + data.id;
-      if (data.texts) { document.getElementById('title').value = data.texts.title || ''; document.getElementById('description').value = data.texts.description || ''; document.getElementById('hashtags').value = data.texts.hashtags || ''; }
-      const pl = document.getElementById('platforms');
-      pl.innerHTML = '<label style="color:var(--muted)">Куди публікувати:</label>' + platformsMeta.map((p) => `<label><input type="checkbox" value="${p.id}" ${p.enabled?'checked':''} ${p.enabled?'':'disabled'}> ${p.name} <span class="badge ${p.enabled?'on':''}">${p.enabled?'готово':'скоро'}</span></label>`).join('');
-    }
-
-    document.getElementById('assembleZip').onclick = async () => {
-      const file = document.getElementById('zip').files[0];
-      if (!file) { alert('Обери архів .zip'); return; }
-      const status = document.getElementById('status');
-      status.textContent = 'Розпаковую й перевіряю фото…';
-      const dataUrl = await fileToBase64(file);
-      const zip = dataUrl.split(',').pop();
-      const res = await fetch('/api/assemble-zip', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ zip, theme: selectedTheme, script: selectedScript }) });
-      const data = await res.json();
-      if (data.error) { status.textContent = '⚠️ ' + data.error; return; }
-      if (data.needsFix) { status.textContent = '⚠️ Треба перезняти фото: ' + data.problems.map((p) => `#${p.index} (${p.issue})`).join('; '); return; }
-      status.textContent = '';
-      showPreview(data);
-    };
-
-    document.getElementById('editBtn').onclick = () => { const b = document.getElementById('editBox'); b.style.display = b.style.display==='none'?'block':'none'; };
-
-    document.getElementById('regen').onclick = async () => {
-      const reason = document.getElementById('reason').value;
-      const res = await fetch('/api/regenerate', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ id: currentId, reason }) });
-      const data = await res.json();
-      document.getElementById('result').textContent = data.note || data.error || 'готово';
-    };
-
-    document.getElementById('publish').onclick = async () => {
-      const platforms = [...document.querySelectorAll('#platforms input:checked')].map((c) => c.value);
-      const res = await fetch('/api/publish', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ id: currentId, platforms, title: document.getElementById('title').value, description: document.getElementById('description').value, hashtags: document.getElementById('hashtags').value }) });
-      const data = await res.json();
-      document.getElementById('result').innerHTML = (data.results || []).map((r) => `${r.platform}: ${r.status} — ${r.detail || ''}`).join('<br>') || (data.error || 'готово');
-    };
 
     load();
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
   </script>
 </body>
 </html>

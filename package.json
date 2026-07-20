@@ -3,13 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Telegram-бот «Слайдшоу-монтажер» для каналу «Чи Ви Знали?» — конвеєр на GitHub Actions без сервера",
+  "description": "«Чи Ви Знали?» — мінідодаток Telegram на Railway: монітор черги Google Sheet, монтаж відео й публікація. Старий Telegram-конвеєр (GitHub Actions) виведено з ладу.",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
+    "start": "node web/server.js",
+    "web": "node web/server.js",
     "themes": "node src/themes.js",
-    "check": "node src/check.js",
-    "web": "node web/server.js"
+    "check": "node src/check.js"
+  },
+  "dependencies": {
+    "googleapis": "^140.0.1"
   }
 }

@@ -1,64 +1,29 @@
-// Веб-панель (ЧЕРНЕТКА) — майбутня заміна Telegram-боту для ПУБЛІКАЦІЇ.
-// Алгоритм той самий, що в боті, але через сайт:
-//   1. GET /            — сторінка зі згорнутими темами + промти + кнопка фото;
-//   2. обираєш тему, копіюєш промт, генеруєш 6 фото своїм ШІ, завантажуєш;
-//   3. POST /api/assemble — сайт монтує відео (спільне ядро pipeline.js) і
-//      повертає прев'ю + назву/опис/хештеги;
-//   4. кнопки «Опублікувати» (publish.js — поки заглушки) і «Переробити»
-//      (з причиною) — перескладає відео.
+// Веб-сервер мінідодатка Telegram для каналу «Чи Ви Знали?».
+// Роль: показати готові (DONE) матеріали з Google Sheet, дати переглянути й
+// завантажити змонтоване відео, скопіювати назву та опис точно як у таблиці,
+// і кнопкою «Опубліковано» перевести рядок DONE → PUBLISHED.
 //
-// ВАЖЛИВО: сервер стартує ЛИШЕ коли ENABLE_WEB=1. Поки флаг не заданий —
-// файл нічого не запускає, тож поточний Telegram-конвеєр не зачіпається.
-// Запуск (у майбутньому, на Railway): ENABLE_WEB=1 node web/server.js
+// Теми/сценарії/фото/архіви робить ChatGPT — додаток їх лише СПОЖИВАЄ.
+// Монтаж і сповіщення веде monitor.js; сервер стартує його разом із собою.
+//
+// Старт (Railway): node web/server.js  (потрібні змінні — див. README).
 import http from 'node:http';
-import { readFile, writeFile, mkdtemp } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
-import os from 'node:os';
+import crypto from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
+import { createReadStream, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { randomUUID } from 'node:crypto';
-import { assembleVideo } from '../src/pipeline.js';
-import { availablePlatforms, publishAll } from '../src/publish.js';
-import { readState } from '../src/state.js';
-import { FACTS_POOL, remainingFacts } from '../src/facts-pool.js';
-import { extractPhotoArchive } from '../src/archive.js';
-import { checkSlides } from '../src/vision.js';
+import { listPublishedItems, markPublished } from '../src/sheets.js';
+import { readLedger, writeLedger, videoPathFor } from '../src/storage.js';
+import { startMonitor, pollOnce } from '../src/monitor.js';
+import { googleConfigured, serviceAccountEmail } from '../src/google-auth.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
 
-// Готові до складання відео живуть у пам'яті процесу (чернетка; на постійному
-// сервері Railway процес не вмирає, тож цього поки досить).
-const assembled = new Map(); // id -> { videoPath, texts, theme }
-
-async function buildPromptFor(theme) {
-  const template = await readFile(path.join(DIR, '../prompt.template.txt'), 'utf8');
-  return template.replaceAll('{{TEMA}}', theme);
-}
-
-// Список тем для панелі: пул ще не використаних фактів (кілька на вибір).
-async function listThemes() {
-  const state = await readState().catch(() => ({ themes: [] }));
-  const used = state.themes
-    .filter((t) => t.status === 'done' || t.status === 'rejected')
-    .map((t) => t.title);
-  const remaining = remainingFacts(used);
-  const pool = remaining.length ? remaining : FACTS_POOL;
-  // Кілька варіантів на вибір + скільки фото рекомендовано (наш формат — 6).
-  return Promise.all(
-    pool.slice(0, 8).map(async (fact) => ({
-      theme: fact.text,
-      category: fact.category,
-      recommendedPhotos: 6,
-      prompt: await buildPromptFor(fact.text),
-    })),
-  );
-}
-
 function json(res, code, body) {
-  const data = JSON.stringify(body);
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
-  res.end(data);
+  res.end(JSON.stringify(body));
 }
 
 async function readBody(req) {
@@ -67,107 +32,138 @@ async function readBody(req) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-// Зберігає завантажені фото (base64 data URL або чистий base64) у тимчасові
-// файли й повертає їх шляхи у порядку надходження.
-async function savePhotos(photos) {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'webphotos-'));
-  const paths = [];
-  for (const [index, raw] of photos.entries()) {
-    const base64 = String(raw).includes(',') ? String(raw).split(',').pop() : String(raw);
-    const filePath = path.join(dir, `photo-${index + 1}.jpg`);
-    await writeFile(filePath, Buffer.from(base64, 'base64'));
-    paths.push(filePath);
+// --- Перевірка підпису Telegram Web App (initData) -------------------------
+// Гарантує, що запит на публікацію справді з мінідодатка нашого бота, а не
+// підроблений. Алгоритм — офіційний: secret = HMAC(bot_token, 'WebAppData'),
+// далі HMAC(secret, data_check_string) має збігтися з полем hash.
+function verifyInitData(initData) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error('Немає TELEGRAM_BOT_TOKEN для перевірки підпису');
+  const params = new URLSearchParams(initData || '');
+  const hash = params.get('hash');
+  if (!hash) return { ok: false };
+  params.delete('hash');
+  const dataCheckString = [...params.entries()]
+    .map(([k, v]) => `${k}=${v}`)
+    .sort()
+    .join('\n');
+  const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest();
+  const calc = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
+  if (calc !== hash) return { ok: false };
+  // Свіжість (захист від повторів): не старше доби.
+  const authDate = Number(params.get('auth_date') || 0);
+  if (authDate && Date.now() / 1000 - authDate > 86400) return { ok: false, stale: true };
+  let user = null;
+  try { user = JSON.parse(params.get('user') || 'null'); } catch { /* ignore */ }
+  return { ok: true, user };
+}
+
+// Лише власник каналу може публікувати (його user.id = TELEGRAM_CHAT_ID).
+function isOwner(user) {
+  const owner = process.env.TELEGRAM_CHAT_ID;
+  if (!owner) return true; // не задано — не обмежуємо (локальна розробка)
+  return user && String(user.id) === String(owner);
+}
+
+// --- Дані для мінідодатка --------------------------------------------------
+// Готові до публікації матеріали (status ready у леджері) — з назвою/описом.
+async function queueItems() {
+  const ledger = await readLedger();
+  return Object.entries(ledger)
+    .filter(([, e]) => e.status === 'ready' && e.videoFile)
+    .sort((a, b) => String(b[1].readyAt).localeCompare(String(a[1].readyAt)))
+    .map(([id, e]) => ({
+      id,
+      title: e.title || '',
+      description: e.description || '',
+      theme: e.theme || '',
+      readyAt: e.readyAt || null,
+      videoUrl: `/api/video/${encodeURIComponent(id)}`,
+    }));
+}
+
+// Віддає відео з тому з підтримкою Range (щоб працювала перемотка у прев'ю).
+async function serveVideo(req, res, id) {
+  const file = videoPathFor(id);
+  if (!existsSync(file)) return json(res, 404, { error: 'відео не знайдено' });
+  const { size } = await stat(file);
+  const range = req.headers.range;
+  if (range) {
+    const m = /bytes=(\d+)-(\d*)/.exec(range);
+    const start = Number(m[1]);
+    const end = m[2] ? Number(m[2]) : size - 1;
+    res.writeHead(206, {
+      'content-type': 'video/mp4',
+      'content-range': `bytes ${start}-${end}/${size}`,
+      'accept-ranges': 'bytes',
+      'content-length': end - start + 1,
+    });
+    createReadStream(file, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': size, 'accept-ranges': 'bytes' });
+    createReadStream(file).pipe(res);
   }
-  return paths;
 }
 
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    const { pathname } = url;
 
-    if (req.method === 'GET' && url.pathname === '/') {
+    if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
       const html = await readFile(path.join(DIR, 'public/index.html'), 'utf8');
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(html);
       return;
     }
 
-    if (req.method === 'GET' && url.pathname === '/api/state') {
-      json(res, 200, { themes: await listThemes(), platforms: availablePlatforms() });
+    if (req.method === 'GET' && pathname === '/api/state') {
+      json(res, 200, {
+        queue: await queueItems(),
+        published: (await listPublishedItems().catch(() => [])).map((it) => ({
+          id: it.id, title: it.title || it.theme, theme: it.theme,
+          pubDate: it.pubDate, description: it.description,
+        })),
+        googleReady: googleConfigured(),
+      });
       return;
     }
 
-    // Складання відео з завантажених фото.
-    if (req.method === 'POST' && url.pathname === '/api/assemble') {
-      const { photos, theme, script } = JSON.parse(await readBody(req));
-      const photoPaths = await savePhotos(photos || []);
-      const { videoPath, texts } = await assembleVideo({ photoPaths, theme, script });
-      const id = randomUUID();
-      assembled.set(id, { videoPath, texts, theme });
-      json(res, 200, { id, texts });
+    if (req.method === 'GET' && pathname === '/api/queue') {
+      json(res, 200, { queue: await queueItems() });
       return;
     }
 
-    // Складання з АРХІВУ: власник переглядає одну зведену картинку (6 фото
-    // разом) у себе, а сюди вивантажує zip, де ті самі фото окремо (1..6).
-    // Агент розпаковує, звіряє імена (безкоштовний захист від чужих фото),
-    // за флагом робить vision-перевірку кожного, потім монтує.
-    if (req.method === 'POST' && url.pathname === '/api/assemble-zip') {
-      const { zip, theme, script, slideTexts } = JSON.parse(await readBody(req));
-      let photoPaths, scriptText;
+    if (req.method === 'GET' && pathname.startsWith('/api/video/')) {
+      const id = decodeURIComponent(pathname.slice('/api/video/'.length));
+      await serveVideo(req, res, id);
+      return;
+    }
+
+    // Публікація: перевіряємо підпис, ставимо PUBLISHED у таблиці, оновлюємо леджер.
+    if (req.method === 'POST' && pathname === '/api/publish') {
+      const { id, initData } = JSON.parse(await readBody(req));
+      const check = verifyInitData(initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Публікувати може лише власник каналу' });
       try {
-        ({ photoPaths, scriptText } = await extractPhotoArchive(zip));
+        const result = await markPublished(id);
+        const ledger = await readLedger();
+        if (ledger[id]) { ledger[id].status = 'published'; ledger[id].publishedAt = new Date().toISOString(); await writeLedger(ledger); }
+        return json(res, 200, { ok: true, date: result.date || null });
       } catch (error) {
         return json(res, 400, { error: error.message });
       }
-      const problems = await checkSlides(photoPaths, slideTexts || []);
-      if (problems.length) {
-        return json(res, 200, {
-          needsFix: true,
-          problems, // [{index, issue}] — які фото перезняти
-        });
-      }
-      const { videoPath, texts } = await assembleVideo({ photoPaths, theme, script: script || scriptText });
-      const id = randomUUID();
-      assembled.set(id, { videoPath, texts, theme });
-      json(res, 200, { id, texts });
-      return;
     }
 
-    // Прев'ю зібраного відео.
-    if (req.method === 'GET' && url.pathname.startsWith('/api/video/')) {
-      const id = url.pathname.split('/').pop();
-      const item = assembled.get(id);
-      if (!item) return json(res, 404, { error: 'відео не знайдено' });
-      res.writeHead(200, { 'content-type': 'video/mp4' });
-      createReadStream(item.videoPath).pipe(res);
-      return;
+    // Ручний прогін черги (для перевірки без очікування таймера).
+    if (req.method === 'POST' && pathname === '/api/poll') {
+      const n = await pollOnce();
+      return json(res, 200, { checked: n });
     }
 
-    // Переробити (з причиною) — поки просто перескладаємо те саме відео.
-    if (req.method === 'POST' && url.pathname === '/api/regenerate') {
-      const { id, reason } = JSON.parse(await readBody(req));
-      const item = assembled.get(id);
-      if (!item) return json(res, 404, { error: 'відео не знайдено' });
-      console.log(`Переробка відео ${id}. Причина: ${reason || '—'}`);
-      // Чернетка: тут за причиною можна перегенерувати озвучку/тексти.
-      json(res, 200, { id, texts: item.texts, note: 'переробку прийнято (чернетка)' });
-      return;
-    }
-
-    // Публікація на обрані платформи (поки заглушки в publish.js).
-    if (req.method === 'POST' && url.pathname === '/api/publish') {
-      const { id, platforms, title, description, hashtags } = JSON.parse(await readBody(req));
-      const item = assembled.get(id);
-      if (!item) return json(res, 404, { error: 'відео не знайдено' });
-      const results = await publishAll(platforms || [], {
-        videoPath: item.videoPath,
-        title,
-        description,
-        hashtags,
-      });
-      json(res, 200, { results });
-      return;
+    if (req.method === 'GET' && pathname === '/healthz') {
+      return json(res, 200, { ok: true, googleReady: googleConfigured(), serviceAccount: serviceAccountEmail() });
     }
 
     json(res, 404, { error: 'not found' });
@@ -177,11 +173,17 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// Стартуємо ЛИШЕ за явним флагом — інакше файл безпечно бездіяльний.
+// Стартуємо ЛИШЕ за явним флагом (щоб файл лишався безпечно бездіяльним при
+// імпорті в тестах). Монітор черги вмикаємо, якщо налаштовано Google-доступ.
 if (process.env.ENABLE_WEB === '1' && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  server.listen(PORT, () => console.log(`Веб-панель на http://localhost:${PORT}`));
+  server.listen(PORT, () => console.log(`Мінідодаток на порті ${PORT}`));
+  if (googleConfigured()) {
+    startMonitor();
+  } else {
+    console.warn('GOOGLE_SERVICE_ACCOUNT_JSON не задано — монітор черги вимкнено (немає доступу до таблиці).');
+  }
 } else if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   console.log('Веб-панель вимкнена. Запусти з ENABLE_WEB=1, щоб увімкнути.');
 }
 
-export { server };
+export { server, verifyInitData };

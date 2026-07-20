@@ -1,0 +1,9 @@
+# Nixpacks-конфіг для Railway. Монтаж відео потребує системних утиліт, яких
+# немає в базовому Node-образі: ffmpeg (склейка/озвучка) і unzip (розпаковка
+# архіву з Drive у src/archive.js). aptPkgs додаються до автоналаштування
+# Node, не замінюючи його.
+[phases.setup]
+aptPkgs = ["ffmpeg", "unzip"]
+
+[start]
+cmd = "node web/server.js"

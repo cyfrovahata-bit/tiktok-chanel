@@ -21,7 +21,7 @@ import { generateNarration, generatePostTexts } from './openai.js';
 //   withVoice  — чи накладати озвучку (за замовчуванням — як у продакшні).
 // Повертає { videoPath, texts } — тексти можуть бути null, якщо OpenAI впав
 // (відео важливіше за підпис, як і в боті).
-export async function assembleVideo({ photoPaths, theme, script = null, withVoice = true }) {
+export async function assembleVideo({ photoPaths, theme, script = null, withVoice = true, withTexts = true }) {
   if (!Array.isArray(photoPaths) || photoPaths.length < 2) {
     throw new Error(`Для монтажу треба щонайменше 2 фото, отримано ${photoPaths?.length ?? 0}`);
   }
@@ -58,11 +58,15 @@ export async function assembleVideo({ photoPaths, theme, script = null, withVoic
     }
   }
 
+  // Тексти публікації потрібні старому потоку; у новому (Google Sheet) назва
+  // й опис беруться з таблиці, тож OpenAI-виклик пропускаємо (withTexts=false).
   let texts = null;
-  try {
-    texts = await generatePostTexts(theme);
-  } catch (error) {
-    console.error('Не вдалося згенерувати тексти публікації:', error.message);
+  if (withTexts) {
+    try {
+      texts = await generatePostTexts(theme);
+    } catch (error) {
+      console.error('Не вдалося згенерувати тексти публікації:', error.message);
+    }
   }
 
   return { videoPath, texts };
