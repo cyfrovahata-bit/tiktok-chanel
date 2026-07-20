@@ -24,10 +24,16 @@ function credentials() {
     throw new Error('Не задано GOOGLE_SERVICE_ACCOUNT_JSON — додай ключ сервіс-акаунта у змінні Railway.');
   }
   raw = raw.trim();
-  // Якщо це не схоже на JSON (не починається з «{») — пробуємо base64.
+  // Іноді значення прилітає в лапках (наприклад, скопійоване разом із ними) —
+  // акуратно знімаємо зовнішні лапки.
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+    raw = raw.slice(1, -1).trim();
+  }
+  // Якщо це не схоже на JSON (не починається з «{») — пробуємо base64
+  // (прибравши будь-які пробіли/переноси, якщо кодування рядок розбило).
   if (!raw.startsWith('{')) {
     try {
-      const decoded = Buffer.from(raw, 'base64').toString('utf8').trim();
+      const decoded = Buffer.from(raw.replace(/\s+/g, ''), 'base64').toString('utf8').trim();
       if (decoded.startsWith('{')) raw = decoded;
     } catch { /* лишаємо як є — впаде на JSON.parse нижче */ }
   }
