@@ -1,5 +1,5 @@
 {
-  "last_update_id": 954000783,
+  "last_update_id": 954000784,
   "themes": [
     {
       "title": "Найбільший орган в тілі людини — це шкіра, і вона може вагою до 10 кг.",
@@ -102,13 +102,13 @@
     }
   ],
   "session": {
-    "active": true,
-    "theme": "Найстарішу карту світу — вирізьблену на бивні мамонта — знайшли в селі Межиріч на Черкащині, їй 14–15 тисяч років.",
+    "active": false,
+    "theme": null,
     "prompt_message_id": null,
     "photos": [],
     "script": null,
     "archive": null,
-    "window_end": "2026-07-20T11:48:01.000Z"
+    "window_end": null
   },
   "last_theme_slot": "2026-07-20-am",
   "last_carousel_slot": "2026-07-18-noon",
