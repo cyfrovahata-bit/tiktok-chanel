@@ -23,6 +23,12 @@ const DEFAULT_TARGET_SECONDS = DEFAULT_VIDEO_SECONDS - END_MARGIN;
 const ALIGN_TEMPO = 1.4;
 const SLIDE_PAD = 0.5;
 
+// Короткі ізольовані репліки (напр. «А ви знали?») англійський голос Callum
+// читає з англійським акцентом — бракує української фонетичної опори. Тому
+// такі репліки синтезуємо з українським «розгоном», а потім лишаємо тільки хвіст.
+const SHORT_CLIP_WORDS = 4;
+const UKR_CARRIER = 'Це справді вражає.';
+
 // cedar і marin — нові голоси, які OpenAI рекомендує як найякісніші.
 const OPENAI_VOICE = process.env.TTS_OPENAI_VOICE || 'cedar';
 const EDGE_VOICE = process.env.TTS_VOICE || 'uk-UA-OstapNeural'; // жіночий: uk-UA-PolinaNeural
@@ -184,7 +190,7 @@ async function synthesizeAligned(groups, outputPath) {
     const clipText = (group || '').trim();
     if (!clipText) throw new Error('Порожня репліка для слайда');
     const clip = path.join(dir, `clip${clips.length}.mp3`);
-    await runEngines(clipText, clip, DEFAULT_TARGET_SECONDS);
+    await synthClipGrounded(clipText, clip);
     await trimSilence(clip);
     await applyTempo(clip, ALIGN_TEMPO);
     clips.push({ path: clip, duration: await audioDuration(clip) });
@@ -223,6 +229,36 @@ async function synthesizeAligned(groups, outputPath) {
     outputPath,
   ]);
   return slideDurations;
+}
+
+// Синтезує репліку. Коротку (≤SHORT_CLIP_WORDS слів) — з українським розгоном,
+// щоб англійський голос не читав її з акцентом: озвучуємо «${розгін} ${текст}»,
+// а потім лишаємо тільки хвіст (від останньої паузи до кінця).
+async function synthClipGrounded(text, outputPath) {
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  if (wordCount > SHORT_CLIP_WORDS) {
+    await runEngines(text, outputPath, DEFAULT_TARGET_SECONDS);
+    return;
+  }
+  const tmp = `${outputPath}.carrier.mp3`;
+  try {
+    await runEngines(`${UKR_CARRIER} ${text}`, tmp, DEFAULT_TARGET_SECONDS);
+    await keepAfterLastSilence(tmp, outputPath);
+  } catch (error) {
+    console.error(`Розгін для короткої репліки не вдався (${error.message}); синтезую окремо.`);
+    await runEngines(text, outputPath, DEFAULT_TARGET_SECONDS);
+  }
+}
+
+// Лишає в аудіо частину від ПОЧАТКУ ОСТАННЬОЇ фрази (після останньої паузи) до
+// кінця — так від «${розгін}. ${фраза}» лишається тільки «${фраза}», але вже
+// проговорена в українському потоці.
+async function keepAfterLastSilence(inPath, outPath) {
+  const log = await runCaptureStderr('ffmpeg', ['-i', inPath, '-af', 'silencedetect=noise=-30dB:d=0.14', '-f', 'null', '-']);
+  const ends = [...log.matchAll(/silence_end:\s*([\d.]+)/g)].map((m) => Number.parseFloat(m[1]));
+  if (ends.length === 0) throw new Error('паузи між розгоном і фразою не знайдено');
+  const start = ends[ends.length - 1]; // початок останньої фрази
+  await run('ffmpeg', ['-y', '-ss', start.toFixed(3), '-i', inPath, '-c:a', 'libmp3lame', outPath]);
 }
 
 // Прибирає тишу з ОБОХ кінців кліпу: спереду — щоб слово стартувало точно на
@@ -367,6 +403,17 @@ function run(command, args) {
       } else {
         resolve(stdout);
       }
+    });
+  });
+}
+
+// Як run, але повертає stderr (ffmpeg-фільтри на кшталт silencedetect пишуть
+// свій вивід саме туди, а вихідний код лишається 0).
+function runCaptureStderr(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { maxBuffer: 16 * 1024 * 1024 }, (error, _stdout, stderr) => {
+      if (error && !stderr) reject(error);
+      else resolve(stderr || '');
     });
   });
 }
