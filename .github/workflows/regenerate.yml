@@ -27,3 +27,4 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           TTS_ENGINE: elevenlabs
+          TTS_ELEVEN_VOICE_ID: MajbwhPMg2mRJJCesMAF  # Oleksii Safin — Friendly Storyteller (укр.)
