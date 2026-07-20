@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished } from '../src/sheets.js';
 import { listVideos, streamVideo, videoName, videoFolderId } from '../src/videos.js';
 import { startMonitor, pollOnce } from '../src/monitor.js';
-import { googleConfigured, serviceAccountEmail } from '../src/google-auth.js';
+import { googleConfigured, serviceAccountStatus } from '../src/google-auth.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -164,10 +164,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && pathname === '/healthz') {
+      const sa = serviceAccountStatus();
       return json(res, 200, {
         ok: true,
         googleReady: googleConfigured(),
-        serviceAccount: serviceAccountEmail(),
+        serviceAccount: sa.email,
+        serviceAccountError: sa.error,
         videoFolderSet: Boolean(videoFolderId()),
       });
     }
