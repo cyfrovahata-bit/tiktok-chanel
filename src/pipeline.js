@@ -48,7 +48,21 @@ export async function assembleVideo({ photoPaths, theme, script = null, withVoic
     }
   }
 
-  await buildSlideshow(photoPaths, silentPath, slideDurations ?? photoPaths.length);
+  // Підписи слайдів беремо зі script.txt (по рядку на слайд) — їх накладаємо
+  // поверх ЧИСТИХ картинок синхронно з озвучкою. Один рядок = один JPG; якщо
+  // кількість не збігається — краще зрозуміла помилка, ніж криве відео.
+  let captionLines = null;
+  if (script) {
+    const lines = String(script).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    if (lines.length !== photoPaths.length) {
+      throw new Error(
+        `Рядків у script.txt (${lines.length}) не дорівнює кількості фото (${photoPaths.length}). Архів має містити рівно по рядку тексту на кожен JPG.`,
+      );
+    }
+    captionLines = lines;
+  }
+
+  await buildSlideshow(photoPaths, silentPath, slideDurations ?? photoPaths.length, captionLines);
   let videoPath = silentPath;
   if (voicePath) {
     try {

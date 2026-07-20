@@ -1,5 +1,13 @@
 // Збірка вертикального слайдшоу 1080x1920 (9:16) з фотографій одним викликом ffmpeg.
+// Якщо передано підписи слайдів — другим проходом «випікаємо» ASS-субтитри
+// (караоке-накопичення тексту синхронно з озвучкою).
 import { execFile } from 'node:child_process';
+import { writeFile, rm } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { buildAss } from './captions.js';
+
+// Тека з бандленим шрифтом (Oswald Bold, підтримує українську кирилицю).
+const FONTS_DIR = fileURLToPath(new URL('../assets/fonts', import.meta.url));
 
 const WIDTH = 1080;
 const HEIGHT = 1920;
@@ -36,13 +44,18 @@ export function buildFilterComplex(slidesOrCount) {
   const count = durations.length;
   const parts = [];
   for (let i = 0; i < count; i++) {
+    // Ken Burns: чергуємо напрямок між сусідніми слайдами, ~5% (у межах 3–6%),
+    // завжди zoom>=1.0 — тож жодних чорних країв. Текст накладаємо окремим
+    // проходом, тож він НЕ рухається разом із картинкою.
+    const zoom = i % 2 === 0
+      ? `z='min(zoom+0.0007,1.05)'`                      // повільне наближення
+      : `z='if(eq(on,0),1.05,max(zoom-0.0007,1.0))'`;    // повільне віддалення
     parts.push(
       // Нормалізація до строгих 1080x1920 без чорних смуг: масштаб по меншій
       // стороні + кроп по центру (важливий контент за промптом — у центральних 80%).
       `[${i}:v]scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=increase,` +
         `crop=${WIDTH}:${HEIGHT},setsar=1,` +
-        // Ken Burns: повільний zoom-in до 1.08; тривалість слайда — своя.
-        `zoompan=z='min(zoom+0.0008,1.08)':d=${Math.round(durations[i] * FPS)}:` +
+        `zoompan=${zoom}:d=${Math.round(durations[i] * FPS)}:` +
         `x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=${WIDTH}x${HEIGHT}:fps=${FPS},` +
         // Однакова часова база потрібна для xfade.
         `settb=AVTB[v${i}]`,
@@ -61,10 +74,22 @@ export function buildFilterComplex(slidesOrCount) {
 
 // slides — або кількість фото (рівні слайди), або масив тривалостей слайдів
 // у секундах (коли відео підлаштовується під довжину озвучки кожного слайда).
-export async function buildSlideshow(photoPaths, outputPath, slides = photoPaths.length) {
+// captionLines — необов'язковий масив підписів (по рядку на слайд): якщо
+// заданий, поверх картинок другим проходом випікаємо ASS-субтитри.
+export async function buildSlideshow(photoPaths, outputPath, slides = photoPaths.length, captionLines = null) {
   if (photoPaths.length < 2) {
     throw new Error(`Для монтажу треба мінімум 2 фото, отримано ${photoPaths.length}`);
   }
+  const needCaptions = Array.isArray(captionLines) && captionLines.length > 0;
+  if (needCaptions && captionLines.length !== photoPaths.length) {
+    throw new Error(
+      `Підписів (${captionLines.length}) не дорівнює фото (${photoPaths.length}) — не можу коректно накласти текст. Перевір, що рядків у script.txt стільки ж, скільки JPG.`,
+    );
+  }
+
+  // Німе відео (Ken Burns + xfade). Якщо треба субтитри — спершу у тимчасовий
+  // файл, потім другий прохід накладає текст.
+  const silentTarget = needCaptions ? `${outputPath}.nosub.mp4` : outputPath;
   const args = ['-y'];
   for (const photoPath of photoPaths) args.push('-i', photoPath);
   args.push(
@@ -74,10 +99,34 @@ export async function buildSlideshow(photoPaths, outputPath, slides = photoPaths
     '-pix_fmt', 'yuv420p',
     '-r', String(FPS),
     '-movflags', '+faststart',
-    outputPath,
+    silentTarget,
   );
   await runFfmpeg(args);
+
+  if (needCaptions) {
+    const assPath = `${outputPath}.ass`;
+    await writeFile(assPath, buildAss(captionLines, toDurations(slides)), 'utf8');
+    await burnSubtitles(silentTarget, assPath, outputPath);
+    await rm(silentTarget, { force: true }).catch(() => {});
+    await rm(assPath, { force: true }).catch(() => {});
+  }
   return outputPath;
+}
+
+// Другий прохід: «випікає» ASS-субтитри у відео (libass), використовуючи
+// бандлений шрифт Oswald із FONTS_DIR.
+async function burnSubtitles(inPath, assPath, outPath) {
+  await runFfmpeg([
+    '-y',
+    '-i', inPath,
+    '-vf', `subtitles=${assPath}:fontsdir=${FONTS_DIR}`,
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    '-r', String(FPS),
+    '-movflags', '+faststart',
+    outPath,
+  ]);
+  return outPath;
 }
 
 // Підкладає озвучку під готове відео; тиша в кінці, якщо аудіо коротше.
