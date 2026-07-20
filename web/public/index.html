@@ -228,6 +228,7 @@
       const app = $('#app'); app.innerHTML = '';
       const banner = $('#banner'); banner.innerHTML = '';
       if (!state.googleReady) banner.appendChild(el('div', 'banner', '⚙️ Google-доступ ще не налаштовано на сервері — черга поки порожня.'));
+      else if (state.videoFolderSet === false) banner.appendChild(el('div', 'banner', '⚙️ Не задано папку Drive для відео (VIDEO_FOLDER_ID) — монтаж вимкнено.'));
 
       const q = state.queue || [];
       $('#count').textContent = q.length ? `${q.length} до публікації` : '';

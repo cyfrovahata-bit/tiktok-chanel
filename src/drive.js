@@ -7,10 +7,12 @@ import { pipeline } from 'node:stream/promises';
 import { googleAuth } from './google-auth.js';
 
 let driveApi = null;
-function api() {
+// Спільний клієнт Drive (використовується і тут, і в videos.js).
+export function drive() {
   if (!driveApi) driveApi = google.drive({ version: 'v3', auth: googleAuth() });
   return driveApi;
 }
+const api = drive;
 
 // Витягує fileId з будь-якого типового посилання Drive:
 //   https://drive.google.com/file/d/<ID>/view?...   → <ID>

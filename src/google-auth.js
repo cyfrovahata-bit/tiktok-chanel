@@ -7,10 +7,12 @@ import { google } from 'googleapis';
 
 let cached = null;
 
-// Області доступу: запис у таблицю (статус PUBLISHED) + читання файлів Drive.
+// Області доступу: запис у таблицю (статус PUBLISHED) + Drive (читати ZIP-архіви
+// і вивантажувати готові відео у папку «video»). Повний drive-scope, бо
+// сервіс-акаунт усе одно бачить лише те, що йому явно розшарено.
 const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
-  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/drive',
 ];
 
 function credentials() {
