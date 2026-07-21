@@ -220,9 +220,11 @@
       body.appendChild(copyable({ label: 'Опис + хештеги', icon: '📝', main: item.description, isDesc: true }));
       const actions = el('div', 'actions');
       const dl = el('a', 'btn secondary', '⬇️ Відео'); dl.href = item.videoUrl; dl.download = `${item.id}.mp4`;
+      const regen = el('button', 'btn secondary', '🔄'); regen.title = 'Перегенерувати'; regen.style.flex = '0 0 auto';
+      regen.addEventListener('click', (e) => { e.stopPropagation(); regenerate(item, card, regen); });
       const pub = el('button', 'btn primary', '✅ Опубліковано');
       pub.addEventListener('click', (e) => { e.stopPropagation(); publish(item, card, pub); });
-      actions.appendChild(dl); actions.appendChild(pub);
+      actions.appendChild(dl); actions.appendChild(regen); actions.appendChild(pub);
       body.appendChild(actions);
       wrap.appendChild(body);
       card.appendChild(wrap);
@@ -253,6 +255,26 @@
         btn.disabled = false; btn.className = 'btn primary'; btn.textContent = '✅ Опубліковано';
         notify('error'); toast(e.message);
       }
+    }
+
+    function askConfirm(msg) {
+      return new Promise((res) => { if (tg?.showConfirm) tg.showConfirm(msg, (ok) => res(ok)); else res(confirm(msg)); });
+    }
+
+    async function regenerate(item, card, btn) {
+      if (!initData) { toast('Відкрий через Telegram'); return; }
+      if (!(await askConfirm('Перегенерувати відео новим кодом? Старе буде замінено.'))) return;
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/regenerate', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: item.id, initData }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Помилка');
+        notify('success'); toast('Перегенеровую — нове відео прийде в Telegram');
+        setTimeout(load, 1500);
+      } catch (e) { btn.disabled = false; notify('error'); toast(e.message); }
     }
 
     function publishedRow(it) {

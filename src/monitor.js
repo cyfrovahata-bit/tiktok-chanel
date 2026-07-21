@@ -96,12 +96,27 @@ async function processItem(item) {
   );
 }
 
-// Один прохід черги.
+// Забути лічильник спроб для ID (напр. після ручної перегенерації).
+export function forget(id) { attempts.delete(id); }
+
+// Один прохід черги. Лок, щоб паралельні виклики (таймер + ручний тригер) не
+// накладались і не робили подвійну генерацію.
+let polling = false;
 export async function pollOnce() {
+  if (polling) return 0;
   if (!videoFolderId()) {
     console.warn('[monitor] VIDEO_FOLDER_ID не задано — пропускаю прохід (нема куди класти відео).');
     return 0;
   }
+  polling = true;
+  try {
+    return await pollOnceInner();
+  } finally {
+    polling = false;
+  }
+}
+
+async function pollOnceInner() {
   const [items, videos] = await Promise.all([listDoneItems(), listVideos()]);
   let generated = 0;
   for (const item of items) {

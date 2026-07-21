@@ -48,6 +48,16 @@ export async function uploadVideo(id, localPath) {
   return res.data.id;
 }
 
+// Видаляє відео <ID>.mp4 з папки (щоб монітор згенерував його наново новим
+// кодом). Повертає true, якщо було що видаляти.
+export async function deleteVideo(id) {
+  const map = await listVideos();
+  const fileId = map.get(videoName(id));
+  if (!fileId) return false;
+  await drive().files.delete({ fileId, supportsAllDrives: true });
+  return true;
+}
+
 // Стрім відео з Drive (з опційним Range для перемотки у прев'ю).
 // Повертає { stream, status, headers } — сервер перекладає це у відповідь.
 export async function streamVideo(fileId, range) {

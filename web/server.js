@@ -13,8 +13,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished } from '../src/sheets.js';
-import { listVideos, streamVideo, videoName, videoFolderId } from '../src/videos.js';
-import { startMonitor, pollOnce } from '../src/monitor.js';
+import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
+import { startMonitor, pollOnce, forget } from '../src/monitor.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -153,6 +153,24 @@ const server = http.createServer(async (req, res) => {
         const result = await markPublished(id);
         cache.at = 0; // скинути кеш, щоб рядок одразу зник із черги
         return json(res, 200, { ok: true, date: result.date || null });
+      } catch (error) {
+        return json(res, 400, { error: error.message });
+      }
+    }
+
+    // Перегенерувати: видалити відео з Drive і зібрати наново (новим кодом).
+    if (req.method === 'POST' && pathname === '/api/regenerate') {
+      const { id, initData } = JSON.parse(await readBody(req));
+      const check = verifyInitData(initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Перегенерувати може лише власник каналу' });
+      try {
+        await deleteVideo(id);
+        forget(id);
+        cache.at = 0; // прибрати з черги одразу
+        // Пересобирання — у фоні (важке); користувач отримає нове відео в Telegram.
+        pollOnce().catch((e) => console.error('regenerate pollOnce:', e.message));
+        return json(res, 200, { ok: true });
       } catch (error) {
         return json(res, 400, { error: error.message });
       }
