@@ -93,6 +93,12 @@ const PRONUNCIATION_FIXES = [
 // другий акут поверх першого.
 const CYRILLIC = 'а-яіїєґА-ЯІЇЄҐ\\u0301';
 
+// Нормальний регістр для озвучки: усе малими, перша літера велика. Слова не
+// змінюються — лише регістр (ElevenLabs так вимовляє природніше).
+function toSpeechCase(s) {
+  return s.toLowerCase().replace(/\p{L}/u, (c) => c.toUpperCase());
+}
+
 function fixPronunciation(text) {
   let result = text;
   // Довші фрази — першими: інакше коротше правило встигне спрацювати
@@ -147,7 +153,10 @@ export async function synthesizeVoiceover(
   // тексту (бот не «вигадує» озвучку, а читає рівно те, що у файлі).
   if (Array.isArray(lines) && lines.length) {
     try {
-      const groups = lines.map((l) => fixPronunciation(String(l).trim()));
+      // Для ГОЛОСУ подаємо нормальний регістр (не ALL-CAPS): ElevenLabs гірше
+      // вимовляє великі літери — плутає наголоси й акцент. Слова ті самі, що у
+      // файлі; субтитри окремо лишаються ВЕЛИКИМИ.
+      const groups = lines.map((l) => fixPronunciation(toSpeechCase(String(l).trim())));
       const slideDurations = await synthesizeAligned(groups, outputPath);
       return { voicePath: outputPath, slideDurations };
     } catch (error) {
@@ -333,9 +342,7 @@ async function elevenLabsTts(text, outputPath, targetSeconds = DEFAULT_TARGET_SE
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) throw new Error('Не задано ELEVENLABS_API_KEY');
   const voiceId = process.env.TTS_ELEVEN_VOICE_ID || 'N2lVS1w4EtoT3dr4eOWO'; // Callum — характерний, не заїжджений
-  // Дефолт — multilingual_v2: стабільніше тримає українську вимову (v3 у
-  // Creative-режимі на коротких рядках зісковзувала на «російський» акцент).
-  const modelId = process.env.TTS_ELEVEN_MODEL || 'eleven_multilingual_v2';
+  const modelId = process.env.TTS_ELEVEN_MODEL || 'eleven_v3';
   const isV3 = modelId.startsWith('eleven_v3');
   const voiceSettings = isV3
     ? { stability: 0.0, use_speaker_boost: true } // 0.0 = Creative
