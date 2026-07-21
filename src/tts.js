@@ -8,7 +8,7 @@ import { execFile } from 'node:child_process';
 import { mkdtemp, rename, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { slideOffsets, FADE_SECONDS } from './montage.js';
+import { slideOffsets, FADE_SECONDS, JCUT_SECONDS } from './montage.js';
 
 // Виклик передає РЕАЛЬНУ довжину відео (slideshowDuration під фактичну
 // кількість слайдів). Голос має закінчуватися за END_MARGIN секунд до кінця
@@ -209,7 +209,11 @@ async function synthesizeAligned(groups, outputPath) {
   const filters = [];
   clips.forEach((clip, idx) => {
     inputs.push('-i', clip.path);
-    const delayMs = Math.round(offsets[idx] * 1000);
+    // J-cut: репліку наступного слайда ставимо трохи РАНІШЕ за зміну кадру,
+    // тож голос «веде» відео (природніші переходи, без пауз). Перший слайд не
+    // зсуваємо (не буває від'ємної затримки).
+    const startSec = idx === 0 ? offsets[idx] : Math.max(0, offsets[idx] - JCUT_SECONDS);
+    const delayMs = Math.round(startSec * 1000);
     filters.push(`[${idx}:a]adelay=${delayMs}:all=1[a${idx}]`);
   });
   let filterComplex;

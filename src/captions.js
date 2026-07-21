@@ -11,7 +11,7 @@
 // Стабільність розкладки: увесь рядок присутній у ЄДИНОМУ ASS-івенті від
 // початку, невидимі слова лише прозорі (\alpha) і проявляються \t-анімацією.
 // Тому libass рахує розкладку ОДИН раз — слова ніколи не «стрибають».
-import { slideOffsets, FADE_SECONDS } from './montage.js';
+import { slideOffsets, FADE_SECONDS, JCUT_SECONDS } from './montage.js';
 
 // Хвіст у кінці слайда, коли повна фраза вже на екрані (= SLIDE_PAD у tts.js).
 const PAD_APPROX = 0.5;
@@ -64,7 +64,10 @@ function slideText(line, isFirst, windowSec) {
   let cumWords = 0;
   const parts = [];
   for (const atom of atoms) {
-    const tMs = Math.round(windowSec * (cumWords / total) * 1000);
+    // Голос слайда стартує на JCUT раніше за кадр, тож зсуваємо появу слів на
+    // стільки ж (щоб не відставали), але не раніше за сам перехід (max 0).
+    const revealSec = Math.max(0, windowSec * (cumWords / total) - JCUT_SECONDS);
+    const tMs = Math.round(revealSec * 1000);
     const tag = `{\\alpha&HFF&\\t(${tMs},${tMs + FADE_IN_MS},\\alpha&H00&)}`;
     parts.push(tag + renderWord(atom));
     cumWords += atom.split(/\s+/).length; // атом-число може містити 2 токени
