@@ -140,7 +140,21 @@ export async function synthesizeVoiceover(
   outputPath,
   videoSeconds = DEFAULT_VIDEO_SECONDS,
   slideCount = null,
+  lines = null,
 ) {
+  // Якщо передано готові рядки слайдів (script.txt) — озвучуємо їх ЯК Є:
+  // один рядок = один слайд, голос = напис. Жодної генерації/переформулювання
+  // тексту (бот не «вигадує» озвучку, а читає рівно те, що у файлі).
+  if (Array.isArray(lines) && lines.length) {
+    try {
+      const groups = lines.map((l) => fixPronunciation(String(l).trim()));
+      const slideDurations = await synthesizeAligned(groups, outputPath);
+      return { voicePath: outputPath, slideDurations };
+    } catch (error) {
+      console.error(`Прив'язка до слайдів не вдалась (${error.message}); суцільна начитка.`);
+      text = lines.join(' ');
+    }
+  }
   text = fixPronunciation(text);
   const targetSeconds = videoSeconds - END_MARGIN;
   const sentences = slideCount ? splitSentences(text) : [];

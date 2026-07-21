@@ -28,29 +28,9 @@ export async function assembleVideo({ photoPaths, theme, script = null, withVoic
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'webvideo-'));
   const silentPath = path.join(workDir, 'silent.mp4');
 
-  // Озвучка ПЕРЕД монтажем: у режимі прив'язки вона повертає тривалості
-  // слайдів, під які монтується відео.
-  let voicePath = null;
-  let slideDurations = null;
-  if (withVoice) {
-    try {
-      const slideCount = photoPaths.length;
-      const videoSeconds = slideshowDuration(slideCount);
-      const narration = await generateNarration(theme, script, slideCount);
-      const result = await synthesizeVoiceover(
-        narration, path.join(workDir, 'voice.mp3'), videoSeconds, slideCount,
-      );
-      voicePath = result.voicePath;
-      slideDurations = result.slideDurations;
-    } catch (error) {
-      // Озвучка не критична — відео піде без звуку (та сама політика, що в боті).
-      console.error('Озвучка не вдалася, відео без звуку:', error.message);
-    }
-  }
-
-  // Підписи слайдів беремо зі script.txt (по рядку на слайд) — їх накладаємо
-  // поверх ЧИСТИХ картинок синхронно з озвучкою. Один рядок = один JPG; якщо
-  // кількість не збігається — краще зрозуміла помилка, ніж криве відео.
+  // Рядки script.txt (по рядку на слайд) — ЄДИНЕ джерело і тексту, і озвучки.
+  // Бот НЕ генерує/не переформульовує текст: голос читає САМЕ ці рядки, а вони
+  // ж накладаються субтитрами. Один рядок = один JPG; інакше зрозуміла помилка.
   let captionLines = null;
   if (script) {
     const lines = String(script).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -60,6 +40,34 @@ export async function assembleVideo({ photoPaths, theme, script = null, withVoic
       );
     }
     captionLines = lines;
+  }
+
+  // Озвучка ПЕРЕД монтажем: у режимі прив'язки повертає тривалості слайдів,
+  // під які монтується відео.
+  let voicePath = null;
+  let slideDurations = null;
+  if (withVoice) {
+    try {
+      const slideCount = photoPaths.length;
+      const videoSeconds = slideshowDuration(slideCount);
+      const voiceOut = path.join(workDir, 'voice.mp3');
+      let result;
+      if (captionLines) {
+        // Голос читає рядки файлу ЯК Є (без OpenAI-генерації тексту).
+        result = await synthesizeVoiceover(
+          captionLines.join(' '), voiceOut, videoSeconds, captionLines.length, captionLines,
+        );
+      } else {
+        // Легасі-фолбек (немає script.txt): начитка з теми.
+        const narration = await generateNarration(theme, null, slideCount);
+        result = await synthesizeVoiceover(narration, voiceOut, videoSeconds, slideCount);
+      }
+      voicePath = result.voicePath;
+      slideDurations = result.slideDurations;
+    } catch (error) {
+      // Озвучка не критична — відео піде без звуку (та сама політика, що в боті).
+      console.error('Озвучка не вдалася, відео без звуку:', error.message);
+    }
   }
 
   await buildSlideshow(photoPaths, silentPath, slideDurations ?? photoPaths.length, captionLines);
