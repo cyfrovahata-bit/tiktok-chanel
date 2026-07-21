@@ -9,6 +9,7 @@ import { mkdtemp, rename, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { slideOffsets, FADE_SECONDS, JCUT_SECONDS } from './montage.js';
+import { numbersToWords } from './num2words-uk.js';
 
 // Виклик передає РЕАЛЬНУ довжину відео (slideshowDuration під фактичну
 // кількість слайдів). Голос має закінчуватися за END_MARGIN секунд до кінця
@@ -100,7 +101,8 @@ function toSpeechCase(s) {
 }
 
 function fixPronunciation(text) {
-  let result = text;
+  // Спершу числа → слова (щоб ElevenLabs не читав цифри чужою мовою).
+  let result = numbersToWords(text);
   // Довші фрази — першими: інакше коротше правило встигне спрацювати
   // всередині слова, яке мало б зловити довше правило цілком.
   const sorted = [...PRONUNCIATION_FIXES].sort((a, b) => b[0].length - a[0].length);
