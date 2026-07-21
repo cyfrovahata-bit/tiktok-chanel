@@ -233,6 +233,12 @@ const server = http.createServer(async (req, res) => {
         googleError: g.error,
         serviceAccount: g.email || null,
         videoFolderSet: Boolean(videoFolderId()),
+        tts: {
+          engine: process.env.TTS_ENGINE || '(дефолт: openai)',
+          elevenVoice: process.env.TTS_ELEVEN_VOICE_ID || '(дефолт: Callum, англ.)',
+          elevenKey: Boolean(process.env.ELEVENLABS_API_KEY),
+          openaiKey: Boolean(process.env.OPENAI_API_KEY),
+        },
       });
     }
 
