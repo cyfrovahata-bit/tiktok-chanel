@@ -333,7 +333,9 @@ async function elevenLabsTts(text, outputPath, targetSeconds = DEFAULT_TARGET_SE
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) throw new Error('Не задано ELEVENLABS_API_KEY');
   const voiceId = process.env.TTS_ELEVEN_VOICE_ID || 'N2lVS1w4EtoT3dr4eOWO'; // Callum — характерний, не заїжджений
-  const modelId = process.env.TTS_ELEVEN_MODEL || 'eleven_v3';
+  // Дефолт — multilingual_v2: стабільніше тримає українську вимову (v3 у
+  // Creative-режимі на коротких рядках зісковзувала на «російський» акцент).
+  const modelId = process.env.TTS_ELEVEN_MODEL || 'eleven_multilingual_v2';
   const isV3 = modelId.startsWith('eleven_v3');
   const voiceSettings = isV3
     ? { stability: 0.0, use_speaker_boost: true } // 0.0 = Creative
