@@ -48,9 +48,12 @@ const WHITE = '&H00FFFFFF&';
 function escapeText(t) { return t.replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}'); }
 
 // Число — золотим; решта — білим (за ТЗ випадкові слова НЕ виділяємо).
+// Субтитри ЗАВЖДИ ВЕЛИКИМИ ЛІТЕРАМИ — незалежно від регістру у script.txt
+// (фірмовий стиль). Голос отримує нормальний регістр окремо (tts.js).
 function renderWord(word) {
-  if (hasDigit(word)) return `{\\c${GOLD}}${escapeText(word)}{\\c${WHITE}}`;
-  return escapeText(word);
+  const w = String(word).toUpperCase();
+  if (hasDigit(w)) return `{\\c${GOLD}}${escapeText(w)}{\\c${WHITE}}`;
+  return escapeText(w);
 }
 
 // Текст ASS-івенту одного слайда з появою по одному слову.
