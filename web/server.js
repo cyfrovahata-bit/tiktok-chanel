@@ -16,11 +16,13 @@ import { listDoneItems, listPublishedItems, markPublished } from '../src/sheets.
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
 import { startMonitor, pollOnce, forget } from '../src/monitor.js';
 import { startAutoPublisher } from '../src/autopublish.js';
-import { metaStatus } from '../src/meta.js';
+import { metaStatus, publishFacebookReel, publishInstagramReel } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
+const TEMP_META_TEST_ID = 'AUTO-20260722-0939';
+const tempMetaTest = { running: false, facebook: null, instagram: null };
 
 function json(res, code, body) {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
@@ -78,6 +80,65 @@ async function refreshCache() {
   ]);
   cache = { at: Date.now(), done, published, videos };
   return cache;
+}
+
+// Разовий тест Meta без будь-яких записів у Google Sheet або Drive.
+// Endpoint приймає лише підписаний Telegram initData від власника каналу,
+// матеріал жорстко зафіксований, а успішну платформу в межах поточного процесу
+// вдруге не публікуємо. Endpoint буде видалено одразу після перевірки.
+async function runTemporaryMetaTest() {
+  if (tempMetaTest.running) return { status: 'running', ...tempMetaTest };
+  if (tempMetaTest.facebook?.status === 'published'
+      && tempMetaTest.instagram?.status === 'published') {
+    return { status: 'already-published', ...tempMetaTest };
+  }
+
+  tempMetaTest.running = true;
+  try {
+    const c = await refreshCache();
+    const item = c.done.find((candidate) => candidate.id === TEMP_META_TEST_ID);
+    if (!item) throw new Error(`Матеріал ${TEMP_META_TEST_ID} не знайдено серед DONE`);
+    if (!c.videos.has(videoName(TEMP_META_TEST_ID))) {
+      throw new Error(`Відео ${videoName(TEMP_META_TEST_ID)} не знайдено`);
+    }
+
+    const publicBase = (process.env.PUBLIC_URL
+      || 'https://tiktok-chanel-production.up.railway.app').replace(/\/$/, '');
+    const videoUrl = `${publicBase}/api/video/${encodeURIComponent(TEMP_META_TEST_ID)}`;
+    const caption = String(item.description || item.title || '');
+    const platforms = [
+      {
+        key: 'facebook',
+        run: () => publishFacebookReel({ videoUrl, description: caption }),
+      },
+      {
+        key: 'instagram',
+        run: () => publishInstagramReel({ videoUrl, caption }),
+      },
+    ];
+
+    for (const platform of platforms) {
+      if (tempMetaTest[platform.key]?.status === 'published') continue;
+      try {
+        const result = await platform.run();
+        tempMetaTest[platform.key] = { status: 'published', id: result.id };
+      } catch (error) {
+        tempMetaTest[platform.key] = { status: 'error', detail: error.message };
+      }
+    }
+
+    const published = platforms.filter(
+      (platform) => tempMetaTest[platform.key]?.status === 'published',
+    ).length;
+    return {
+      status: published === platforms.length ? 'published' : 'partial-error',
+      itemId: TEMP_META_TEST_ID,
+      facebook: tempMetaTest.facebook,
+      instagram: tempMetaTest.instagram,
+    };
+  } finally {
+    tempMetaTest.running = false;
+  }
 }
 
 // Готові до публікації: DONE-рядки, для яких у Drive вже є відео.
@@ -157,6 +218,15 @@ const server = http.createServer(async (req, res) => {
       const id = decodeURIComponent(pathname.slice('/api/video/'.length));
       await serveVideo(req, res, id, url.searchParams.get('download') === '1');
       return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/meta-test') {
+      const { initData } = JSON.parse(await readBody(req));
+      const check = verifyInitData(initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Тест може запустити лише власник каналу' });
+      const result = await runTemporaryMetaTest();
+      return json(res, result.status === 'running' ? 409 : 200, result);
     }
 
     // Публікація: перевіряємо підпис, ставимо PUBLISHED у таблиці.
