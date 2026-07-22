@@ -1,4 +1,6 @@
 // Автопублікація готових відео о 10:00 та 18:00 за Europe/Kyiv.
+// О 10:00 виходить матеріал із попереднього вечора, о 18:00 — із поточного
+// ранку. Так між генерацією та публікацією лишається час на ручні правки.
 // Таблицю не змінює: слот, ID постів і захист від дублів зберігаються в
 // appProperties самого MP4 на Google Drive.
 import { readAllItems, isReady } from './sheets.js';
@@ -23,12 +25,49 @@ function kyivParts(now = new Date()) {
   };
 }
 
+function shiftIsoDate(date, days) {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+// Автоматизація створює ID на кшталт AUTO-20260722-0930. Саме ID, а не
+// позиція рядка в таблиці, однозначно визначає, коли матеріал згенеровано.
+export function generationSlotForItem(item) {
+  const match = String(item?.id || '').match(
+    /^AUTO-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(?:$|[-_])/i,
+  );
+  if (!match) return null;
+
+  const [, year, month, day, hourText, minuteText] = match;
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  if (hour > 23 || minute > 59) return null;
+
+  const date = `${year}-${month}-${day}`;
+  const parsed = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return null;
+  return `${date}-${hour < 12 ? 'am' : 'pm'}`;
+}
+
 // Даємо дві години на випадок, якщо генерація або монтаж трохи затримались.
 // У межах вікна слот той самий, тож повторного поста не буде.
 export function currentPublishSlot(now = new Date()) {
   const { date, hour } = kyivParts(now);
-  if (hour === 10 || hour === 11) return { key: `${date}-am`, label: '10:00' };
-  if (hour === 18 || hour === 19) return { key: `${date}-pm`, label: '18:00' };
+  if (hour === 10 || hour === 11) {
+    return {
+      key: `${date}-am`,
+      label: '10:00',
+      generationSlot: `${shiftIsoDate(date, -1)}-pm`,
+    };
+  }
+  if (hour === 18 || hour === 19) {
+    return {
+      key: `${date}-pm`,
+      label: '18:00',
+      generationSlot: `${date}-am`,
+    };
+  }
   return null;
 }
 
@@ -89,8 +128,10 @@ export async function runAutoPublishOnce({
   let item = file ? findItemForFile(items, file) : null;
 
   if (!file) {
-    // Найновіший готовий рядок без раніше призначеного автопостинг-слота.
-    // Враховуємо також marker-файли, які лишаються після перегенерації.
+    // Беремо лише матеріал із потрібного генераційного слота: о 10:00 — з
+    // попереднього вечора, о 18:00 — з поточного ранку. Якщо його немає,
+    // чекаємо й не підміняємо свіжішим постом. Враховуємо також marker-файли,
+    // які лишаються після перегенерації.
     const claimedItemIds = new Set(
       [...files.values()]
         .map((candidateFile) => candidateFile.appProperties?.autoPostItemId)
@@ -98,6 +139,7 @@ export async function runAutoPublishOnce({
     );
     const candidates = items
       .filter(isReady)
+      .filter((candidate) => generationSlotForItem(candidate) === slot.generationSlot)
       .map((candidate) => ({ item: candidate, file: files.get(videoName(candidate.id)) }))
       .filter(({ item: candidate, file: candidateFile }) => (
         candidateFile
