@@ -15,6 +15,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished } from '../src/sheets.js';
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
 import { startMonitor, pollOnce, forget } from '../src/monitor.js';
+import { startAutoPublisher } from '../src/autopublish.js';
+import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -239,6 +241,11 @@ const server = http.createServer(async (req, res) => {
           elevenKey: Boolean(process.env.ELEVENLABS_API_KEY),
           openaiKey: Boolean(process.env.OPENAI_API_KEY),
         },
+        meta: {
+          ...metaStatus(),
+          schedule: ['10:00', '18:00'],
+          timeZone: 'Europe/Kyiv',
+        },
       });
     }
 
@@ -254,6 +261,7 @@ if (process.env.ENABLE_WEB === '1' && import.meta.url === pathToFileURL(process.
   server.listen(PORT, () => console.log(`Мінідодаток на порті ${PORT}`));
   if (googleConfigured()) {
     startMonitor();
+    startAutoPublisher();
   } else {
     console.warn('GOOGLE_SERVICE_ACCOUNT_JSON не задано — монітор черги вимкнено (немає доступу до таблиці).');
   }

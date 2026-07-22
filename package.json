@@ -11,7 +11,8 @@
     "start": "node web/server.js",
     "web": "node web/server.js",
     "themes": "node src/themes.js",
-    "check": "node src/check.js"
+    "check": "node src/check.js",
+    "test": "node --test"
   },
   "dependencies": {
     "googleapis": "^140.0.1"

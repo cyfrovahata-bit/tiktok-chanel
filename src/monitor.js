@@ -20,11 +20,10 @@ import { extractPhotoArchive } from './archive.js';
 import { assembleVideo } from './pipeline.js';
 import { sendMessage, ownerChatId } from './telegram.js';
 
-// Розумний розклад: часто у «вікнах» появи тем (ChatGPT пише ~09:50 і ~17:50
-// Київ), рідко — решту доби. Так менше зайвих звернень до Google API, а
-// результат той самий.
-const FAST_MS = Number(process.env.POLL_FAST_MS) || 5 * 60 * 1000;   // у вікні
-const SLOW_MS = Number(process.env.POLL_SLOW_MS) || 30 * 60 * 1000;  // поза вікном
+// ChatGPT стартує о 08:00 і 16:00 (Київ). Часто перевіряємо Drive вже трохи
+// до цих запусків і до часу автопублікації; поза вікнами — рідше.
+const FAST_MS = Number(process.env.POLL_FAST_MS) || 2 * 60 * 1000;   // у вікні
+const SLOW_MS = Number(process.env.POLL_SLOW_MS) || 15 * 60 * 1000;  // поза вікном
 const MAX_ATTEMPTS = 3;
 
 // Хвилини від початку доби за київським часом.
@@ -37,11 +36,11 @@ function kyivMinuteOfDay(now = new Date()) {
   return h * 60 + m;
 }
 
-// Активні вікна: ранкове 09:30–11:30 і вечірнє 17:30–19:30 (Київ) — трохи
-// ширші за час запуску ChatGPT, бо генерація може затриматись.
-function inActiveWindow(now = new Date()) {
+// Активні вікна: 07:45–10:30 і 15:45–18:30. Стартуємо перевірку за 15 хв
+// до генерації; після 10:00/18:00 лишаємо запас для затриманого архіву.
+export function inActiveWindow(now = new Date()) {
   const m = kyivMinuteOfDay(now);
-  return (m >= 9 * 60 + 30 && m <= 11 * 60 + 30) || (m >= 17 * 60 + 30 && m <= 19 * 60 + 30);
+  return (m >= 7 * 60 + 45 && m <= 10 * 60 + 30) || (m >= 15 * 60 + 45 && m <= 18 * 60 + 30);
 }
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://tiktok-chanel-production.up.railway.app').replace(/\/$/, '');
 

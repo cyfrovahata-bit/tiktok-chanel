@@ -1,9 +1,6 @@
-// Публікація відео по платформах — ПОКИ ЗАГЛУШКИ (чернетка).
-// Кожна платформа вмикається окремим флагом у міру проходження модерації
-// й підключення API. Поки флаг не заданий — publish() повертає статус
-// «не підключено», нічого нікуди не надсилаючи. Реальні виклики API
-// (TikTok Content Posting, Meta Graph, YouTube Data) додаються сюди
-// пізніше, коли будуть ключі — решта коду (веб-панель) уже готова їх звати.
+// Єдина точка публікації по платформах. Facebook та Instagram реалізовані
+// через Meta Graph API; TikTok і YouTube навмисно лишаються ручними.
+import { publishFacebookReel, publishInstagramReel } from './meta.js';
 
 // name — людська назва; flag — змінна середовища, що вмикає платформу;
 // коли реальний код з'явиться, він живе у полі publish кожного запису.
@@ -39,9 +36,33 @@ export async function publish(platform, payload) {
     };
   }
 
-  // TODO: реальний виклик API платформи. Навмисно не імітуємо успіх, поки
-  // код відсутній, щоб випадково не вважати відео опублікованим.
-  throw new Error(`${meta.name}: інтеграцію API ще не реалізовано`);
+  const caption = String(payload.description || payload.title || '');
+  if (platform === 'facebook') {
+    const result = await publishFacebookReel({
+      videoUrl: payload.videoUrl,
+      description: caption,
+    });
+    return {
+      platform,
+      status: 'published',
+      id: result.id,
+      detail: `Facebook Reel ${result.id}`,
+    };
+  }
+  if (platform === 'instagram') {
+    const result = await publishInstagramReel({
+      videoUrl: payload.videoUrl,
+      caption,
+    });
+    return {
+      platform,
+      status: 'published',
+      id: result.id,
+      detail: `Instagram Reel ${result.id}`,
+    };
+  }
+
+  throw new Error(`${meta.name}: лишено для ручної публікації`);
 }
 
 // Публікує на всі увімкнені платформи; вимкнені акуратно пропускаються.
