@@ -92,20 +92,34 @@ function queueFrom(c) {
       description: it.description,
       theme: it.theme,
       videoUrl: `/api/video/${encodeURIComponent(it.id)}`,
+      downloadUrl: `/api/video/${encodeURIComponent(it.id)}?download=1`,
+      fileName: videoName(it.id),
     }));
 }
 
+// Telegram Mini Apps downloadFile() вимагає Content-Disposition та CORS для
+// web.telegram.org. Для звичайного прев'ю ці заголовки не додаємо, щоб відео
+// й далі відтворювалося вбудованим <video>.
+function videoResponseHeaders(id, upstreamHeaders = {}, asAttachment = false) {
+  const headers = { 'content-type': 'video/mp4', 'accept-ranges': 'bytes' };
+  if (upstreamHeaders['content-length']) headers['content-length'] = upstreamHeaders['content-length'];
+  if (upstreamHeaders['content-range']) headers['content-range'] = upstreamHeaders['content-range'];
+  if (asAttachment) {
+    headers['content-disposition'] = `attachment; filename="${videoName(id)}"`;
+    headers['access-control-allow-origin'] = 'https://web.telegram.org';
+  }
+  return headers;
+}
+
 // Стрім відео з Drive (з підтримкою Range для перемотки).
-async function serveVideo(req, res, id) {
+async function serveVideo(req, res, id, asAttachment = false) {
   const c = await refreshCache();
   const fileId = c.videos.get(videoName(id));
   if (!fileId) return json(res, 404, { error: 'відео не знайдено' });
   try {
     const range = req.headers.range;
     const r = await streamVideo(fileId, range);
-    const headers = { 'content-type': 'video/mp4', 'accept-ranges': 'bytes' };
-    if (r.headers['content-length']) headers['content-length'] = r.headers['content-length'];
-    if (r.headers['content-range']) headers['content-range'] = r.headers['content-range'];
+    const headers = videoResponseHeaders(id, r.headers, asAttachment);
     res.writeHead(range && r.headers['content-range'] ? 206 : 200, headers);
     r.stream.pipe(res);
     r.stream.on('error', () => res.destroyed || res.end());
@@ -141,7 +155,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && pathname.startsWith('/api/video/')) {
       const id = decodeURIComponent(pathname.slice('/api/video/'.length));
-      await serveVideo(req, res, id);
+      await serveVideo(req, res, id, url.searchParams.get('download') === '1');
       return;
     }
 
@@ -269,4 +283,4 @@ if (process.env.ENABLE_WEB === '1' && import.meta.url === pathToFileURL(process.
   console.log('Веб-панель вимкнена. Запусти з ENABLE_WEB=1, щоб увімкнути.');
 }
 
-export { server, verifyInitData };
+export { server, verifyInitData, videoResponseHeaders };

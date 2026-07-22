@@ -194,6 +194,39 @@
       return box;
     }
 
+    // Bot API 8.0+ має нативне завантаження файлів у Mini App. На старіших
+    // версіях Telegram відкриваємо attachment-посилання у зовнішньому браузері.
+    function downloadVideo(item) {
+      const fileName = item.fileName || `${String(item.id).replace(/[^A-Za-z0-9_.-]/g, '_')}.mp4`;
+      const relativeUrl = item.downloadUrl || `${item.videoUrl}${item.videoUrl.includes('?') ? '&' : '?'}download=1`;
+      const url = new URL(relativeUrl, window.location.href).href;
+      haptic('light');
+
+      const nativeDownloadSupported = tg?.downloadFile
+        && (!tg.isVersionAtLeast || tg.isVersionAtLeast('8.0'));
+      if (nativeDownloadSupported) {
+        try {
+          tg.downloadFile({ url, file_name: fileName }, (accepted) => {
+            toast(accepted ? 'Завантаження розпочато' : 'Завантаження скасовано');
+          });
+          return;
+        } catch (error) {
+          console.warn('Telegram downloadFile не спрацював, відкриваю браузер:', error);
+        }
+      }
+
+      if (tg?.openLink) {
+        tg.openLink(url);
+        toast('Відкриваю завантаження…');
+        return;
+      }
+
+      const link = document.createElement('a');
+      link.href = url; link.download = fileName; link.rel = 'noopener';
+      document.body.appendChild(link); link.click(); link.remove();
+      toast('Завантаження розпочато');
+    }
+
     // Які картки розгорнуті (за id) — зберігається між оновленнями списку.
     const expanded = new Set();
     let expandInit = false;
@@ -219,7 +252,8 @@
       body.appendChild(copyable({ label: 'Назва', icon: '📌', main: item.title }));
       body.appendChild(copyable({ label: 'Опис + хештеги', icon: '📝', main: item.description, isDesc: true }));
       const actions = el('div', 'actions');
-      const dl = el('a', 'btn secondary', '⬇️ Відео'); dl.href = item.videoUrl; dl.download = `${item.id}.mp4`;
+      const dl = el('button', 'btn secondary', '⬇️ Відео');
+      dl.addEventListener('click', (e) => { e.stopPropagation(); downloadVideo(item); });
       const regen = el('button', 'btn secondary', '🔄'); regen.title = 'Перегенерувати'; regen.style.flex = '0 0 auto';
       regen.addEventListener('click', (e) => { e.stopPropagation(); regenerate(item, card, regen); });
       const pub = el('button', 'btn primary', '✅ Опубліковано');
