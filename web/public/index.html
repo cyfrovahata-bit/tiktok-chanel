@@ -260,13 +260,6 @@
       pub.addEventListener('click', (e) => { e.stopPropagation(); publish(item, card, pub); });
       actions.appendChild(dl); actions.appendChild(regen); actions.appendChild(pub);
       body.appendChild(actions);
-      if (item.id === 'AUTO-20260722-0939') {
-        const metaTest = el('button', 'btn primary', '🧪 Тест у Facebook та Instagram');
-        metaTest.style.width = '100%';
-        metaTest.style.marginTop = '10px';
-        metaTest.addEventListener('click', (e) => { e.stopPropagation(); testMeta(metaTest); });
-        body.appendChild(metaTest);
-      }
       wrap.appendChild(body);
       card.appendChild(wrap);
 
@@ -294,37 +287,6 @@
         setTimeout(load, 900);
       } catch (e) {
         btn.disabled = false; btn.className = 'btn primary'; btn.textContent = '✅ Опубліковано';
-        notify('error'); toast(e.message);
-      }
-    }
-
-    async function testMeta(btn) {
-      if (!initData) { toast('Відкрий через Telegram'); return; }
-      if (!(await askConfirm('Опублікувати ранковий ролик як тест у Facebook та Instagram? У таблиці й Drive нічого не буде позначено.'))) return;
-      btn.disabled = true; btn.textContent = 'Публікую… це може тривати кілька хвилин';
-      try {
-        const r = await fetch('/api/meta-test', {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ initData }),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || 'Помилка');
-        const facebook = data.facebook?.status === 'published'
-          ? `Facebook: опубліковано (${data.facebook.id})`
-          : `Facebook: ${data.facebook?.detail || 'помилка'}`;
-        const instagram = data.instagram?.status === 'published'
-          ? `Instagram: опубліковано (${data.instagram.id})`
-          : `Instagram: ${data.instagram?.detail || 'помилка'}`;
-        const complete = data.facebook?.status === 'published'
-          && data.instagram?.status === 'published';
-        btn.disabled = complete;
-        btn.className = complete ? 'btn done' : 'btn primary';
-        btn.textContent = complete ? '✓ Тест опубліковано' : '🧪 Повторити невдалу платформу';
-        notify(complete ? 'success' : 'error');
-        const message = `${facebook}\n${instagram}`;
-        if (tg?.showAlert) tg.showAlert(message); else alert(message);
-      } catch (e) {
-        btn.disabled = false; btn.textContent = '🧪 Тест у Facebook та Instagram';
         notify('error'); toast(e.message);
       }
     }
