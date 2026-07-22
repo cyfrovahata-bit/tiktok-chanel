@@ -62,7 +62,16 @@ export function numberToUkrainian(num) {
 // тисяч («15 000», включно з нерозривним пробілом). Числа, зліплені з
 // літерами («3D», «COVID19»), НЕ чіпає.
 export function numbersToWords(text) {
-  return String(text).replace(
+  // Рік потребує порядкового відмінка, а не звичайного кількісного
+  // числівника. Без цього «у 2000 році» ставало «у дві тисячі році», що
+  // ElevenLabs вимовляв неприродно й інколи повторював останнє слово.
+  // Це лише TTS-нормалізація: напис «У 2000 РОЦІ» на слайді не змінюється.
+  const withYearForms = String(text).replace(
+    /(?<!\p{L})([ув])\s+2000\s+році(?!\p{L})/giu,
+    (_match, preposition) => `${preposition} двох тисячному році`,
+  );
+
+  return withYearForms.replace(
     /(?<![\p{L}\d])(\d{1,3}(?:[  ]\d{3})+|\d+)(?![\p{L}\d])/gu,
     (m) => numberToUkrainian(m.replace(/[  ]/g, '')),
   );
