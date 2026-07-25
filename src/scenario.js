@@ -7,8 +7,38 @@
 // позначається як неперевірений (verified: false).
 import { readFile } from 'node:fs/promises';
 
-const SEARCH_MODEL = process.env.OPENAI_SCENARIO_MODEL || 'gpt-5.6';
 const PLAIN_MODEL = process.env.OPENAI_FALLBACK_MODEL || 'gpt-4o-mini';
+
+// Модель для веб-пошуку обираємо АВТОМАТИЧНО зі списку доступних акаунту
+// (нічого налаштовувати вручну не треба). Змінна OPENAI_SCENARIO_MODEL, якщо
+// задана, має пріоритет. Результат кешується на час життя процесу:
+// null — ще не питали, '' — придатної моделі немає.
+let resolvedModel = null;
+
+// Не-текстові й службові варіанти, які не годяться для сценарію.
+const NOT_CHAT = /(audio|realtime|image|embedding|transcribe|tts|moderation|codex|search-preview|instruct)/;
+
+async function pickSearchModel() {
+  if (process.env.OPENAI_SCENARIO_MODEL) return process.env.OPENAI_SCENARIO_MODEL;
+  if (resolvedModel !== null) return resolvedModel;
+  try {
+    const r = await fetch('https://api.openai.com/v1/models', {
+      headers: { authorization: `Bearer ${apiKey()}` },
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const ids = ((await r.json()).data || []).map((m) => m.id);
+    const gpt5 = ids.filter((id) => /^gpt-5/.test(id) && !NOT_CHAT.test(id));
+    // Спершу «повні» моделі (без mini/nano), новіші вперед.
+    const full = gpt5.filter((id) => !/(mini|nano)/.test(id)).sort().reverse();
+    const small = gpt5.filter((id) => /(mini|nano)/.test(id)).sort().reverse();
+    resolvedModel = full[0] || small[0] || '';
+    console.log(`[scenario] модель для веб-пошуку: ${resolvedModel || 'немає — працюю без перевірки фактів'}`);
+  } catch (error) {
+    console.error('[scenario] не вдалося отримати список моделей:', error.message);
+    resolvedModel = '';
+  }
+  return resolvedModel;
+}
 
 function apiKey() {
   const key = process.env.OPENAI_API_KEY;
@@ -39,22 +69,25 @@ function responseText(data) {
 
 // Головний виклик: спершу з веб-пошуком, при невдачі — звичайний чат.
 async function askModel(prompt) {
-  try {
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${apiKey()}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: SEARCH_MODEL,
-        tools: [{ type: 'web_search' }],
-        input: prompt,
-      }),
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status} ${(await response.text()).slice(0, 200)}`);
-    const text = responseText(await response.json());
-    if (!text.trim()) throw new Error('порожня відповідь');
-    return { data: parseJsonLoose(text), verified: true };
-  } catch (error) {
-    console.error(`[scenario] веб-пошук недоступний (${error.message}); працюю без перевірки фактів`);
+  const searchModel = await pickSearchModel();
+  if (searchModel) {
+    try {
+      const response = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${apiKey()}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: searchModel,
+          tools: [{ type: 'web_search' }],
+          input: prompt,
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status} ${(await response.text()).slice(0, 200)}`);
+      const text = responseText(await response.json());
+      if (!text.trim()) throw new Error('порожня відповідь');
+      return { data: parseJsonLoose(text), verified: true };
+    } catch (error) {
+      console.error(`[scenario] веб-пошук не вдався (${error.message}); працюю без перевірки фактів`);
+    }
   }
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
