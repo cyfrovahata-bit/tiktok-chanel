@@ -56,9 +56,17 @@ function renderWord(word) {
   return escapeText(w);
 }
 
+// Прибирає крапку (і три крапки) в кінці рядка — на слайді вона зайва.
+// Знак питання й оклику лишаємо: вони несуть інтонацію напису.
+// Увага: це стосується ЛИШЕ субтитрів. Для озвучки крапка потрібна —
+// за нею ElevenLabs дає спадну інтонацію завершеного речення.
+function stripTrailingDot(line) {
+  return String(line).trim().replace(/[.…]+$/u, '').trim();
+}
+
 // Текст ASS-івенту одного слайда з появою по одному слову.
 function slideText(line, isFirst, windowSec) {
-  const words = line.trim().split(/\s+/).filter(Boolean);
+  const words = stripTrailingDot(line).split(/\s+/).filter(Boolean);
   // Слайд 1 — увесь гачок одразу, без анімації.
   if (isFirst) return `{\\alpha&H00&}${words.map(renderWord).join(' ')}`;
 
