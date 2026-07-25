@@ -67,9 +67,11 @@ function responseText(data) {
   return parts.join('\n');
 }
 
-// Головний виклик: спершу з веб-пошуком, при невдачі — звичайний чат.
-async function askModel(prompt) {
-  const searchModel = await pickSearchModel();
+// Головний виклик: за потреби з веб-пошуком, інакше (або при невдачі) —
+// звичайний дешевий чат. search=false економить ~половину вартості там, де
+// перевіряти факти не треба (стилістичні правки).
+async function askModel(prompt, { search = true } = {}) {
+  const searchModel = search ? await pickSearchModel() : '';
   if (searchModel) {
     try {
       const response = await fetch('https://api.openai.com/v1/responses', {
@@ -77,7 +79,9 @@ async function askModel(prompt) {
         headers: { authorization: `Bearer ${apiKey()}`, 'content-type': 'application/json' },
         body: JSON.stringify({
           model: searchModel,
-          tools: [{ type: 'web_search' }],
+          // low — менше тексту зі знайдених сторінок у контексті: дешевше,
+          // а факт усе одно звіряється за джерелами.
+          tools: [{ type: 'web_search', search_context_size: 'low' }],
           input: prompt,
         }),
       });
@@ -331,8 +335,16 @@ ${SHAPE}`);
   return { ...parseResult(data), verified };
 }
 
-// Правка наявного сценарію за зауваженнями власника.
+// Слова, які натякають, що зауваження стосується ФАКТІВ, а не стилю. Лише в
+// такому разі платимо за повторний веб-пошук.
+const FACT_HINTS = /(факт|невірн|не вірн|неправ|не прав|помилк|брехн|насправді|перевір|джерел|дат[аиуе]|рік|року|роц|цифр|числ|точн|застар|сумнівн|вигадан)/i;
+
+// Правка наявного сценарію за зауваженнями власника. Стилістичні правки
+// («гачок гострішим») ідуть без веб-пошуку — це вдвічі дешевше; перевірка
+// вмикається, лише коли зауваження про факти.
 export async function reviseScenario(draft, notes) {
+  const needSearch = FACT_HINTS.test(notes);
+  console.log(`[scenario] правка ${needSearch ? 'З веб-перевіркою' : 'без пошуку (стиль)'}`);
   const { data, verified } = await askModel(`${RULES}
 
 Ось наявний сценарій:
@@ -344,8 +356,13 @@ ${notes}
 
 Якщо зауваження стосуються фактів — перевір їх веб-пошуком заново.
 
-${SHAPE}`);
-  return { ...parseResult(data, draft.theme), verified };
+${SHAPE}`, { search: needSearch });
+  // Без пошуку статус перевірки НЕ погіршуємо: факти вже були звірені при
+  // створенні теми, а правка стосувалась лише формулювань.
+  return {
+    ...parseResult(data, draft.theme),
+    verified: needSearch ? verified : (draft.verified ?? false),
+  };
 }
 
 // Промт для ChatGPT: затверджений сценарій + візуальний контекст. ChatGPT лише
