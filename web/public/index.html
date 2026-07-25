@@ -124,6 +124,19 @@
     .published-item .pi-title { font-size: 14px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .published-item .pi-date { font-size: 12px; color: var(--muted); }
 
+    /* Чернетка сценарію (тема на перевірку) */
+    .draft { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 15px; margin-bottom: 14px; box-shadow: var(--shadow); }
+    .draft .theme { font-size: 17px; font-weight: 700; line-height: 1.35; margin-bottom: 10px; }
+    .slide-row { border-top: 1px solid var(--border); padding: 10px 0; }
+    .slide-row .num { font-size: 11px; color: var(--muted); letter-spacing: .5px; }
+    .slide-row .stext { font-size: 15px; font-weight: 650; margin: 3px 0 4px; }
+    .slide-row .simg { font-size: 13px; color: var(--muted); line-height: 1.45; }
+    .notes { width: 100%; margin-top: 12px; padding: 11px 12px; font: inherit; font-size: 14.5px;
+      color: var(--text); background: color-mix(in srgb, var(--bg) 45%, var(--surface));
+      border: 1px solid var(--border); border-radius: 12px; resize: vertical; min-height: 72px; }
+    .notes::placeholder { color: var(--muted); }
+    .draft .actions { margin-top: 11px; flex-wrap: wrap; }
+
     .empty { text-align: center; color: var(--muted); padding: 34px 20px; }
     .empty .big { font-size: 34px; margin-bottom: 10px; }
     .skeleton { height: 220px; border-radius: var(--radius); background: linear-gradient(100deg, var(--surface) 30%, color-mix(in srgb, var(--muted) 12%, var(--surface)) 50%, var(--surface) 70%); background-size: 200% 100%; animation: sh 1.3s infinite; margin-bottom: 16px; }
@@ -321,11 +334,76 @@
       return row;
     }
 
+    // --- Чернетки сценаріїв (теми на перевірку) -----------------------------
+    const slotName = (s) => (s === 'pm' ? 'вечірня' : 'ранкова');
+
+    async function draftAction(action, payload, btn, okMsg) {
+      if (!initData) { toast('Відкрий через Telegram'); return null; }
+      const old = btn.textContent; btn.disabled = true; btn.textContent = '…';
+      try {
+        const r = await fetch(`/api/draft/${action}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...payload, initData }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Помилка');
+        notify('success'); if (okMsg) toast(okMsg);
+        return data;
+      } catch (e) { notify('error'); toast(e.message); return null; }
+      finally { btn.disabled = false; btn.textContent = old; }
+    }
+
+    function draftCard(draft) {
+      const box = el('div', 'draft');
+      box.appendChild(el('div', 'kicker', `${slotName(draft.slot).toUpperCase()} · ${esc(draft.date || '')}`));
+      box.appendChild(el('div', 'theme', esc(draft.theme)));
+      (draft.slides || []).forEach((s, i) => {
+        const row = el('div', 'slide-row');
+        row.appendChild(el('div', 'num', `СЛАЙД ${i + 1}`));
+        row.appendChild(el('div', 'stext', esc(s.text)));
+        if (s.image) row.appendChild(el('div', 'simg', `🎨 ${esc(s.image)}`));
+        box.appendChild(row);
+      });
+
+      const notes = el('textarea', 'notes');
+      notes.placeholder = 'Що поправити? Напр.: «гачок гострішим», «прибери 3-й слайд», «більше про Україну»…';
+      box.appendChild(notes);
+
+      const key = draft.key;
+      const actions = el('div', 'actions');
+      const edit = el('button', 'btn secondary', '✏️ Редагувати');
+      edit.addEventListener('click', async () => {
+        const text = notes.value.trim();
+        if (!text) { toast('Спершу напиши зауваження'); notes.focus(); return; }
+        if (await draftAction('edit', { key, notes: text }, edit, 'Сценарій оновлено')) load();
+      });
+      const regen = el('button', 'btn secondary', '🔄 Інша тема');
+      regen.addEventListener('click', async () => {
+        if (!(await askConfirm('Згенерувати зовсім нову тему? Поточна чернетка зникне.'))) return;
+        if (await draftAction('regenerate', { key }, regen, 'Нова тема готова')) load();
+      });
+      const ok = el('button', 'btn primary', '✅ ОК — у роботу');
+      ok.addEventListener('click', async () => {
+        if (!(await askConfirm('Затвердити сценарій? Рядок ляже в таблицю — ChatGPT намалює фото.'))) return;
+        if (await draftAction('approve', { key }, ok, 'Готово — рядок у таблиці')) load();
+      });
+      actions.appendChild(edit); actions.appendChild(regen); actions.appendChild(ok);
+      box.appendChild(actions);
+      return box;
+    }
+
     function render(state) {
       const app = $('#app'); app.innerHTML = '';
       const banner = $('#banner'); banner.innerHTML = '';
       if (!state.googleReady) banner.appendChild(el('div', 'banner', '⚙️ Google-доступ ще не налаштовано на сервері — черга поки порожня.'));
       else if (state.videoFolderSet === false) banner.appendChild(el('div', 'banner', '⚙️ Не задано папку Drive для відео (VIDEO_FOLDER_ID) — монтаж вимкнено.'));
+
+      // Чернетки сценаріїв — угорі, поки не затверджені.
+      const drafts = (state.drafts || []).filter((d) => d.slides && d.slides.length);
+      if (drafts.length) {
+        app.appendChild(el('h2', 'section', drafts.length > 1 ? 'Теми на перевірку' : 'Тема на перевірку'));
+        drafts.forEach((d) => app.appendChild(draftCard(d)));
+      }
 
       const q = state.queue || [];
       $('#count').textContent = q.length ? `${q.length} до публікації` : '';
@@ -348,8 +426,11 @@
 
     async function load() {
       try {
-        const r = await fetch('/api/state');
-        render(await r.json());
+        const [state, draftRes] = await Promise.all([
+          fetch('/api/state').then((r) => r.json()),
+          fetch('/api/draft').then((r) => r.json()).catch(() => ({ drafts: [] })),
+        ]);
+        render({ ...state, drafts: draftRes.drafts || [] });
       } catch (e) {
         $('#app').innerHTML = `<div class="empty"><div class="big">⚠️</div>Не вдалося завантажити.<br>${esc(e.message)}</div>`;
       }

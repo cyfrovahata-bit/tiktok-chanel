@@ -14,7 +14,9 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished } from '../src/sheets.js';
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
-import { startMonitor, pollOnce, forget } from '../src/monitor.js';
+import { startMonitor, pollOnce, forget, ensureDailyDraft } from '../src/monitor.js';
+import { pendingDrafts, findDraft, upsertDraft, approveDraft } from '../src/drafts.js';
+import { reviseScenario } from '../src/scenario.js';
 import { startAutoPublisher } from '../src/autopublish.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
@@ -157,6 +159,45 @@ const server = http.createServer(async (req, res) => {
       const id = decodeURIComponent(pathname.slice('/api/video/'.length));
       await serveVideo(req, res, id, url.searchParams.get('download') === '1');
       return;
+    }
+
+    // --- Чернетки сценаріїв (теми на перевірку) -----------------------------
+    if (req.method === 'GET' && pathname === '/api/draft') {
+      const drafts = await pendingDrafts().catch(() => []);
+      return json(res, 200, { drafts });
+    }
+
+    // regenerate (інша тема) | edit (за зауваженнями) | approve (ОК → рядок у таблиці)
+    if (req.method === 'POST' && pathname.startsWith('/api/draft/')) {
+      const action = pathname.slice('/api/draft/'.length);
+      const body = JSON.parse(await readBody(req));
+      const check = verifyInitData(body.initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Доступ лише власнику каналу' });
+      try {
+        const current = body.key ? await findDraft(body.key) : null;
+        if (action === 'regenerate') {
+          const draft = await ensureDailyDraft(true, current?.slot ?? null);
+          return json(res, 200, { draft });
+        }
+        if (action === 'edit') {
+          const notes = String(body.notes || '').trim();
+          if (!notes) return json(res, 400, { error: 'Порожні зауваження' });
+          if (!current) return json(res, 404, { error: 'Чернетки немає' });
+          const revised = await reviseScenario(current, notes);
+          const draft = { ...current, ...revised, status: 'pending', notes, updatedAt: new Date().toISOString() };
+          await upsertDraft(draft);
+          return json(res, 200, { draft });
+        }
+        if (action === 'approve') {
+          if (!current) return json(res, 404, { error: 'Чернетки немає' });
+          const result = await approveDraft(current);
+          return json(res, 200, { ok: true, id: result.id, slides: result.slides });
+        }
+        return json(res, 404, { error: 'not found' });
+      } catch (error) {
+        return json(res, 400, { error: error.message });
+      }
     }
 
     // Публікація: перевіряємо підпис, ставимо PUBLISHED у таблиці.

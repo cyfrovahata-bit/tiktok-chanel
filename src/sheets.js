@@ -112,6 +112,35 @@ export async function markPublished(id, when = new Date()) {
   return { rowNumber: item.rowNumber, date };
 }
 
+// Додає рядок у чергу зі статусом NEW і готовим промтом у колонці
+// «Додаткові вказівки» (G). ChatGPT за відкладеним завданням бере саме цей
+// рядок: малює фото за промтом, пакує архів, заповнює H/M/N і ставить DONE.
+export async function appendQueueRow({ id, category = '', theme, slides, prompt, note = '' }) {
+  const created = formatKyivDateTime(new Date());
+  const row = [
+    id, category, theme, '', 'NEW', String(slides ?? ''), prompt,
+    '', created, '', '', note, '', '',
+  ];
+  await api().spreadsheets.values.append({
+    spreadsheetId: SHEET_ID,
+    range: RANGE,
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [row] },
+  });
+  return { id, created };
+}
+
+// Дата-час DD.MM.YYYY HH:MM:SS за київським часом (як у наявних рядках).
+function formatKyivDateTime(date) {
+  const p = new Intl.DateTimeFormat('uk-UA', {
+    timeZone: 'Europe/Kyiv', day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(date);
+  const g = (t) => p.find((x) => x.type === t)?.value ?? '';
+  return `${g('day')}.${g('month')}.${g('year')} ${g('hour')}:${g('minute')}:${g('second')}`;
+}
+
 // Дата у форматі DD.MM.YYYY за київським часом (як у наявних рядках).
 function formatKyivDate(date) {
   const parts = new Intl.DateTimeFormat('uk-UA', {

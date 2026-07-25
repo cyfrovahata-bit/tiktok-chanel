@@ -13,8 +13,10 @@
 import { mkdtemp, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { listDoneItems } from './sheets.js';
+import { listDoneItems, readAllItems } from './sheets.js';
 import { downloadArchive } from './drive.js';
+import { listDrafts, upsertDraft, kyivToday, currentSlot } from './drafts.js';
+import { generateScenario } from './scenario.js';
 import { listVideos, uploadVideo, videoName, videoFolderId } from './videos.js';
 import { extractPhotoArchive } from './archive.js';
 import { assembleVideo } from './pipeline.js';
@@ -98,6 +100,35 @@ async function processItem(item) {
 // Забути лічильник спроб для ID (напр. після ручної перегенерації).
 export function forget(id) { attempts.delete(id); }
 
+// --- Чернетки сценаріїв: ранкова (з 08:00) і вечірня (з 16:00) --------------
+// Готуємо завчасно, щоб був час переглянути й перегенерувати до того, як
+// ChatGPT за відкладеним завданням візьме рядок у роботу.
+// force — примусово нова тема; slotOverride — для якого слота.
+export async function ensureDailyDraft(force = false, slotOverride = null) {
+  const today = kyivToday();
+  const slot = slotOverride || currentSlot();
+  if (!slot) return null; // ще до 08:00 — нічого не готуємо
+  const key = `${today}-${slot}`;
+  const items = await listDrafts().catch(() => []);
+  if (!force && items.some((d) => d.key === key)) return null; // на цей слот уже є
+
+  const used = await readAllItems().catch(() => []);
+  const usedTitles = used.map((it) => it.theme).filter(Boolean);
+  const scenario = await generateScenario(usedTitles);
+  const draft = {
+    ...scenario, key, date: today, slot,
+    status: 'pending', createdAt: new Date().toISOString(),
+  };
+  await upsertDraft(draft);
+  const when = slot === 'pm' ? 'вечірня' : 'ранкова';
+  console.log(`[draft] ${when} чернетка: «${draft.theme}» (${draft.slides.length} слайдів)`);
+  await notify(
+    `📝 Тема (${when}):\n${draft.theme}\n\nСценарій із ${draft.slides.length} слайдів готовий — переглянь, за потреби виправ і затвердь.`,
+    openAppMarkup('draft'),
+  );
+  return draft;
+}
+
 // Один прохід черги. Лок, щоб паралельні виклики (таймер + ручний тригер) не
 // накладались і не робили подвійну генерацію.
 let polling = false;
@@ -145,6 +176,8 @@ export function startMonitor() {
     if (!running) {
       running = true;
       try {
+        // Чернетка сценарію на слот (08:00 / 16:00) — не критична для черги.
+        await ensureDailyDraft().catch((e) => console.error('[draft]', e.message));
         const n = await pollOnce();
         console.log(`[monitor] перевірено чергу: ${n} готових DONE`);
       } catch (error) {
