@@ -376,6 +376,15 @@
         wow.style.color = 'var(--text)'; wow.style.margin = '2px 0 8px';
         inner.appendChild(wow);
       }
+      if (draft.story) {
+        // Розповідь абзацом — так одразу чути, чи це історія, чи перелік.
+        const st = el('div', 'simg', esc(draft.story));
+        st.style.color = 'var(--text)'; st.style.fontSize = '14.5px';
+        st.style.padding = '11px 12px'; st.style.borderRadius = '12px';
+        st.style.background = 'color-mix(in srgb, var(--bg) 45%, var(--surface))';
+        st.style.border = '1px solid var(--border)'; st.style.margin = '8px 0';
+        inner.appendChild(st);
+      }
       if ((draft.sources || []).length) {
         inner.appendChild(el('div', 'simg', `🔗 ${draft.sources.map((s) => esc(s)).join('  ·  ')}`));
       }
