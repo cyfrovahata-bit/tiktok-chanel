@@ -355,8 +355,12 @@
 
     function draftCard(draft) {
       const box = el('div', 'draft');
-      box.appendChild(el('div', 'kicker', `${slotName(draft.slot).toUpperCase()} · ${esc(draft.date || '')}`));
+      const check = draft.verified === false ? ' · ⚠️ ФАКТИ НЕ ПЕРЕВІРЕНО' : (draft.verified ? ' · ✅ ПЕРЕВІРЕНО' : '');
+      box.appendChild(el('div', 'kicker', `${slotName(draft.slot).toUpperCase()} · ${esc(draft.date || '')}${check}`));
       box.appendChild(el('div', 'theme', esc(draft.theme)));
+      if ((draft.sources || []).length) {
+        box.appendChild(el('div', 'simg', `🔗 ${draft.sources.map((s) => esc(s)).join('  ·  ')}`));
+      }
       (draft.slides || []).forEach((s, i) => {
         const row = el('div', 'slide-row');
         row.appendChild(el('div', 'num', `СЛАЙД ${i + 1}`));
