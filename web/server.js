@@ -15,8 +15,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished } from '../src/sheets.js';
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, ensureDailyDraft } from '../src/monitor.js';
-import { pendingDrafts, findDraft, upsertDraft, approveDraft, rejectDraft } from '../src/drafts.js';
-import { reviseScenario } from '../src/scenario.js';
+import { pendingDrafts, findDraft, upsertDraft, approveDraft, rejectDraft, draftRowId } from '../src/drafts.js';
+import { reviseScenario, buildPromptText } from '../src/scenario.js';
 import { startAutoPublisher } from '../src/autopublish.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
@@ -243,6 +243,36 @@ const server = http.createServer(async (req, res) => {
           await upsertDraft(draft);
           return json(res, 200, { draft });
         }
+        // Ручні правки без ШІ: замінити слово в рядку, підправити розповідь.
+        if (action === 'save') {
+          if (!current) return json(res, 404, { error: 'Чернетки немає' });
+          const slides = Array.isArray(body.slides)
+            ? body.slides
+              .map((s, i) => ({
+                text: String(s?.text ?? '').trim(),
+                // Опис кадру лишаємо з наявної чернетки — його не редагують.
+                image: current.slides[i]?.image ?? '',
+              }))
+              .filter((s) => s.text)
+            : current.slides;
+          if (!slides.length) return json(res, 400, { error: 'Порожній сценарій' });
+          const draft = {
+            ...current,
+            slides,
+            story: body.story != null ? String(body.story).trim() : current.story,
+            updatedAt: new Date().toISOString(),
+          };
+          await upsertDraft(draft);
+          return json(res, 200, { draft });
+        }
+
+        // Готовий промт для ChatGPT — щоб скопіювати, не відкриваючи таблицю.
+        if (action === 'prompt') {
+          if (!current) return json(res, 404, { error: 'Чернетки немає' });
+          const prompt = await buildPromptText(current, draftRowId(current));
+          return json(res, 200, { prompt });
+        }
+
         if (action === 'reject') {
           // Прибрати чернетку й запам'ятати тему як відхилену (не пропонувати).
           if (!body.key) return json(res, 400, { error: 'Не вказано чернетку' });

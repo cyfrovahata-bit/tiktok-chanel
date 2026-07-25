@@ -133,6 +133,7 @@ export async function removeDraft(key) {
 }
 
 // ID рядка в таблиці: AUTO-YYYYMMDD-0800 / -1600 (як наявні AUTO-…).
+export function draftRowId(draft) { return rowId(draft); }
 function rowId(draft) {
   const ymd = (draft.date || kyivToday()).replace(/-/g, '');
   return `AUTO-${ymd}-${draft.slot === 'pm' ? '1600' : '0800'}`;

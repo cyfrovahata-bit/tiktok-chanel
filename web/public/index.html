@@ -376,22 +376,37 @@
         wow.style.color = 'var(--text)'; wow.style.margin = '2px 0 8px';
         inner.appendChild(wow);
       }
+      // Розповідь абзацом — редагована: можна підправити слово без ШІ.
+      const autoFit = (ta) => {
+        const fit = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
+        ta.addEventListener('input', fit);
+        setTimeout(fit, 0);
+      };
+      let storyBox = null;
       if (draft.story) {
-        // Розповідь абзацом — так одразу чути, чи це історія, чи перелік.
-        const st = el('div', 'simg', esc(draft.story));
-        st.style.color = 'var(--text)'; st.style.fontSize = '14.5px';
-        st.style.padding = '11px 12px'; st.style.borderRadius = '12px';
-        st.style.background = 'color-mix(in srgb, var(--bg) 45%, var(--surface))';
-        st.style.border = '1px solid var(--border)'; st.style.margin = '8px 0';
-        inner.appendChild(st);
+        storyBox = el('textarea', 'notes');
+        storyBox.value = draft.story;
+        storyBox.style.margin = '8px 0';
+        autoFit(storyBox);
+        inner.appendChild(storyBox);
       }
       if ((draft.sources || []).length) {
         inner.appendChild(el('div', 'simg', `🔗 ${draft.sources.map((s) => esc(s)).join('  ·  ')}`));
       }
+      // Тексти слайдів — теж редаговані прямо тут.
+      const slideInputs = [];
       (draft.slides || []).forEach((s, i) => {
         const row = el('div', 'slide-row');
         row.appendChild(el('div', 'num', `СЛАЙД ${i + 1}`));
-        row.appendChild(el('div', 'stext', esc(s.text)));
+        const ta = el('textarea', 'notes');
+        ta.value = s.text;
+        ta.style.minHeight = '0';
+        ta.style.margin = '3px 0 5px';
+        ta.style.fontWeight = '650';
+        ta.style.fontSize = '15px';
+        autoFit(ta);
+        slideInputs.push(ta);
+        row.appendChild(ta);
         if (s.image) row.appendChild(el('div', 'simg', `🎨 ${esc(s.image)}`));
         inner.appendChild(row);
       });
@@ -418,13 +433,33 @@
         if (!(await askConfirm('Затвердити сценарій? Рядок ляже в таблицю — ChatGPT намалює фото.'))) return;
         if (await draftAction('approve', { key }, ok, 'Готово — рядок у таблиці')) load();
       });
+      // Ручні правки без ШІ: замінив слово — зберіг.
+      const save = el('button', 'btn secondary', '💾 Зберегти');
+      save.addEventListener('click', async () => {
+        const payload = {
+          key,
+          slides: slideInputs.map((ta) => ({ text: ta.value })),
+          ...(storyBox ? { story: storyBox.value } : {}),
+        };
+        if (await draftAction('save', payload, save, 'Збережено')) load();
+      });
+
+      // Копіює готовий промт для ChatGPT — без відкривання таблиці.
+      const promptBtn = el('button', 'btn secondary', '📋 Промт');
+      promptBtn.addEventListener('click', async () => {
+        const data = await draftAction('prompt', { key }, promptBtn, null);
+        if (data?.prompt) { await copyText(data.prompt); haptic('light'); toast('Промт скопійовано'); }
+      });
+
       const del = el('button', 'btn secondary', '🗑');
       del.title = 'Прибрати тему'; del.style.flex = '0 0 auto';
       del.addEventListener('click', async () => {
         if (!(await askConfirm('Прибрати цю тему? Більше не пропонуватиметься.'))) return;
         if (await draftAction('reject', { key }, del, 'Тему прибрано')) load();
       });
-      actions.appendChild(edit); actions.appendChild(regen); actions.appendChild(del); actions.appendChild(ok);
+      actions.appendChild(save); actions.appendChild(promptBtn);
+      actions.appendChild(edit); actions.appendChild(regen);
+      actions.appendChild(del); actions.appendChild(ok);
       inner.appendChild(actions);
       wrap.appendChild(inner);
       box.appendChild(wrap);
