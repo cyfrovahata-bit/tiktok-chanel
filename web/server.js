@@ -161,6 +161,35 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Діагностика Meta-токена: який це токен (сторінки чи користувача), які
+    // дозволи, чи бачить він сторінки. Сам токен НЕ повертаємо.
+    if (req.method === 'GET' && pathname === '/api/meta/check') {
+      const token = process.env.META_PAGE_ACCESS_TOKEN;
+      if (!token) return json(res, 200, { error: 'META_PAGE_ACCESS_TOKEN не задано' });
+      const base = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v25.0'}`;
+      const get = async (p) => {
+        try {
+          const r = await fetch(`${base}/${p}${p.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}`);
+          return await r.json();
+        } catch (e) { return { error: { message: e.message } }; }
+      };
+      const [me, accounts, perms] = await Promise.all([
+        get('me?fields=id,name,category'),
+        get('me/accounts?fields=id,name'),
+        get('me/permissions'),
+      ]);
+      const granted = (perms.data || []).filter((p) => p.status === 'granted').map((p) => p.permission);
+      const isPageToken = Boolean(me.category); // у токена Сторінки є category
+      return json(res, 200, {
+        tokenType: me.error ? 'невідомо (помилка)' : (isPageToken ? 'ТОКЕН СТОРІНКИ ✅' : 'ТОКЕН КОРИСТУВАЧА ⚠️'),
+        me: me.error ? me.error.message : { id: me.id, name: me.name, category: me.category },
+        pagesVisible: accounts.data ? accounts.data.map((p) => ({ id: p.id, name: p.name })) : (accounts.error?.message ?? null),
+        grantedPermissions: granted.length ? granted : (perms.error?.message ?? 'немає'),
+        configuredPageId: process.env.META_PAGE_ID || null,
+        configuredIgUserId: process.env.META_IG_USER_ID || null,
+      });
+    }
+
     // Які моделі OpenAI доступні акаунту (щоб знати, чи є модель із веб-пошуком).
     // Повертає лише назви — секретів не розкриває.
     if (req.method === 'GET' && pathname === '/api/models') {
