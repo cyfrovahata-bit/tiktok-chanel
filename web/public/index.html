@@ -336,6 +336,7 @@
 
     // --- Чернетки сценаріїв (теми на перевірку) -----------------------------
     const slotName = (s) => (s === 'pm' ? 'вечірня' : 'ранкова');
+    let draftExpandInit = false;
 
     async function draftAction(action, payload, btn, okMsg) {
       if (!initData) { toast('Відкрий через Telegram'); return null; }
@@ -354,24 +355,36 @@
     }
 
     function draftCard(draft) {
-      const box = el('div', 'draft');
-      const check = draft.verified === false ? ' · ⚠️ ФАКТИ НЕ ПЕРЕВІРЕНО' : (draft.verified ? ' · ✅ ПЕРЕВІРЕНО' : '');
-      box.appendChild(el('div', 'kicker', `${slotName(draft.slot).toUpperCase()} · ${esc(draft.date || '')}${check}`));
-      box.appendChild(el('div', 'theme', esc(draft.theme)));
+      // Картка згортається так само, як картка готового відео.
+      const box = el('div', 'card');
+      box.dataset.id = draft.key;
+      const check = draft.verified === false ? '⚠️' : (draft.verified ? '✅' : '');
+
+      const head = el('div', 'card-head');
+      head.appendChild(el('span', 'dot pending'));
+      head.appendChild(el('div', 'head-title', `${esc(draft.theme)}`));
+      head.appendChild(el('span', 'chev', '▶'));
+      box.appendChild(head);
+
+      const wrap = el('div', 'card-body-wrap');
+      const inner = el('div', 'draft');
+      inner.style.margin = '0'; inner.style.boxShadow = 'none'; inner.style.border = '0';
+      inner.appendChild(el('div', 'kicker',
+        `${slotName(draft.slot).toUpperCase()} · ${esc(draft.date || '')}${check ? ` · ${check} ${draft.verified ? 'ПЕРЕВІРЕНО' : 'ФАКТИ НЕ ПЕРЕВІРЕНО'}` : ''}`));
       if ((draft.sources || []).length) {
-        box.appendChild(el('div', 'simg', `🔗 ${draft.sources.map((s) => esc(s)).join('  ·  ')}`));
+        inner.appendChild(el('div', 'simg', `🔗 ${draft.sources.map((s) => esc(s)).join('  ·  ')}`));
       }
       (draft.slides || []).forEach((s, i) => {
         const row = el('div', 'slide-row');
         row.appendChild(el('div', 'num', `СЛАЙД ${i + 1}`));
         row.appendChild(el('div', 'stext', esc(s.text)));
         if (s.image) row.appendChild(el('div', 'simg', `🎨 ${esc(s.image)}`));
-        box.appendChild(row);
+        inner.appendChild(row);
       });
 
       const notes = el('textarea', 'notes');
       notes.placeholder = 'Що поправити? Напр.: «гачок гострішим», «прибери 3-й слайд», «більше про Україну»…';
-      box.appendChild(notes);
+      inner.appendChild(notes);
 
       const key = draft.key;
       const actions = el('div', 'actions');
@@ -391,8 +404,23 @@
         if (!(await askConfirm('Затвердити сценарій? Рядок ляже в таблицю — ChatGPT намалює фото.'))) return;
         if (await draftAction('approve', { key }, ok, 'Готово — рядок у таблиці')) load();
       });
-      actions.appendChild(edit); actions.appendChild(regen); actions.appendChild(ok);
-      box.appendChild(actions);
+      const del = el('button', 'btn secondary', '🗑');
+      del.title = 'Прибрати тему'; del.style.flex = '0 0 auto';
+      del.addEventListener('click', async () => {
+        if (!(await askConfirm('Прибрати цю тему? Більше не пропонуватиметься.'))) return;
+        if (await draftAction('reject', { key }, del, 'Тему прибрано')) load();
+      });
+      actions.appendChild(edit); actions.appendChild(regen); actions.appendChild(del); actions.appendChild(ok);
+      inner.appendChild(actions);
+      wrap.appendChild(inner);
+      box.appendChild(wrap);
+
+      const setOpen = (open) => {
+        box.classList.toggle('open', open);
+        if (open) expanded.add(key); else expanded.delete(key);
+      };
+      head.addEventListener('click', () => setOpen(!box.classList.contains('open')));
+      if (expanded.has(key)) setOpen(true);
       return box;
     }
 
@@ -406,6 +434,8 @@
       const drafts = (state.drafts || []).filter((d) => d.slides && d.slides.length);
       if (drafts.length) {
         app.appendChild(el('h2', 'section', drafts.length > 1 ? 'Теми на перевірку' : 'Тема на перевірку'));
+        // За замовчуванням розгорнута лише найновіша тема; решта — згорнуті.
+        if (!draftExpandInit) { expanded.add(drafts[drafts.length - 1].key); draftExpandInit = true; }
         drafts.forEach((d) => app.appendChild(draftCard(d)));
       }
 

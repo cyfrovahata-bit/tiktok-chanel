@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { listDoneItems, readAllItems } from './sheets.js';
 import { downloadArchive } from './drive.js';
-import { listDrafts, upsertDraft, kyivToday, currentSlot } from './drafts.js';
+import { listDrafts, upsertDraft, kyivToday, currentSlot, listRejectedThemes, rejectDraft } from './drafts.js';
 import { generateScenario } from './scenario.js';
 import { listVideos, uploadVideo, videoName, videoFolderId } from './videos.js';
 import { extractPhotoArchive } from './archive.js';
@@ -112,12 +112,22 @@ export async function ensureDailyDraft(force = false, slotOverride = null, silen
   const items = await listDrafts().catch(() => []);
   if (!force && items.some((d) => d.key === key)) return null; // на цей слот уже є
 
-  const used = await readAllItems().catch(() => []);
-  // Заборонені теми = і рядки таблиці, і вже наявні чернетки (зокрема чернетка
-  // сусіднього слота), інакше ранок і вечір можуть вигадати те саме.
+  // «Інша тема»: стару тему цього слота позначаємо відхиленою, щоб генератор
+  // більше ніколи її не пропонував.
+  if (force && items.some((d) => d.key === key)) {
+    await rejectDraft(key).catch((e) => console.error('[draft] відхилення:', e.message));
+  }
+
+  const [used, rejected] = await Promise.all([
+    readAllItems().catch(() => []),
+    listRejectedThemes().catch(() => []),
+  ]);
+  // Заборонені теми = рядки таблиці + наявні чернетки (зокрема сусіднього
+  // слота, інакше ранок і вечір вигадають те саме) + усі відхилені власником.
   const usedTitles = [
     ...used.map((it) => it.theme),
     ...items.filter((d) => d.key !== key).map((d) => d.theme),
+    ...rejected,
   ].filter(Boolean);
   const scenario = await generateScenario(usedTitles);
   const draft = {

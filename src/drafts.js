@@ -13,6 +13,7 @@ import { appendQueueRow } from './sheets.js';
 const FOLDER_ID = process.env.PROMPT_FOLDER_ID || '1GiHg-j0ytQyfjLU97i5vkXL6XfjIR9Uk';
 const FILE_NAME = 'drafts.json';
 const KEEP = 8; // скільки останніх чернеток тримати у файлі
+const REJECTED_KEEP = 60; // скільки відхилених тем пам'ятати (щоб не повторювати)
 
 export function promptFolderId() { return FOLDER_ID; }
 
@@ -56,9 +57,13 @@ async function findFile() {
   return res.data.files?.[0]?.id ?? null;
 }
 
-async function writeAll(items) {
-  const body = JSON.stringify({ items: items.slice(-KEEP) }, null, 2);
-  const media = { mimeType: 'application/json', body };
+// Записує документ цілком: чернетки (останні KEEP) + відхилені теми.
+async function writeAll(input) {
+  const doc = {
+    items: (input.items || []).slice(-KEEP),
+    rejected: (input.rejected || []).slice(-REJECTED_KEEP),
+  };
+  const media = { mimeType: 'application/json', body: JSON.stringify(doc, null, 2) };
   const existing = await findFile();
   if (existing) await drive().files.update({ fileId: existing, media, supportsAllDrives: true });
   else {
@@ -67,16 +72,29 @@ async function writeAll(items) {
       media, fields: 'id', supportsAllDrives: true,
     });
   }
-  return items;
+  return doc;
+}
+
+// Увесь документ: чернетки + відхилені теми.
+async function readDoc() {
+  const id = await findFile();
+  if (!id) return { items: [], rejected: [] };
+  const res = await drive().files.get({ fileId: id, alt: 'media', supportsAllDrives: true });
+  const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    rejected: Array.isArray(data?.rejected) ? data.rejected : [],
+  };
 }
 
 // Усі збережені чернетки (найновіші в кінці).
 export async function listDrafts() {
-  const id = await findFile();
-  if (!id) return [];
-  const res = await drive().files.get({ fileId: id, alt: 'media', supportsAllDrives: true });
-  const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-  return Array.isArray(data?.items) ? data.items : [];
+  return (await readDoc()).items;
+}
+
+// Теми, які власник відхилив («Інша тема» або «Прибрати») — більше не пропонуємо.
+export async function listRejectedThemes() {
+  return (await readDoc()).rejected;
 }
 
 // Чернетки, які ще чекають на затвердження.
@@ -90,16 +108,28 @@ export async function findDraft(key) {
 
 // Створити/замінити чернетку за ключем.
 export async function upsertDraft(draft) {
-  const items = await listDrafts();
-  const i = items.findIndex((d) => d.key === draft.key);
-  if (i >= 0) items[i] = draft; else items.push(draft);
-  await writeAll(items);
+  const doc = await readDoc();
+  const i = doc.items.findIndex((d) => d.key === draft.key);
+  if (i >= 0) doc.items[i] = draft; else doc.items.push(draft);
+  await writeAll(doc);
   return draft;
 }
 
+// Прибирає чернетку й ЗАПАМ'ЯТОВУЄ її тему як відхилену, щоб генератор більше
+// не пропонував те саме.
+export async function rejectDraft(key) {
+  const doc = await readDoc();
+  const gone = doc.items.find((d) => d.key === key);
+  doc.items = doc.items.filter((d) => d.key !== key);
+  if (gone?.theme && !doc.rejected.includes(gone.theme)) doc.rejected.push(gone.theme);
+  await writeAll(doc);
+  return gone?.theme ?? null;
+}
+
 export async function removeDraft(key) {
-  const items = (await listDrafts()).filter((d) => d.key !== key);
-  await writeAll(items);
+  const doc = await readDoc();
+  doc.items = doc.items.filter((d) => d.key !== key);
+  await writeAll(doc);
 }
 
 // ID рядка в таблиці: AUTO-YYYYMMDD-0800 / -1600 (як наявні AUTO-…).

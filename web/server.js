@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished } from '../src/sheets.js';
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, ensureDailyDraft } from '../src/monitor.js';
-import { pendingDrafts, findDraft, upsertDraft, approveDraft } from '../src/drafts.js';
+import { pendingDrafts, findDraft, upsertDraft, approveDraft, rejectDraft } from '../src/drafts.js';
 import { reviseScenario } from '../src/scenario.js';
 import { startAutoPublisher } from '../src/autopublish.js';
 import { metaStatus } from '../src/meta.js';
@@ -242,6 +242,12 @@ const server = http.createServer(async (req, res) => {
           const draft = { ...current, ...revised, status: 'pending', notes, updatedAt: new Date().toISOString() };
           await upsertDraft(draft);
           return json(res, 200, { draft });
+        }
+        if (action === 'reject') {
+          // Прибрати чернетку й запам'ятати тему як відхилену (не пропонувати).
+          if (!body.key) return json(res, 400, { error: 'Не вказано чернетку' });
+          const theme = await rejectDraft(body.key);
+          return json(res, 200, { ok: true, theme });
         }
         if (action === 'approve') {
           if (!current) return json(res, 404, { error: 'Чернетки немає' });
