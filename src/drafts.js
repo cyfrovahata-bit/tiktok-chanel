@@ -121,6 +121,9 @@ export async function approveDraft(draft) {
     prompt,
     note: 'Сценарій затверджено власником; малювати рівно за промтом',
   });
-  await removeDraft(draft.key);
+  // Чернетку НЕ видаляємо, а позначаємо затвердженою: інакше слот став би
+  // «вільним» і монітор наступним проходом згенерував би нову тему на сьогодні.
+  // У мінідодатку вона зникає, бо pendingDrafts() бере лише status='pending'.
+  await upsertDraft({ ...draft, status: 'approved', rowId: id, approvedAt: new Date().toISOString() });
   return { id, slides: draft.slides.length };
 }

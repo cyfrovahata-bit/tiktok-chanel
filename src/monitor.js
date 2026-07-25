@@ -104,7 +104,7 @@ export function forget(id) { attempts.delete(id); }
 // Готуємо завчасно, щоб був час переглянути й перегенерувати до того, як
 // ChatGPT за відкладеним завданням візьме рядок у роботу.
 // force — примусово нова тема; slotOverride — для якого слота.
-export async function ensureDailyDraft(force = false, slotOverride = null) {
+export async function ensureDailyDraft(force = false, slotOverride = null, silent = false) {
   const today = kyivToday();
   const slot = slotOverride || currentSlot();
   if (!slot) return null; // ще до 08:00 — нічого не готуємо
@@ -113,7 +113,12 @@ export async function ensureDailyDraft(force = false, slotOverride = null) {
   if (!force && items.some((d) => d.key === key)) return null; // на цей слот уже є
 
   const used = await readAllItems().catch(() => []);
-  const usedTitles = used.map((it) => it.theme).filter(Boolean);
+  // Заборонені теми = і рядки таблиці, і вже наявні чернетки (зокрема чернетка
+  // сусіднього слота), інакше ранок і вечір можуть вигадати те саме.
+  const usedTitles = [
+    ...used.map((it) => it.theme),
+    ...items.filter((d) => d.key !== key).map((d) => d.theme),
+  ].filter(Boolean);
   const scenario = await generateScenario(usedTitles);
   const draft = {
     ...scenario, key, date: today, slot,
@@ -122,10 +127,15 @@ export async function ensureDailyDraft(force = false, slotOverride = null) {
   await upsertDraft(draft);
   const when = slot === 'pm' ? 'вечірня' : 'ранкова';
   console.log(`[draft] ${when} чернетка: «${draft.theme}» (${draft.slides.length} слайдів)`);
-  await notify(
-    `📝 Тема (${when}):\n${draft.theme}\n\nСценарій із ${draft.slides.length} слайдів готовий — переглянь, за потреби виправ і затвердь.`,
-    openAppMarkup('draft'),
-  );
+  // Сповіщаємо лише про ПЛАНОВУ чернетку. Коли власник сам натиснув «Інша
+  // тема» — він уже в мінідодатку й побачить результат там, зайве повідомлення
+  // у Telegram тільки заважає.
+  if (!silent) {
+    await notify(
+      `📝 Тема (${when}):\n${draft.theme}\n\nСценарій із ${draft.slides.length} слайдів готовий — переглянь, за потреби виправ і затвердь.`,
+      openAppMarkup('draft'),
+    );
+  }
   return draft;
 }
 

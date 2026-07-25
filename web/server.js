@@ -230,7 +230,8 @@ const server = http.createServer(async (req, res) => {
       try {
         const current = body.key ? await findDraft(body.key) : null;
         if (action === 'regenerate') {
-          const draft = await ensureDailyDraft(true, current?.slot ?? null);
+          // silent=true: власник у додатку, дублювати в Telegram не треба.
+          const draft = await ensureDailyDraft(true, current?.slot ?? null, true);
           return json(res, 200, { draft });
         }
         if (action === 'edit') {
