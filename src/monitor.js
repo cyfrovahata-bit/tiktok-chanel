@@ -48,7 +48,22 @@ const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://tiktok-chanel-production.
 
 // Спроби на кожен ID у межах життя процесу (щоб не спамити «знайшов тему»
 // на кожній ітерації, коли монтаж падає, і зупинитись після MAX_ATTEMPTS).
-const attempts = new Map();
+// Пам'ятаємо ще посилання на архів і час останньої спроби: майже завжди
+// причина падіння — у самому архіві, тож ЗАМІНА архіву має одразу дати нову
+// спробу, а не впертись у вичерпаний лічильник до перезапуску процесу.
+const attempts = new Map(); // id → { count, archive, lastAt }
+const RETRY_AFTER_MS = Number(process.env.RETRY_AFTER_MS) || 30 * 60 * 1000;
+
+function attemptCount(id) { return attempts.get(id)?.count ?? 0; }
+
+// Чи пропускаємо цей матеріал цього проходу.
+function giveUpOn(item) {
+  const a = attempts.get(item.id);
+  if (!a || a.count < MAX_ATTEMPTS) return false;
+  if (a.archive !== item.archive) { attempts.delete(item.id); return false; } // новий архів — пробуємо
+  if (Date.now() - a.lastAt >= RETRY_AFTER_MS) { attempts.delete(item.id); return false; } // час минув
+  return true;
+}
 
 function openAppMarkup(id) {
   return {
@@ -68,7 +83,7 @@ async function notify(text, markup) {
 
 // Монтує відео для одного матеріалу й вивантажує його у Drive.
 async function processItem(item) {
-  const tried = attempts.get(item.id) || 0;
+  const tried = attemptCount(item.id);
   // «Знайшов тему» — лише на першій спробі (як у прикладі: «Архів знайдено»).
   if (tried === 0) {
     await notify(`🔎 Знайшов нову тему:\n${item.title}\n\nАрхів знайдено — генерую відео…`);
@@ -189,7 +204,7 @@ async function pollOnceInner() {
   let generated = 0;
   for (const item of items) {
     if (videos.has(videoName(item.id))) continue; // відео вже є → готове
-    if ((attempts.get(item.id) || 0) >= MAX_ATTEMPTS) continue; // здалися
+    if (giveUpOn(item)) continue; // тричі впало на цьому ж архіві — чекаємо
     try {
       pollState = { ...pollState, busyWith: item.id };
       await processItem(item);
@@ -199,12 +214,15 @@ async function pollOnceInner() {
         lastGeneratedId: item.id, lastGeneratedAt: new Date().toISOString(),
       };
     } catch (error) {
-      const tried = (attempts.get(item.id) || 0) + 1;
-      attempts.set(item.id, tried);
+      const tried = attemptCount(item.id) + 1;
+      attempts.set(item.id, { count: tried, archive: item.archive, lastAt: Date.now() });
       pollState = { ...pollState, busyWith: null, lastError: `${item.id} (спроба ${tried}): ${error.message}` };
       console.error(`Помилка обробки ${item.id} (спроба ${tried}):`, error.message);
       if (tried >= MAX_ATTEMPTS) {
-        await notify(`⚠️ Не вдалося зробити відео для «${item.title}» після ${MAX_ATTEMPTS} спроб:\n${error.message}`);
+        await notify(
+          `⚠️ Не вдалося зробити відео для «${item.title}» після ${MAX_ATTEMPTS} спроб:\n${error.message}`
+          + '\n\nЗаміни архів у таблиці — і я одразу спробую знову.',
+        );
       }
     }
   }
