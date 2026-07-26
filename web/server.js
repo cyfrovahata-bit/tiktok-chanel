@@ -20,6 +20,8 @@ import { pendingDrafts, listDrafts, findDraft, upsertDraft, approveDraft, reject
 import { reviseScenario, buildPromptText } from '../src/scenario.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
+import { createSubmission, addPhoto, submitOwn } from '../src/own.js';
+import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher } from '../src/autopublish.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
@@ -307,6 +309,44 @@ const server = http.createServer(async (req, res) => {
         });
       } catch (error) {
         return json(res, 200, { error: error.message });
+      }
+    }
+
+    // --- Власний сюжет власника ---------------------------------------------
+    // Три кроки, щоб фото йшли по одному й тіло запиту лишалось малим:
+    //   start  → створює папку Drive під цей матеріал;
+    //   photo  → вивантажує одне фото;
+    //   submit → кладе рядок NEW у таблицю з промтом під цей матеріал.
+    if (req.method === 'POST' && pathname.startsWith('/api/own/')) {
+      const step = pathname.slice('/api/own/'.length);
+      const body = JSON.parse(await readBody(req));
+      const check = verifyInitData(body.initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Додавати сюжети може лише власник каналу' });
+      try {
+        if (step === 'start') return json(res, 200, await createSubmission());
+        if (step === 'photo') {
+          if (!body.folderId) throw new Error('Немає folderId — почни зі старту');
+          return json(res, 200, await addPhoto(body.folderId, body));
+        }
+        if (step === 'submit') {
+          if (!body.id) throw new Error('Немає id');
+          const story = String(body.story || '').trim();
+          const photoCount = Number(body.photoCount) || 0;
+          if (!story && !photoCount) throw new Error('Порожньо: додай сюжет або хоча б одне фото');
+          const out = await submitOwn({ ...body, story, photoCount });
+          cache.at = 0;
+          await sendMessage(
+            ownerChatId(),
+            `✍️ Твій сюжет прийнято: ${out.id}\n`
+            + `${photoCount ? `${photoCount} фото завантажено. ` : 'Без фото. '}`
+            + 'Рядок у таблиці зі статусом NEW — ChatGPT візьме його в роботу.',
+          ).catch(() => {});
+          return json(res, 200, out);
+        }
+        return json(res, 404, { error: 'невідомий крок' });
+      } catch (error) {
+        return json(res, 400, { error: error.message });
       }
     }
 

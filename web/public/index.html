@@ -149,6 +149,26 @@
     }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
     .banner { background: color-mix(in srgb, #e67e22 20%, var(--surface)); border: 1px solid color-mix(in srgb, #e67e22 40%, transparent); color: var(--text); padding: 12px 14px; border-radius: 13px; font-size: 13.5px; margin: 10px 2px 4px; }
+
+    /* Свій сюжет: згорнутий рядок-посилання, щоб не відтягував увагу від черги */
+    .own-toggle {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: none; border: 0; padding: 4px 2px; margin: 2px 0 0;
+      color: var(--muted); font: inherit; font-size: 13px; cursor: pointer;
+    }
+    .own-toggle:active { opacity: .6; }
+    .own-panel {
+      display: none; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px; margin: 8px 0 4px;
+    }
+    .own-panel.open { display: block; }
+    .own-hint { font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
+    .own-files { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+    .own-chip {
+      font-size: 12px; padding: 4px 9px; border-radius: 999px;
+      background: color-mix(in srgb, var(--muted) 15%, transparent); color: var(--text);
+    }
+    .own-actions { display: flex; gap: 8px; margin-top: 12px; }
   </style>
 </head>
 <body>
@@ -162,6 +182,25 @@
   </header>
 
   <div id="banner"></div>
+
+  <button class="own-toggle" id="ownToggle">✍️ Свій сюжет</button>
+  <div class="own-panel" id="ownPanel">
+    <p class="own-hint">
+      Напиши сюжет своїми словами й, за бажанням, додай кілька своїх фото.
+      ChatGPT розіб'є текст на слайди, підбере твої фото під них і доведе до
+      формату 9:16, а чого забракне — домалює. Можна надіслати й самі фото
+      без тексту — тоді сюжет він придумає за ними.
+    </p>
+    <textarea class="notes" id="ownStory" rows="6"
+      placeholder="Наприклад: Під Бакотською затокою лежить село, яке затопили…"></textarea>
+    <input type="file" id="ownPhotos" accept="image/*" multiple hidden />
+    <div class="own-files" id="ownFiles"></div>
+    <div class="own-actions">
+      <button class="btn secondary" id="ownPick">📎 Фото</button>
+      <button class="btn primary" id="ownSend">Надіслати</button>
+    </div>
+  </div>
+
   <main id="app">
     <div class="skeleton"></div>
     <div class="skeleton" style="height:120px"></div>
@@ -517,6 +556,86 @@
         $('#app').innerHTML = `<div class="empty"><div class="big">⚠️</div>Не вдалося завантажити.<br>${esc(e.message)}</div>`;
       }
     }
+
+    // --- Свій сюжет ---------------------------------------------------------
+    // Фото шлемо по одному окремими запитами: десяток знімків із телефона в
+    // одному тілі запиту — це десятки мегабайт base64, що впирається в ліміти
+    // проксі. По одному ще й дає чесний прогрес.
+    let ownPicked = [];
+
+    function ownRenderFiles() {
+      const box = $('#ownFiles'); box.innerHTML = '';
+      ownPicked.forEach((f, i) => {
+        const chip = el('span', 'own-chip', `${i + 1}. ${esc(f.name)}`);
+        box.appendChild(chip);
+      });
+    }
+
+    const readAsBase64 = (file) => new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(',')[1] || '');
+      r.onerror = () => reject(new Error(`Не вдалося прочитати ${file.name}`));
+      r.readAsDataURL(file);
+    });
+
+    $('#ownToggle').addEventListener('click', () => {
+      haptic();
+      $('#ownPanel').classList.toggle('open');
+    });
+    $('#ownPick').addEventListener('click', () => $('#ownPhotos').click());
+    $('#ownPhotos').addEventListener('change', (e) => {
+      ownPicked = [...e.target.files].slice(0, 10);
+      ownRenderFiles();
+    });
+
+    $('#ownSend').addEventListener('click', async () => {
+      const btn = $('#ownSend');
+      const story = $('#ownStory').value.trim();
+      if (!story && !ownPicked.length) { toast('Додай сюжет або хоча б одне фото'); return; }
+      const old = btn.textContent;
+      btn.disabled = true;
+      try {
+        btn.textContent = 'Готую…';
+        const start = await fetch('/api/own/start', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ initData }),
+        }).then((r) => r.json());
+        if (start.error) throw new Error(start.error);
+
+        for (let i = 0; i < ownPicked.length; i++) {
+          btn.textContent = `Фото ${i + 1} з ${ownPicked.length}…`;
+          const file = ownPicked[i];
+          const res = await fetch('/api/own/photo', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              initData, folderId: start.folderId, index: i + 1,
+              name: file.name, mimeType: file.type, data: await readAsBase64(file),
+            }),
+          }).then((r) => r.json());
+          if (res.error) throw new Error(res.error);
+        }
+
+        btn.textContent = 'Записую…';
+        const out = await fetch('/api/own/submit', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            initData, id: start.id, folderId: start.folderId,
+            folderUrl: start.folderUrl, story, photoCount: ownPicked.length,
+          }),
+        }).then((r) => r.json());
+        if (out.error) throw new Error(out.error);
+
+        notify('success');
+        toast(`Прийнято: ${out.id}`);
+        $('#ownStory').value = ''; ownPicked = []; ownRenderFiles();
+        $('#ownPanel').classList.remove('open');
+      } catch (e) {
+        notify('error');
+        toast(e.message);
+      } finally {
+        btn.disabled = false; btn.textContent = old;
+      }
+    });
 
     load();
     document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
