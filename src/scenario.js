@@ -1,44 +1,14 @@
 // Генерація СЦЕНАРІЮ ролика через OpenAI: тема + слайди (текст рядка та опис
 // зображення) + візуальний контекст і джерела.
 //
-// Факти перевіряються ВЕБ-ПОШУКОМ (Responses API + tool web_search): модель
-// має спиратися на два незалежні джерела, одне з них — офіційне чи первинне.
-// Якщо пошук недоступний — відкат на звичайний чат-виклик, і сценарій
-// позначається як неперевірений (verified: false).
+// Виклик — звичайний дешевий chat/completions БЕЗ інструмента web_search:
+// платний веб-пошук через API прибрано. Вимога достовірності лишається
+// ТЕКСТОМ У ПРОМТІ (розділ ФАКТИ): модель бере лише те, у чому впевнена, і
+// подає джерела. Реальна звірка відбувається далі — ChatGPT, коли шукає
+// фото-референси за промтом, і ставить ERROR, якщо факт хибний.
 import { readFile } from 'node:fs/promises';
 
-const PLAIN_MODEL = process.env.OPENAI_FALLBACK_MODEL || 'gpt-4o-mini';
-
-// Модель для веб-пошуку обираємо АВТОМАТИЧНО зі списку доступних акаунту
-// (нічого налаштовувати вручну не треба). Змінна OPENAI_SCENARIO_MODEL, якщо
-// задана, має пріоритет. Результат кешується на час життя процесу:
-// null — ще не питали, '' — придатної моделі немає.
-let resolvedModel = null;
-
-// Не-текстові й службові варіанти, які не годяться для сценарію.
-const NOT_CHAT = /(audio|realtime|image|embedding|transcribe|tts|moderation|codex|search-preview|instruct)/;
-
-async function pickSearchModel() {
-  if (process.env.OPENAI_SCENARIO_MODEL) return process.env.OPENAI_SCENARIO_MODEL;
-  if (resolvedModel !== null) return resolvedModel;
-  try {
-    const r = await fetch('https://api.openai.com/v1/models', {
-      headers: { authorization: `Bearer ${apiKey()}` },
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const ids = ((await r.json()).data || []).map((m) => m.id);
-    const gpt5 = ids.filter((id) => /^gpt-5/.test(id) && !NOT_CHAT.test(id));
-    // Спершу «повні» моделі (без mini/nano), новіші вперед.
-    const full = gpt5.filter((id) => !/(mini|nano)/.test(id)).sort().reverse();
-    const small = gpt5.filter((id) => /(mini|nano)/.test(id)).sort().reverse();
-    resolvedModel = full[0] || small[0] || '';
-    console.log(`[scenario] модель для веб-пошуку: ${resolvedModel || 'немає — працюю без перевірки фактів'}`);
-  } catch (error) {
-    console.error('[scenario] не вдалося отримати список моделей:', error.message);
-    resolvedModel = '';
-  }
-  return resolvedModel;
-}
+const MODEL = process.env.OPENAI_SCENARIO_MODEL || process.env.OPENAI_FALLBACK_MODEL || 'gpt-4o-mini';
 
 function apiKey() {
   const key = process.env.OPENAI_API_KEY;
@@ -55,49 +25,14 @@ function parseJsonLoose(text) {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-// Текст відповіді Responses API (output_text або обхід output[].content[].text).
-function responseText(data) {
-  if (typeof data.output_text === 'string' && data.output_text.trim()) return data.output_text;
-  const parts = [];
-  for (const item of data.output || []) {
-    for (const c of item.content || []) {
-      if (typeof c.text === 'string') parts.push(c.text);
-    }
-  }
-  return parts.join('\n');
-}
-
-// Головний виклик: за потреби з веб-пошуком, інакше (або при невдачі) —
-// звичайний дешевий чат. search=false економить ~половину вартості там, де
-// перевіряти факти не треба (стилістичні правки).
-async function askModel(prompt, { search = true } = {}) {
-  const searchModel = search ? await pickSearchModel() : '';
-  if (searchModel) {
-    try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: { authorization: `Bearer ${apiKey()}`, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: searchModel,
-          // low — менше тексту зі знайдених сторінок у контексті: дешевше,
-          // а факт усе одно звіряється за джерелами.
-          tools: [{ type: 'web_search', search_context_size: 'low' }],
-          input: prompt,
-        }),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status} ${(await response.text()).slice(0, 200)}`);
-      const text = responseText(await response.json());
-      if (!text.trim()) throw new Error('порожня відповідь');
-      return { data: parseJsonLoose(text), verified: true };
-    } catch (error) {
-      console.error(`[scenario] веб-пошук не вдався (${error.message}); працюю без перевірки фактів`);
-    }
-  }
+// Єдиний виклик моделі — звичайний chat/completions. Без інструментів, без
+// веб-пошуку: одна відповідь на один запит, передбачувана вартість.
+async function askModel(prompt) {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey()}`, 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: PLAIN_MODEL,
+      model: MODEL,
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
       temperature: 0.9,
@@ -107,7 +42,7 @@ async function askModel(prompt, { search = true } = {}) {
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error('OpenAI: порожня відповідь');
-  return { data: parseJsonLoose(content), verified: false };
+  return parseJsonLoose(content);
 }
 
 const RULES = `Ти — сценарист коротких відео українського каналу «Чи Ви Знали?».
@@ -119,7 +54,7 @@ const RULES = `Ти — сценарист коротких відео укра�
 
 ПОРЯДОК РОБОТИ (саме такий)
 1. Обери тему за формулою ЗНАЙОМЕ + НЕСПОДІВАНЕ.
-2. Перевір головний факт веб-пошуком.
+2. Звір головний факт із тим, що ти знаєш напевно (розділ ФАКТИ).
 3. Напиши КОРОТКУ РОЗПОВІДЬ суцільним абзацом (поле "story"): 5–9 речень,
    жива усна мова, без заголовків, списків і тире замість дієслів.
 4. Розріж цю саму розповідь на слайди: один слайд = одне речення з неї.
@@ -172,12 +107,15 @@ const RULES = `Ти — сценарист коротких відео укра�
 Екзотику, де були одиниці, бери лише тоді, коли факт вражає так, що ним
 захочеться поділитися й не бувши там.
 
-ФАКТИ
-• Перевір головний факт веб-пошуком, не покладайся на пам'ять: щонайменше два
-  незалежні джерела, одне — офіційне чи первинне (музей, університет, наукова
-  публікація, держустанова, архів, UNESCO, Guinness, виробник).
-• Джерела суперечать — не подавай спірне як доведене: уточни, познач
-  невизначеність або відкинь деталь.
+ФАКТИ (найсуворіший розділ — тут помилка коштує найдорожче)
+• Бери ЛИШЕ те, у чому ти впевнений і що підтверджується щонайменше двома
+  незалежними джерелами, одне з яких офіційне чи первинне (музей,
+  університет, наукова публікація, держустанова, архів, UNESCO, Guinness,
+  виробник). У полі "sources" вкажи ці джерела.
+• Не впевнений у деталі — НЕ вигадуй її: візьми іншу тему або обійдись без
+  цієї деталі. Краще простіший перевірений факт, ніж ефектний сумнівний.
+• Джерела можуть суперечити — тоді не подавай спірне як доведене: уточни,
+  познач невизначеність або відкинь деталь.
 • Заборонено: міфи як факти, псевдонаука, вигадані рекорди, медичні поради,
   небезпечні експерименти, перебільшення заради клікбейту.
 • Не називай «єдиним», «першим», «найстарішим», якщо це не доведено.
@@ -275,32 +213,24 @@ function parseResult(raw, fallbackTheme = '') {
 // Новий сценарій. usedTitles — теми, які вже були (щоб не повторюватись).
 export async function generateScenario(usedTitles = []) {
   const used = usedTitles.length ? usedTitles.slice(-40).join('; ') : 'поки немає';
-  const { data, verified } = await askModel(`${RULES}
+  const data = await askModel(`${RULES}
 
 ЗАВДАННЯ: придумай ОДНУ нову тему за формулою ЗНАЙОМЕ + НЕСПОДІВАНЕ —
 масове українське місце, побутова річ або те, що постійно обговорюють, — з
-несподіваним перевіреним фактом і конкретною цифрою. Спершу подумки склади
+несподіваним достовірним фактом і конкретною цифрою. Спершу подумки склади
 3 варіанти теми, прожени кожен через ТЕСТ КОМЕНТАРЯ і візьми той, на фінальне
-питання якого зможе відповісти «так» найбільше людей. Потім ПЕРЕВІР факт
-веб-пошуком і напиши повний сценарій.
+питання якого зможе відповісти «так» найбільше людей. Потім звір факт із
+розділом ФАКТИ і напиши повний сценарій.
 
 ЗАБОРОНЕНІ теми (вже були): ${used}
 
 ${SHAPE}`);
-  return { ...parseResult(data), verified };
+  return parseResult(data);
 }
 
-// Слова, які натякають, що зауваження стосується ФАКТІВ, а не стилю. Лише в
-// такому разі платимо за повторний веб-пошук.
-const FACT_HINTS = /(факт|невірн|не вірн|неправ|не прав|помилк|брехн|насправді|перевір|джерел|дат[аиуе]|рік|року|роц|цифр|числ|точн|застар|сумнівн|вигадан)/i;
-
-// Правка наявного сценарію за зауваженнями власника. Стилістичні правки
-// («гачок гострішим») ідуть без веб-пошуку — це вдвічі дешевше; перевірка
-// вмикається, лише коли зауваження про факти.
+// Правка наявного сценарію за зауваженнями власника.
 export async function reviseScenario(draft, notes) {
-  const needSearch = FACT_HINTS.test(notes);
-  console.log(`[scenario] правка ${needSearch ? 'З веб-перевіркою' : 'без пошуку (стиль)'}`);
-  const { data, verified } = await askModel(`${RULES}
+  const data = await askModel(`${RULES}
 
 Ось наявний сценарій:
 ТЕМА: ${draft.theme}
@@ -309,15 +239,11 @@ ${draft.slides.map((s, i) => `${i + 1}. ТЕКСТ: ${s.text}\n   ЗОБРАЖЕ
 ЗАУВАЖЕННЯ ВЛАСНИКА (виконай точно, решту не ламай):
 ${notes}
 
-Якщо зауваження стосуються фактів — перевір їх веб-пошуком заново.
+Якщо зауваження стосуються фактів — застосуй розділ ФАКТИ заново: лишай тільки
+те, у чому впевнений, і онови "sources".
 
-${SHAPE}`, { search: needSearch });
-  // Без пошуку статус перевірки НЕ погіршуємо: факти вже були звірені при
-  // створенні теми, а правка стосувалась лише формулювань.
-  return {
-    ...parseResult(data, draft.theme),
-    verified: needSearch ? verified : (draft.verified ?? false),
-  };
+${SHAPE}`);
+  return parseResult(data, draft.theme);
 }
 
 // Промт для ChatGPT: затверджений сценарій + візуальний контекст. ChatGPT лише
@@ -338,8 +264,10 @@ export async function buildPromptText(draft, rowId = '') {
     v.doNotInvent && `НЕ ВИГАДУВАТИ: ${v.doNotInvent}`,
   ].filter(Boolean).join('\n');
 
+  // Посилання дала модель сценарію без веб-пошуку, тож це підказка, а не
+  // доказ: ChatGPT має звірити їх сам, коли шукатиме референси.
   const sources = (draft.sources || []).length
-    ? `\nДЖЕРЕЛА ДЛЯ ВІЗУАЛЬНОЇ ПЕРЕВІРКИ:\n${draft.sources.map((s) => `• ${s}`).join('\n')}\n`
+    ? `\nОРІЄНТОВНІ ДЖЕРЕЛА (звір самостійно, посилання можуть бути неточні):\n${draft.sources.map((s) => `• ${s}`).join('\n')}\n`
     : '';
 
   return `ЗАТВЕРДЖЕНИЙ СЦЕНАРІЙ. Твоє завдання — ЛИШЕ намалювати фото й зібрати
@@ -357,8 +285,12 @@ ${frames}
 
 ═══════════════════════════════════════
 ПОРЯДОК ДІЙ:
-1. Знайди реальні фото-референси об'єктів теми (за джерелами вище) і малюй
-   НАБЛИЖЕНО до справжнього вигляду, а не вигадану версію.
+1. ПЕРЕВІР ФАКТИ веб-пошуком, перш ніж малювати. Головний факт і всі числа з
+   текстів вище мають підтверджуватись щонайменше двома незалежними
+   джерелами, одне з яких офіційне чи первинне (музей, університет, наукова
+   публікація, держустанова, архів, UNESCO, Guinness, виробник). Заразом
+   знайди реальні фото-референси об'єктів і малюй НАБЛИЖЕНО до справжнього
+   вигляду, а не вигадану версію.
 2. Згенеруй УСІ ${n} зображень 9:16 ОДРАЗУ, в одному стилі, реалістичні,
    кінематографічні, ЧИСТІ БЕЗ ТЕКСТУ — написи накладає застосунок.
    Верхні 40% кадру тримай візуально спокійними (туди ляже напис),
@@ -376,8 +308,9 @@ ${frames}
      аудиторії, заклик підписатись і рівно 5 хештегів;
    • «Статус» — заміни NEW на DONE.
 
-Якщо під час пошуку референсів побачиш, що якийсь факт у сценарії помилковий —
-не малюй хибне: постав статус ERROR і коротко опиши проблему в «Примітці».`;
+Якщо перевірка показала, що факт або число у сценарії помилкові чи їх не
+вдалося підтвердити — НЕ малюй хибне і НЕ виправляй текст сам: постав статус
+ERROR і коротко опиши проблему в «Примітці».`;
 }
 
 // Шаблон стилю каналу (лишено для сумісності зі старими шляхами).

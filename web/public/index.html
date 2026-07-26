@@ -358,7 +358,6 @@
       // Картка згортається так само, як картка готового відео.
       const box = el('div', 'card');
       box.dataset.id = draft.key;
-      const check = draft.verified === false ? '⚠️' : (draft.verified ? '✅' : '');
 
       const head = el('div', 'card-head');
       head.appendChild(el('span', 'dot pending'));
@@ -370,7 +369,7 @@
       const inner = el('div', 'draft');
       inner.style.margin = '0'; inner.style.boxShadow = 'none'; inner.style.border = '0';
       inner.appendChild(el('div', 'kicker',
-        `${slotName(draft.slot).toUpperCase()} · ${esc(draft.date || '')}${check ? ` · ${check} ${draft.verified ? 'ПЕРЕВІРЕНО' : 'ФАКТИ НЕ ПЕРЕВІРЕНО'}` : ''}`));
+        `${slotName(draft.slot).toUpperCase()} · ${esc(draft.date || '')}`));
       if (draft.wow) {
         const wow = el('div', 'simg', `💥 ${esc(draft.wow)}`);
         wow.style.color = 'var(--text)'; wow.style.margin = '2px 0 8px';

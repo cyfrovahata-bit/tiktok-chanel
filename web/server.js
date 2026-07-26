@@ -190,8 +190,8 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // Які моделі OpenAI доступні акаунту (щоб знати, чи є модель із веб-пошуком).
-    // Повертає лише назви — секретів не розкриває.
+    // Які моделі OpenAI доступні акаунту (діагностика: чи існує та, якою
+    // генеруємо сценарій). Повертає лише назви — секретів не розкриває.
     if (req.method === 'GET' && pathname === '/api/models') {
       const key = process.env.OPENAI_API_KEY;
       if (!key) return json(res, 200, { error: 'OPENAI_API_KEY не задано' });
@@ -203,7 +203,7 @@ const server = http.createServer(async (req, res) => {
         const data = await r.json();
         const all = (data.data || []).map((m) => m.id).sort();
         return json(res, 200, {
-          scenarioModel: process.env.OPENAI_SCENARIO_MODEL || 'gpt-5.6',
+          scenarioModel: process.env.OPENAI_SCENARIO_MODEL || process.env.OPENAI_FALLBACK_MODEL || 'gpt-4o-mini',
           gpt5: all.filter((id) => id.startsWith('gpt-5')),
           gpt4: all.filter((id) => id.startsWith('gpt-4')),
           total: all.length,
