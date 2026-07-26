@@ -70,6 +70,14 @@ export async function readAllItems() {
   return items;
 }
 
+// Сирі комірки рядків A..N, як їх віддає Sheets — для діагностики, коли треба
+// побачити, що і в якій колонці реально лежить (наші назви колонок — лише
+// домовленість, і ChatGPT міг записати не туди).
+export async function readRawRows() {
+  const res = await api().spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: RANGE });
+  return res.data.values || [];
+}
+
 // Матеріал вважається ГОТОВИМ до монтажу, якщо статус DONE і заповнені
 // обов'язкові поля (ID, Архів, Назва, Опис).
 export function isReady(item) {

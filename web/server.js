@@ -13,7 +13,7 @@ import { readFile, mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { listDoneItems, listPublishedItems, markPublished, readAllItems, isReady } from '../src/sheets.js';
+import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady } from '../src/sheets.js';
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, ensureDailyDraft, draftStatus, pollStatus } from '../src/monitor.js';
 import { pendingDrafts, listDrafts, findDraft, upsertDraft, approveDraft, rejectDraft, draftRowId } from '../src/drafts.js';
@@ -256,8 +256,17 @@ const server = http.createServer(async (req, res) => {
       try {
         const item = (await readAllItems()).find((it) => it.id === id);
         if (!item) return json(res, 200, { error: `рядок ${id} не знайдено` });
+        // Сирі комірки: показують, у якій колонці текст лежить НАСПРАВДІ,
+        // якщо в очікуваній його немає.
+        const raw = (await readRawRows())[item.rowNumber - 1] || [];
+        const letters = 'ABCDEFGHIJKLMN'.split('');
+        const columns = letters.map((letter, i) => {
+          const value = String(raw[i] ?? '');
+          return { column: letter, chars: value.length, head: value.slice(0, 100) };
+        });
         return json(res, 200, {
-          id, slidesColumn: item.slides, chars: item.extra.length, prompt: item.extra,
+          id, row: item.rowNumber, slidesColumn: item.slides,
+          chars: item.extra.length, prompt: item.extra, columns,
         });
       } catch (error) {
         return json(res, 200, { error: error.message });
