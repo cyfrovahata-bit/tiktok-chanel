@@ -13,6 +13,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { buildSlideshow, mixAudio, slideshowDuration } from './montage.js';
 import { synthesizeVoiceover } from './tts.js';
 import { generateNarration, generatePostTexts } from './openai.js';
+import { splitScriptLines } from './archive.js';
 
 // Складає відео з фото + тексти публікації.
 //   photoPaths — локальні шляхи до 6 фото (у порядку слайдів);
@@ -33,10 +34,15 @@ export async function assembleVideo({ photoPaths, theme, script = null, withVoic
   // ж накладаються субтитрами. Один рядок = один JPG; інакше зрозуміла помилка.
   let captionLines = null;
   if (script) {
-    const lines = String(script).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    const lines = splitScriptLines(script);
     if (lines.length !== photoPaths.length) {
+      // Показуємо, що саме лежить у файлі: інакше «1 рядок замість 8» нічого
+      // не пояснює й доводиться качати архів руками.
+      const preview = String(script).replace(/\s+/g, ' ').trim().slice(0, 180);
       throw new Error(
-        `Рядків у script.txt (${lines.length}) не дорівнює кількості фото (${photoPaths.length}). Архів має містити рівно по рядку тексту на кожен JPG.`,
+        `Рядків у script.txt (${lines.length}) не дорівнює кількості фото (${photoPaths.length}). `
+        + 'Архів має містити рівно по рядку тексту на кожен JPG. '
+        + `Початок файлу: «${preview}${preview.length >= 180 ? '…' : ''}»`,
       );
     }
     captionLines = lines;

@@ -9,7 +9,8 @@
 // Стану на диску немає: джерело правди — Google Sheet + Drive.
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished, readAllItems, isReady } from '../src/sheets.js';
@@ -17,6 +18,8 @@ import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '
 import { startMonitor, pollOnce, forget, ensureDailyDraft, draftStatus, pollStatus } from '../src/monitor.js';
 import { pendingDrafts, findDraft, upsertDraft, approveDraft, rejectDraft, draftRowId } from '../src/drafts.js';
 import { reviseScenario, buildPromptText } from '../src/scenario.js';
+import { downloadArchive } from '../src/drive.js';
+import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { startAutoPublisher } from '../src/autopublish.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
@@ -239,6 +242,43 @@ const server = http.createServer(async (req, res) => {
           };
         });
         return json(res, 200, { total: all.length, rows });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
+    // Діагностика архіву: що реально лежить у ZIP цього рядка. Показує склад
+    // файлів і — головне — як розібрався script.txt (скільки рядків вийшло і
+    // які саме), щоб розбіжність «рядків ≠ фото» було видно без ручного
+    // завантаження. Секретів немає: це вміст архіву самого власника.
+    if (req.method === 'GET' && pathname === '/api/archive') {
+      const id = url.searchParams.get('id');
+      if (!id) return json(res, 200, { error: 'вкажи ?id=AUTO-…' });
+      try {
+        const item = (await readAllItems()).find((it) => it.id === id);
+        if (!item) return json(res, 200, { error: `рядок ${id} не знайдено` });
+        if (!item.archive) return json(res, 200, { error: `у рядку ${id} порожня колонка «Архів»` });
+        const dir = await mkdtemp(path.join(os.tmpdir(), 'diag-'));
+        const zipPath = path.join(dir, 'a.zip');
+        await downloadArchive(item.archive, zipPath);
+        const { photoPaths, scriptText } = await extractPhotoArchive(await readFile(zipPath));
+        const lines = scriptText ? splitScriptLines(scriptText) : [];
+        return json(res, 200, {
+          id,
+          photos: photoPaths.length,
+          scriptFound: Boolean(scriptText),
+          scriptChars: scriptText ? scriptText.length : 0,
+          // Які роздільники реально є у файлі — саме тут ховається причина.
+          separators: scriptText ? {
+            lf: (scriptText.match(/\n/g) || []).length,
+            cr: (scriptText.match(/\r/g) || []).length,
+            literalBackslashN: (scriptText.match(/\\n/g) || []).length,
+            unicodeLineSep: (scriptText.match(/[\u2028\u2029]/g) || []).length,
+          } : null,
+          linesParsed: lines.length,
+          matches: lines.length === photoPaths.length,
+          lines,
+        });
       } catch (error) {
         return json(res, 200, { error: error.message });
       }
