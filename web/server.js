@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished, readAllItems, isReady } from '../src/sheets.js';
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, ensureDailyDraft, draftStatus, pollStatus } from '../src/monitor.js';
-import { pendingDrafts, findDraft, upsertDraft, approveDraft, rejectDraft, draftRowId } from '../src/drafts.js';
+import { pendingDrafts, listDrafts, findDraft, upsertDraft, approveDraft, rejectDraft, draftRowId } from '../src/drafts.js';
 import { reviseScenario, buildPromptText } from '../src/scenario.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
@@ -286,7 +286,10 @@ const server = http.createServer(async (req, res) => {
 
     // --- Чернетки сценаріїв (теми на перевірку) -----------------------------
     if (req.method === 'GET' && pathname === '/api/draft') {
-      const drafts = await pendingDrafts().catch(() => []);
+      // ?all=1 — разом із затвердженими. Потрібно, коли архів прийшов битий і
+      // треба дістати затверджені тексти слайдів для нового script.txt.
+      const all = url.searchParams.get('all') === '1';
+      const drafts = await (all ? listDrafts() : pendingDrafts()).catch(() => []);
       return json(res, 200, { drafts });
     }
 
