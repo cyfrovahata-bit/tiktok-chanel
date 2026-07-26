@@ -100,6 +100,11 @@ async function processItem(item) {
 // Забути лічильник спроб для ID (напр. після ручної перегенерації).
 export function forget(id) { attempts.delete(id); }
 
+// Останній результат спроби створити чернетку — видно в /healthz, щоб мовчазні
+// падіння не лишалися непоміченими.
+let draftState = { lastTryAt: null, lastOkAt: null, lastError: null, notifiedFor: null };
+export function draftStatus() { return { ...draftState }; }
+
 // --- Чернетки сценаріїв: ранкова (з 08:00) і вечірня (з 16:00) --------------
 // Готуємо завчасно, щоб був час переглянути й перегенерувати до того, як
 // ChatGPT за відкладеним завданням візьме рядок у роботу.
@@ -111,6 +116,7 @@ export async function ensureDailyDraft(force = false, slotOverride = null, silen
   const key = `${today}-${slot}`;
   const items = await listDrafts().catch(() => []);
   if (!force && items.some((d) => d.key === key)) return null; // на цей слот уже є
+  draftState = { ...draftState, lastTryAt: new Date().toISOString() };
 
   // «Інша тема»: стару тему цього слота позначаємо відхиленою, щоб генератор
   // більше ніколи її не пропонував.
@@ -135,6 +141,7 @@ export async function ensureDailyDraft(force = false, slotOverride = null, silen
     status: 'pending', createdAt: new Date().toISOString(),
   };
   await upsertDraft(draft);
+  draftState = { lastTryAt: draftState.lastTryAt, lastOkAt: new Date().toISOString(), lastError: null, notifiedFor: null };
   const when = slot === 'pm' ? 'вечірня' : 'ранкова';
   console.log(`[draft] ${when} чернетка: «${draft.theme}» (${draft.slides.length} слайдів)`);
   // Сповіщаємо лише про ПЛАНОВУ чернетку. Коли власник сам натиснув «Інша
@@ -196,8 +203,18 @@ export function startMonitor() {
     if (!running) {
       running = true;
       try {
-        // Чернетка сценарію на слот (08:00 / 16:00) — не критична для черги.
-        await ensureDailyDraft().catch((e) => console.error('[draft]', e.message));
+        // Чернетка сценарію на слот (08:00 / 16:00) — не критична для черги,
+        // але про падіння маємо дізнатися: інакше власник просто чекає теми,
+        // якої не буде, і не розуміє чому.
+        await ensureDailyDraft().catch(async (error) => {
+          draftState = { ...draftState, lastTryAt: new Date().toISOString(), lastError: error.message };
+          console.error('[draft]', error.message);
+          const slotKey = `${kyivToday()}-${currentSlot() ?? 'none'}`;
+          if (draftState.notifiedFor !== slotKey) {
+            draftState.notifiedFor = slotKey;
+            await notify(`⚠️ Не вдалося підготувати тему:\n${error.message}\n\nСпробую ще раз автоматично.`);
+          }
+        });
         const n = await pollOnce();
         console.log(`[monitor] перевірено чергу: ${n} готових DONE`);
       } catch (error) {

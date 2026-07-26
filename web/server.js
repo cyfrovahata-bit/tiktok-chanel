@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished } from '../src/sheets.js';
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
-import { startMonitor, pollOnce, forget, ensureDailyDraft } from '../src/monitor.js';
+import { startMonitor, pollOnce, forget, ensureDailyDraft, draftStatus } from '../src/monitor.js';
 import { pendingDrafts, findDraft, upsertDraft, approveDraft, rejectDraft, draftRowId } from '../src/drafts.js';
 import { reviseScenario, buildPromptText } from '../src/scenario.js';
 import { startAutoPublisher } from '../src/autopublish.js';
@@ -378,6 +378,7 @@ const server = http.createServer(async (req, res) => {
         googleMode: g.mode,
         canUpload: g.canUpload,
         googleError: g.error,
+        draft: draftStatus(),
         serviceAccount: g.email || null,
         videoFolderSet: Boolean(videoFolderId()),
         tts: {
