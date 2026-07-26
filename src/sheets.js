@@ -38,6 +38,9 @@ function toItem(row, rowNumber) {
     pubDate: cell(row, COL.pubDate).trim(),
     status: cell(row, COL.status).trim().toUpperCase(),
     slides: cell(row, COL.slides).trim(),
+    // Колонка G «Додаткові вказівки» — саме сюди лягає промт для ChatGPT.
+    // Читаємо, щоб можна було звірити, що він реально отримав.
+    extra: cell(row, COL.extra),
     archive: cell(row, COL.archive).trim(),
     sources: cell(row, COL.sources).trim(),
     note: cell(row, COL.note).trim(),

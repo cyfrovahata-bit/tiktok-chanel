@@ -247,6 +247,23 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Що реально записано в колонку G цього рядка — тобто який промт ChatGPT
+    // насправді отримав. Потрібно, щоб відрізняти «промт неповний» від
+    // «промт правильний, але його проігнорували».
+    if (req.method === 'GET' && pathname === '/api/prompt') {
+      const id = url.searchParams.get('id');
+      if (!id) return json(res, 200, { error: 'вкажи ?id=AUTO-…' });
+      try {
+        const item = (await readAllItems()).find((it) => it.id === id);
+        if (!item) return json(res, 200, { error: `рядок ${id} не знайдено` });
+        return json(res, 200, {
+          id, slidesColumn: item.slides, chars: item.extra.length, prompt: item.extra,
+        });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
     // Діагностика архіву: що реально лежить у ZIP цього рядка. Показує склад
     // файлів і — головне — як розібрався script.txt (скільки рядків вийшло і
     // які саме), щоб розбіжність «рядків ≠ фото» було видно без ручного
