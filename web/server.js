@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { listDoneItems, listPublishedItems, markPublished } from '../src/sheets.js';
+import { listDoneItems, listPublishedItems, markPublished, readAllItems, isReady } from '../src/sheets.js';
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, ensureDailyDraft, draftStatus } from '../src/monitor.js';
 import { pendingDrafts, findDraft, upsertDraft, approveDraft, rejectDraft, draftRowId } from '../src/drafts.js';
@@ -209,6 +209,36 @@ const server = http.createServer(async (req, res) => {
           total: all.length,
           all,
         });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
+    // Діагностика черги: ЧОМУ рядок не беруть у роботу. Монітор бере рядок
+    // лише коли статус DONE і заповнені ID, Архів, Назва, Опис (isReady).
+    // Показуємо по кожному рядку, чого саме бракує. Секретів тут немає —
+    // лише статус, тема й «так/ні» про заповненість колонок.
+    if (req.method === 'GET' && pathname === '/api/rows') {
+      try {
+        const [all, videos] = await Promise.all([readAllItems(), listVideos().catch(() => new Map())]);
+        const rows = all.slice(-15).reverse().map((it) => {
+          const missing = [];
+          if (!it.id) missing.push('ID');
+          if (!it.archive) missing.push('Архів');
+          if (!it.title.trim()) missing.push('Назва');
+          if (!it.description.trim()) missing.push('Опис');
+          return {
+            row: it.rowNumber,
+            id: it.id,
+            status: it.status,
+            theme: it.theme.slice(0, 80),
+            ready: isReady(it),
+            missing,
+            hasVideo: videos.has(videoName(it.id)),
+            note: it.note.slice(0, 200),
+          };
+        });
+        return json(res, 200, { total: all.length, rows });
       } catch (error) {
         return json(res, 200, { error: error.message });
       }
