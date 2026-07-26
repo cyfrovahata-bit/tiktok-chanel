@@ -100,6 +100,16 @@ async function processItem(item) {
 // Забути лічильник спроб для ID (напр. після ручної перегенерації).
 export function forget(id) { attempts.delete(id); }
 
+// Останній прохід черги — видно в /healthz. Без цього «нічого не сталося»
+// не відрізнити від «монтаж триває» чи «впало й мовчить».
+let pollState = {
+  lastRunAt: null, lastDoneCount: null, busyWith: null,
+  lastGeneratedId: null, lastGeneratedAt: null, lastError: null,
+};
+export function pollStatus() {
+  return { ...pollState, attempts: Object.fromEntries(attempts) };
+}
+
 // Останній результат спроби створити чернетку — видно в /healthz, щоб мовчазні
 // падіння не лишалися непоміченими.
 let draftState = { lastTryAt: null, lastOkAt: null, lastError: null, notifiedFor: null };
@@ -175,16 +185,23 @@ export async function pollOnce() {
 
 async function pollOnceInner() {
   const [items, videos] = await Promise.all([listDoneItems(), listVideos()]);
+  pollState = { ...pollState, lastRunAt: new Date().toISOString(), lastDoneCount: items.length };
   let generated = 0;
   for (const item of items) {
     if (videos.has(videoName(item.id))) continue; // відео вже є → готове
     if ((attempts.get(item.id) || 0) >= MAX_ATTEMPTS) continue; // здалися
     try {
+      pollState = { ...pollState, busyWith: item.id };
       await processItem(item);
       generated++;
+      pollState = {
+        ...pollState, busyWith: null, lastError: null,
+        lastGeneratedId: item.id, lastGeneratedAt: new Date().toISOString(),
+      };
     } catch (error) {
       const tried = (attempts.get(item.id) || 0) + 1;
       attempts.set(item.id, tried);
+      pollState = { ...pollState, busyWith: null, lastError: `${item.id} (спроба ${tried}): ${error.message}` };
       console.error(`Помилка обробки ${item.id} (спроба ${tried}):`, error.message);
       if (tried >= MAX_ATTEMPTS) {
         await notify(`⚠️ Не вдалося зробити відео для «${item.title}» після ${MAX_ATTEMPTS} спроб:\n${error.message}`);
