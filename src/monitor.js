@@ -95,6 +95,17 @@ async function processItem(item) {
   const zipBuffer = await readFile(zipPath);
   const { photoPaths, scriptText } = await extractPhotoArchive(zipBuffer);
 
+  // Скільки слайдів затверджено — записано в колонці F ще при створенні рядка.
+  // Якщо в архіві інша кількість фото, справжня причина саме тут, а не в
+  // розбіжності «рядки script.txt ≠ фото», яку побачив би конвеєр далі.
+  const wanted = Number(item.slides);
+  if (Number.isInteger(wanted) && wanted > 0 && photoPaths.length !== wanted) {
+    throw new Error(
+      `Фото в архіві (${photoPaths.length}) не збігається із затвердженим сценарієм (${wanted} слайдів). `
+      + 'Перезбери архів рівно на стільки фото, скільки рядків у сценарії.',
+    );
+  }
+
   // Назву/опис беремо з таблиці — тут потрібне лише відео (без OpenAI-текстів).
   const { videoPath } = await assembleVideo({
     photoPaths,
