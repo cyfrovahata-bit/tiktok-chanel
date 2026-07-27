@@ -176,6 +176,13 @@ export async function publishFacebookReel({ videoUrl, description }, options = {
   }, fetchImpl);
   if (transferred.success === false) throw new Error('Facebook не прийняв файл Reel');
 
+  // is_ai_generated немає в посібнику «Publish a Reel» — його таблиця параметрів
+  // обриваються на video_state/description. Параметр описаний лише в довіднику
+  // Graph API для ребра /{page-id}/video_reels: «A boolean flag for developers
+  // to self-claim whether the video was created with AI». Це той самий
+  // перемикач «Додати значок ШІ», що видно при ручній публікації; без нього
+  // Facebook вважає ролик недекларованим ШІ-контентом і може тихо, без жодної
+  // помилки в API, обмежити його показ.
   const finished = await graphRequest(`${encodeURIComponent(pageId)}/video_reels`, {
     method: 'POST',
     params: {
@@ -183,6 +190,7 @@ export async function publishFacebookReel({ videoUrl, description }, options = {
       video_id: started.video_id,
       video_state: 'PUBLISHED',
       description: String(description || ''),
+      ...(process.env.META_AI_LABEL === '0' ? {} : { is_ai_generated: 'true' }),
     },
     token,
     fetchImpl,

@@ -72,6 +72,34 @@ test('Facebook: starts upload, transfers by public URL and publishes Reel', asyn
   assert.equal(calls[2].options.body.get('upload_phase'), 'finish');
   assert.equal(calls[2].options.body.get('video_state'), 'PUBLISHED');
   assert.equal(calls[2].options.body.get('description'), 'Опис');
+  assert.equal(calls[2].options.body.get('is_ai_generated'), 'true');
+});
+
+test('Facebook: ШІ-позначку можна вимкнути через META_AI_LABEL=0', async () => {
+  const calls = [];
+  const responses = [
+    reply({ video_id: 'fb-video-2', upload_url: 'https://rupload.facebook.test/upload' }),
+    reply({ success: true }),
+    reply({ success: true }),
+  ];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    return responses.shift();
+  };
+
+  const previous = process.env.META_AI_LABEL;
+  process.env.META_AI_LABEL = '0';
+  try {
+    await publishFacebookReel(
+      { videoUrl: 'https://example.com/video.mp4', description: 'Опис' },
+      { token: 'page-token', pageId: '456', fetchImpl },
+    );
+  } finally {
+    if (previous === undefined) delete process.env.META_AI_LABEL;
+    else process.env.META_AI_LABEL = previous;
+  }
+
+  assert.equal(calls[2].options.body.has('is_ai_generated'), false);
 });
 
 test('Meta errors include API code', async () => {
