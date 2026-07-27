@@ -67,6 +67,27 @@ function verifyInitData(initData) {
   return { ok: true, user };
 }
 
+// Одноразові state для OAuth TikTok. Живуть у пам'яті процесу: перезапуск між
+// «Почати» і «Дозволити» просто вимагає повторити спробу — це дешевше, ніж
+// зберігати їх десь іще.
+const tiktokStates = new Map(); // state → час видачі
+const TIKTOK_STATE_TTL = 15 * 60 * 1000;
+
+function issueTiktokState() {
+  const now = Date.now();
+  for (const [key, at] of tiktokStates) if (now - at > TIKTOK_STATE_TTL) tiktokStates.delete(key);
+  const state = crypto.randomBytes(16).toString('hex');
+  tiktokStates.set(state, now);
+  return state;
+}
+
+function consumeTiktokState(state) {
+  if (!state || !tiktokStates.has(state)) return false;
+  const at = tiktokStates.get(state);
+  tiktokStates.delete(state); // одноразовий
+  return Date.now() - at <= TIKTOK_STATE_TTL;
+}
+
 // Лише власник каналу може публікувати (user.id = TELEGRAM_CHAT_ID).
 function isOwner(user) {
   const owner = process.env.TELEGRAM_CHAT_ID;
@@ -492,12 +513,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- TikTok --------------------------------------------------------------
-    // Крок 1: згода. Redirect URI має бути доданий у налаштуваннях застосунку.
+    // Крок 1: згода. Redirect URI має бути в списку застосунку; якщо він
+    // замкнений на чужий домен, задай TIKTOK_REDIRECT_URI і постав там
+    // переадресацію на наш /tiktok/callback.
     if (req.method === 'GET' && pathname === '/tiktok/start') {
       if (!tiktokConfigured()) {
         return json(res, 200, { error: 'Задай TIKTOK_CLIENT_KEY і TIKTOK_CLIENT_SECRET' });
       }
-      res.writeHead(302, { location: tiktokConsentUrl() });
+      res.writeHead(302, { location: tiktokConsentUrl(issueTiktokState()) });
       return res.end();
     }
 
@@ -508,6 +531,17 @@ const server = http.createServer(async (req, res) => {
       if (error || !code) {
         res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
         return res.end(`<h2>TikTok не дав дозвіл</h2><p>${error || 'немає code'}</p>`);
+      }
+      // Без цієї перевірки будь-хто, хто знає адресу, міг би авторизуватися
+      // СВОЇМ акаунтом і підмінити збережений токен — ролики пішли б на чужий
+      // профіль. Приймаємо лише code, що прийшов на наш власний state.
+      if (!consumeTiktokState(url.searchParams.get('state'))) {
+        res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(
+          '<h2>Невідомий state</h2>'
+          + '<p>Починай авторизацію з <code>/tiktok/start</code> цього ж застосунку. '
+          + 'Якщо між кроками перезапустився сервер — просто спробуй ще раз.</p>',
+        );
       }
       try {
         const saved = await tiktokExchangeCode(code);
