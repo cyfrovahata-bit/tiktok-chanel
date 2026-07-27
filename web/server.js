@@ -327,6 +327,30 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Охоплення допису. Вирішальний сигнал, коли Graph показує «Публічно», а
+    // сторінка не відкривається: нуль показів = Facebook не роздає допис,
+    // тобто обмеження є, просто його не видно в полях приватності.
+    if (req.method === 'GET' && pathname === '/api/meta/insights') {
+      const storyId = url.searchParams.get('id');
+      const token = process.env.META_PAGE_ACCESS_TOKEN;
+      if (!storyId) return json(res, 200, { error: 'вкажи ?id=<story id, напр. 1217780308083247_1221…>' });
+      if (!token) return json(res, 200, { error: 'META_PAGE_ACCESS_TOKEN не задано' });
+      try {
+        const base = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v25.0'}`;
+        const metrics = 'post_impressions,post_impressions_unique,post_video_views';
+        const r = await fetch(
+          `${base}/${encodeURIComponent(storyId)}/insights?metric=${metrics}&access_token=${encodeURIComponent(token)}`,
+        );
+        const data = await r.json();
+        if (data.error) return json(res, 200, { error: data.error.message });
+        const out = {};
+        for (const m of data.data || []) out[m.name] = m.values?.[0]?.value ?? null;
+        return json(res, 200, { id: storyId, ...out });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
     // Дописи у СТРІЧЦІ Сторінки. Reel і запис у стрічці — різні обʼєкти:
     // ролик може існувати як Reel, але не мати story у стрічці, і тоді
     // story.php по його ID не відкривається, а охоплення йде лише через
