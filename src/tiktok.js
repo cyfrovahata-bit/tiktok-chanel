@@ -205,8 +205,10 @@ export async function publishTikTokVideo({ videoBuffer, title }, options = {}) {
       post_info: {
         title: String(title || '').slice(0, 2200),
         privacy_level: privacy,
-        // Кадри малює нейромережа — позначаємо, як і в Instagram.
-        is_aigc: process.env.TIKTOK_AI_LABEL === '0' ? false : true,
+        // Кадри малює нейромережа — позначаємо, як і в Instagram. Вимкнути
+        // можна лише явним TIKTOK_AI_LABEL=0: краще позначити зайвий раз,
+        // ніж отримати санкції за недекларований ШІ-контент.
+        is_aigc: process.env.TIKTOK_AI_LABEL !== '0',
       },
       source_info,
     };
