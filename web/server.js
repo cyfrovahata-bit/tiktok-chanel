@@ -327,6 +327,33 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Стан конкретного допису у Facebook: чи опублікований, яка приватність,
+    // яке постійне посилання. Питання «чому одне видно без логіну, а інше ні»
+    // без цього доводиться вгадувати.
+    if (req.method === 'GET' && pathname === '/api/meta/post') {
+      const id = url.searchParams.get('id');
+      const token = process.env.META_PAGE_ACCESS_TOKEN;
+      if (!id) return json(res, 200, { error: 'вкажи ?id=<facebook post id>' });
+      if (!token) return json(res, 200, { error: 'META_PAGE_ACCESS_TOKEN не задано' });
+      try {
+        const base = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v25.0'}`;
+        const fields = 'id,permalink_url,privacy,published,status,created_time,title,description';
+        const r = await fetch(`${base}/${encodeURIComponent(id)}?fields=${fields}&access_token=${encodeURIComponent(token)}`);
+        const data = await r.json();
+        if (data.error) return json(res, 200, { error: data.error.message });
+        return json(res, 200, {
+          id: data.id,
+          permalink: data.permalink_url ? `https://www.facebook.com${data.permalink_url}` : null,
+          published: data.published,
+          privacy: data.privacy || null,
+          status: data.status || null,
+          createdTime: data.created_time || null,
+        });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
     // Що саме автопублікація вже відправила: мітки живуть у appProperties
     // самого MP4, і без цього подивитися на них нема як.
     if (req.method === 'GET' && pathname === '/api/autopost/status') {
