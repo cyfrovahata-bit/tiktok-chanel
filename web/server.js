@@ -13,7 +13,8 @@ import { readFile, mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady } from '../src/sheets.js';
+import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady, listNewItems, updateRowPrompt } from '../src/sheets.js';
+import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-prompt.js';
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
 import { downloadArchive } from '../src/drive.js';
@@ -72,16 +73,17 @@ function isOwner(user) {
 
 // --- Дані для мінідодатка (короткий кеш, щоб не смикати Google щоразу) ------
 const CACHE_MS = 20 * 1000;
-let cache = { at: 0, done: [], published: [], videos: new Map() };
+let cache = { at: 0, done: [], published: [], videos: new Map(), pending: [] };
 
 async function refreshCache() {
   if (Date.now() - cache.at < CACHE_MS) return cache;
-  const [done, published, videos] = await Promise.all([
+  const [done, published, videos, pending] = await Promise.all([
     listDoneItems().catch(() => []),
     listPublishedItems().catch(() => []),
     listVideos().catch(() => new Map()),
+    listNewItems().catch(() => []),
   ]);
-  cache = { at: Date.now(), done, published, videos };
+  cache = { at: Date.now(), done, published, videos, pending };
   return cache;
 }
 
@@ -148,6 +150,14 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && (pathname === '/api/state' || pathname === '/api/queue')) {
       const c = await refreshCache();
       json(res, 200, {
+        // Теми, які ChatGPT уже написав, але ще не малював: їх можна правити.
+        pending: c.pending.map((it) => ({
+          id: it.id,
+          theme: it.theme || parseTheme(it.extra),
+          slides: parseSlideLines(it.extra),
+          note: it.note,
+          created: it.created,
+        })),
         queue: queueFrom(c),
         published: c.published.map((it) => ({
           id: it.id, title: it.title || it.theme, theme: it.theme, pubDate: it.pubDate,
@@ -253,6 +263,26 @@ const server = http.createServer(async (req, res) => {
         });
       } catch (error) {
         return json(res, 200, { error: error.message });
+      }
+    }
+
+    // Правка теми, яку ChatGPT уже підготував, але ще не малював. Міняємо
+    // лише тексти слайдів і тему; кількість рядків лишається тією самою, щоб
+    // не розійтися з колонкою «Слайдів» і кількістю майбутніх фото.
+    if (req.method === 'POST' && pathname === '/api/pending/save') {
+      const body = JSON.parse(await readBody(req));
+      const check = verifyInitData(body.initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Правити може лише власник каналу' });
+      try {
+        const item = (await readAllItems()).find((it) => it.id === body.id);
+        if (!item) throw new Error(`Рядок ${body.id} не знайдено`);
+        const prompt = applySlideLines(item.extra, body.slides || []);
+        await updateRowPrompt(body.id, { theme: body.theme, prompt });
+        cache.at = 0;
+        return json(res, 200, { ok: true, slides: (body.slides || []).length });
+      } catch (error) {
+        return json(res, 400, { error: error.message });
       }
     }
 

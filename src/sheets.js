@@ -42,6 +42,7 @@ function toItem(row, rowNumber) {
     // Читаємо, щоб можна було звірити, що він реально отримав.
     extra: cell(row, COL.extra),
     archive: cell(row, COL.archive).trim(),
+    created: cell(row, COL.created).trim(),
     sources: cell(row, COL.sources).trim(),
     note: cell(row, COL.note).trim(),
     // Назву й опис НЕ тримуємо: показуємо точно як у таблиці (абзаци, емодзі).
@@ -121,6 +122,36 @@ export async function markPublished(id, when = new Date()) {
     requestBody: { values: [[date, 'PUBLISHED']] },
   });
   return { rowNumber: item.rowNumber, date };
+}
+
+// Рядки, які ChatGPT уже підготував, але ще не малював (статус NEW). Саме їх
+// власник може виправити в мінідодатку до 15:00/20:00.
+export async function listNewItems() {
+  return (await readAllItems()).filter((it) => it.status === 'NEW' && it.id);
+}
+
+// Переписує тему й промт наявного рядка. Статус, архів, назву й опис не
+// чіпаємо — це поле відповідальності ChatGPT.
+export async function updateRowPrompt(id, { theme, prompt }) {
+  const item = (await readAllItems()).find((it) => it.id === id);
+  if (!item) throw new Error(`ID ${id} не знайдено в таблиці`);
+  if (item.status !== 'NEW') {
+    throw new Error(`ID ${id} у статусі ${item.status} — правити можна лише NEW`);
+  }
+  const row = item.rowNumber;
+  await api().spreadsheets.values.update({
+    spreadsheetId: SHEET_ID,
+    range: `${TAB}!C${row}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [[theme ?? item.theme]] },
+  });
+  await api().spreadsheets.values.update({
+    spreadsheetId: SHEET_ID,
+    range: `${TAB}!G${row}`,
+    valueInputOption: 'RAW', // промт — просто текст, формули з нього не потрібні
+    requestBody: { values: [[prompt]] },
+  });
+  return { rowNumber: row };
 }
 
 // Додає рядок у чергу зі статусом NEW і готовим промтом у колонці

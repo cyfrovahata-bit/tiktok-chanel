@@ -373,11 +373,91 @@
       return row;
     }
 
+    // --- Тема на перевірку (рядок NEW у таблиці) ----------------------------
+    // ChatGPT уже написав сюжет, але ще не малює. Тут його можна поправити —
+    // зміни лягають назад у промт, за яким малюватимуться кадри.
+    function pendingCard(item) {
+      const box = el('div', 'card');
+      const head = el('div', 'card-head');
+      head.appendChild(el('span', 'dot pending'));
+      head.appendChild(el('div', 'head-title', esc(item.theme || item.id)));
+      head.appendChild(el('span', 'chev', '▶'));
+      box.appendChild(head);
+
+      const wrap = el('div', 'card-body-wrap');
+      const body = el('div', 'card-body');
+      body.appendChild(el('div', 'kicker',
+        `${esc(item.id)} · ${item.slides.length} слайдів${item.created ? ` · ${esc(item.created)}` : ''}`));
+
+      // Тема окремим полем: вона йде і в колонку C, і в заголовок промту.
+      const themeBox = el('textarea', 'notes');
+      themeBox.value = item.theme || '';
+      themeBox.rows = 2;
+      themeBox.style.margin = '0 0 10px';
+      body.appendChild(themeBox);
+
+      const autoFit = (ta) => {
+        const fit = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
+        ta.addEventListener('input', fit);
+        setTimeout(fit, 0);
+      };
+
+      const inputs = item.slides.map((line, i) => {
+        const row = el('div', 'slide-row');
+        row.appendChild(el('div', 'num', `СЛАЙД ${i + 1}`));
+        const ta = el('textarea', 'notes');
+        ta.value = line;
+        ta.rows = 2;
+        ta.style.margin = '4px 0 0';
+        autoFit(ta);
+        row.appendChild(ta);
+        body.appendChild(row);
+        return ta;
+      });
+      autoFit(themeBox);
+
+      const actions = el('div', 'actions');
+      const save = el('button', 'btn primary', '💾 Зберегти');
+      save.addEventListener('click', async () => {
+        const old = save.textContent;
+        save.disabled = true; save.textContent = 'Зберігаю…';
+        try {
+          const r = await fetch('/api/pending/save', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              initData, id: item.id,
+              theme: themeBox.value.trim(),
+              slides: inputs.map((t) => t.value),
+            }),
+          });
+          const data = await r.json();
+          if (!r.ok || data.error) throw new Error(data.error || 'Помилка');
+          notify('success'); toast('Збережено в таблицю');
+        } catch (e) { notify('error'); toast(e.message); }
+        finally { save.disabled = false; save.textContent = old; }
+      });
+      actions.appendChild(save);
+      body.appendChild(actions);
+
+      wrap.appendChild(body);
+      box.appendChild(wrap);
+
+      const setOpen = (open) => box.classList.toggle('open', open);
+      head.addEventListener('click', () => { haptic(); setOpen(!box.classList.contains('open')); });
+      return box;
+    }
+
     function render(state) {
       const app = $('#app'); app.innerHTML = '';
       const banner = $('#banner'); banner.innerHTML = '';
       if (!state.googleReady) banner.appendChild(el('div', 'banner', '⚙️ Google-доступ ще не налаштовано на сервері — черга поки порожня.'));
       else if (state.videoFolderSet === false) banner.appendChild(el('div', 'banner', '⚙️ Не задано папку Drive для відео (VIDEO_FOLDER_ID) — монтаж вимкнено.'));
+
+      const pending = (state.pending || []).filter((p) => p.slides && p.slides.length);
+      if (pending.length) {
+        app.appendChild(el('h2', 'section', pending.length > 1 ? 'Теми на перевірку' : 'Тема на перевірку'));
+        pending.forEach((p) => app.appendChild(pendingCard(p)));
+      }
 
       const q = state.queue || [];
       $('#count').textContent = q.length ? `${q.length} до публікації` : '';
