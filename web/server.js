@@ -15,7 +15,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady, listNewItems, updateRowPrompt, deleteQueueRow, appendRejectedTheme, listRejectedThemes } from '../src/sheets.js';
 import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-prompt.js';
-import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
+import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoFolderId, deleteVideo, remuxVideoToSpec } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
 import { forgetNotice } from '../src/notices.js';
 import { downloadArchive } from '../src/drive.js';
@@ -454,6 +454,20 @@ const server = http.createServer(async (req, res) => {
           crosspostEligible: data.is_crossposting_eligible ?? null,
           contentCategory: data.content_category ?? null,
         });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
+    // Разова перепаковка старого ролика під специфікацію Meta Reels. Потрібна
+    // лише для файлів, змонтованих до виправлення параметрів звуку; нові
+    // виходять правильними одразу. Ролик перезаписується тим самим fileId,
+    // мітки автопублікації не чіпаються.
+    if (req.method === 'GET' && pathname === '/api/remux') {
+      const id = url.searchParams.get('id');
+      if (!id) return json(res, 200, { error: 'вкажи ?id=AUTO-РРРРММДД-ГГХХ' });
+      try {
+        return json(res, 200, await remuxVideoToSpec(id));
       } catch (error) {
         return json(res, 200, { error: error.message });
       }

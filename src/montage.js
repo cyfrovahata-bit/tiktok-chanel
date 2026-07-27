@@ -12,6 +12,10 @@ const FONTS_DIR = fileURLToPath(new URL('../assets/fonts', import.meta.url));
 const WIDTH = 1080;
 const HEIGHT = 1920;
 const FPS = 25;
+// Meta вимагає для Reels closed GOP довжиною 2–5 секунд. За замовчуванням x264
+// ставив ключовий кадр раз на ~10 с — на статичних кадрах із повільним zoompan
+// детектор зміни сцени просто не спрацьовував.
+const GOP_ARGS = ['-g', String(FPS * 2), '-keyint_min', String(FPS * 2), '-sc_threshold', '0', '-flags', '+cgop'];
 export const DEFAULT_SLIDE_SECONDS = 4;
 export const FADE_SECONDS = 0.5;
 // J-cut: озвучка наступного слайда починається на стільки раніше за зміну
@@ -105,6 +109,7 @@ export async function buildSlideshow(photoPaths, outputPath, slides = photoPaths
     '-c:v', 'libx264',
     '-pix_fmt', 'yuv420p',
     '-r', String(FPS),
+    ...GOP_ARGS,
     '-movflags', '+faststart',
     silentTarget,
   );
@@ -130,6 +135,29 @@ async function burnSubtitles(inPath, assPath, outPath) {
     '-c:v', 'libx264',
     '-pix_fmt', 'yuv420p',
     '-r', String(FPS),
+    ...GOP_ARGS,
+    '-movflags', '+faststart',
+    outPath,
+  ]);
+  return outPath;
+}
+
+// Приводить уже змонтований ролик до специфікації Meta Reels. Потрібно лише
+// для файлів, зроблених до виправлення параметрів звуку: перемонтувати їх нема
+// з чого (архіви з фото давно прибрані), а публікувати як є — марно.
+export async function remuxToReelsSpec(inPath, outPath) {
+  await runFfmpeg([
+    '-y',
+    '-i', inPath,
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    '-r', String(FPS),
+    ...GOP_ARGS,
+    '-c:a', 'aac',
+    '-profile:a', 'aac_low',
+    '-ar', '48000',
+    '-ac', '2',
+    '-b:a', '128k',
     '-movflags', '+faststart',
     outPath,
   ]);
@@ -137,6 +165,15 @@ async function burnSubtitles(inPath, assPath, outPath) {
 }
 
 // Підкладає озвучку під готове відео; тиша в кінці, якщо аудіо коротше.
+//
+// Параметри звуку задані явно й не успадковуються від TTS-доріжки. Meta вимагає
+// для Reels стерео, 48 кГц і 128 кбіт/с, а озвучка з ElevenLabs приходить
+// монофонічним MP3 на 44,1 кГц — без цих ключів AAC успадковував їх, і ролик
+// не проходив за специфікацією. Facebook такий файл приймав мовчки, але не
+// створював для нього «Оригінальний звук» і не пускав у стрічку Reels: у
+// публічній вкладці сторінки його не бачили ні сторонні, ні підписники.
+// Руками той самий ролик публікувався нормально, бо застосунок на телефоні
+// перекодовує файл перед відправкою і тим самим лагодить усі три параметри.
 export async function mixAudio(videoPath, audioPath, outputPath) {
   await runFfmpeg([
     '-y',
@@ -146,6 +183,9 @@ export async function mixAudio(videoPath, audioPath, outputPath) {
     '-map', '1:a',
     '-c:v', 'copy',
     '-c:a', 'aac',
+    '-profile:a', 'aac_low',
+    '-ar', '48000',
+    '-ac', '2',
     '-b:a', '128k',
     '-af', 'apad',
     '-shortest',
