@@ -15,9 +15,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady } from '../src/sheets.js';
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
-import { startMonitor, pollOnce, forget, ensureDailyDraft, draftStatus, pollStatus } from '../src/monitor.js';
-import { pendingDrafts, listDrafts, findDraft, upsertDraft, approveDraft, rejectDraft, draftRowId } from '../src/drafts.js';
-import { reviseScenario, buildPromptText } from '../src/scenario.js';
+import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { createSubmission, addPhoto, submitOwn } from '../src/own.js';
@@ -195,60 +193,6 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // Які моделі OpenAI доступні акаунту (діагностика: чи існує та, якою
-    // генеруємо сценарій). Повертає лише назви — секретів не розкриває.
-    if (req.method === 'GET' && pathname === '/api/models') {
-      const key = process.env.OPENAI_API_KEY;
-      if (!key) return json(res, 200, { error: 'OPENAI_API_KEY не задано' });
-      try {
-        const r = await fetch('https://api.openai.com/v1/models', {
-          headers: { authorization: `Bearer ${key}` },
-        });
-        if (!r.ok) return json(res, 200, { error: `OpenAI HTTP ${r.status}` });
-        const data = await r.json();
-        const all = (data.data || []).map((m) => m.id).sort();
-        return json(res, 200, {
-          scenarioModel: process.env.OPENAI_SCENARIO_MODEL || process.env.OPENAI_FALLBACK_MODEL || 'gpt-4o-mini',
-          gpt5: all.filter((id) => id.startsWith('gpt-5')),
-          gpt4: all.filter((id) => id.startsWith('gpt-4')),
-          total: all.length,
-          all,
-        });
-      } catch (error) {
-        return json(res, 200, { error: error.message });
-      }
-    }
-
-    // Діагностика черги: ЧОМУ рядок не беруть у роботу. Монітор бере рядок
-    // лише коли статус DONE і заповнені ID, Архів, Назва, Опис (isReady).
-    // Показуємо по кожному рядку, чого саме бракує. Секретів тут немає —
-    // лише статус, тема й «так/ні» про заповненість колонок.
-    if (req.method === 'GET' && pathname === '/api/rows') {
-      try {
-        const [all, videos] = await Promise.all([readAllItems(), listVideos().catch(() => new Map())]);
-        const rows = all.slice(-15).reverse().map((it) => {
-          const missing = [];
-          if (!it.id) missing.push('ID');
-          if (!it.archive) missing.push('Архів');
-          if (!it.title.trim()) missing.push('Назва');
-          if (!it.description.trim()) missing.push('Опис');
-          return {
-            row: it.rowNumber,
-            id: it.id,
-            status: it.status,
-            theme: it.theme.slice(0, 80),
-            ready: isReady(it),
-            missing,
-            hasVideo: videos.has(videoName(it.id)),
-            note: it.note.slice(0, 200),
-          };
-        });
-        return json(res, 200, { total: all.length, rows });
-      } catch (error) {
-        return json(res, 200, { error: error.message });
-      }
-    }
-
     // Що реально записано в колонку G цього рядка — тобто який промт ChatGPT
     // насправді отримав. Потрібно, щоб відрізняти «промт неповний» від
     // «промт правильний, але його проігнорували».
@@ -350,86 +294,6 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // --- Чернетки сценаріїв (теми на перевірку) -----------------------------
-    if (req.method === 'GET' && pathname === '/api/draft') {
-      // ?all=1 — разом із затвердженими. Потрібно, коли архів прийшов битий і
-      // треба дістати затверджені тексти слайдів для нового script.txt.
-      const all = url.searchParams.get('all') === '1';
-      const drafts = await (all ? listDrafts() : pendingDrafts()).catch(() => []);
-      return json(res, 200, { drafts });
-    }
-
-    // regenerate (інша тема) | edit (за зауваженнями) | approve (ОК → рядок у таблиці)
-    if (req.method === 'POST' && pathname.startsWith('/api/draft/')) {
-      const action = pathname.slice('/api/draft/'.length);
-      const body = JSON.parse(await readBody(req));
-      const check = verifyInitData(body.initData);
-      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
-      if (!isOwner(check.user)) return json(res, 403, { error: 'Доступ лише власнику каналу' });
-      try {
-        const current = body.key ? await findDraft(body.key) : null;
-        if (action === 'regenerate') {
-          // silent=true: власник у додатку, дублювати в Telegram не треба.
-          const draft = await ensureDailyDraft(true, current?.slot ?? null, true);
-          return json(res, 200, { draft });
-        }
-        if (action === 'edit') {
-          const notes = String(body.notes || '').trim();
-          if (!notes) return json(res, 400, { error: 'Порожні зауваження' });
-          if (!current) return json(res, 404, { error: 'Чернетки немає' });
-          const revised = await reviseScenario(current, notes);
-          const draft = { ...current, ...revised, status: 'pending', notes, updatedAt: new Date().toISOString() };
-          await upsertDraft(draft);
-          return json(res, 200, { draft });
-        }
-        // Ручні правки без ШІ: замінити слово в рядку, підправити розповідь.
-        if (action === 'save') {
-          if (!current) return json(res, 404, { error: 'Чернетки немає' });
-          const slides = Array.isArray(body.slides)
-            ? body.slides
-              .map((s, i) => ({
-                text: String(s?.text ?? '').trim(),
-                // Опис кадру лишаємо з наявної чернетки — його не редагують.
-                image: current.slides[i]?.image ?? '',
-              }))
-              .filter((s) => s.text)
-            : current.slides;
-          if (!slides.length) return json(res, 400, { error: 'Порожній сценарій' });
-          const draft = {
-            ...current,
-            slides,
-            story: body.story != null ? String(body.story).trim() : current.story,
-            updatedAt: new Date().toISOString(),
-          };
-          await upsertDraft(draft);
-          return json(res, 200, { draft });
-        }
-
-        // Готовий промт для ChatGPT — щоб скопіювати, не відкриваючи таблицю.
-        if (action === 'prompt') {
-          if (!current) return json(res, 404, { error: 'Чернетки немає' });
-          const prompt = await buildPromptText(current, draftRowId(current));
-          return json(res, 200, { prompt });
-        }
-
-        if (action === 'reject') {
-          // Прибрати чернетку й запам'ятати тему як відхилену (не пропонувати).
-          if (!body.key) return json(res, 400, { error: 'Не вказано чернетку' });
-          const theme = await rejectDraft(body.key);
-          return json(res, 200, { ok: true, theme });
-        }
-        if (action === 'approve') {
-          if (!current) return json(res, 404, { error: 'Чернетки немає' });
-          const result = await approveDraft(current);
-          return json(res, 200, { ok: true, id: result.id, slides: result.slides });
-        }
-        return json(res, 404, { error: 'not found' });
-      } catch (error) {
-        return json(res, 400, { error: error.message });
-      }
-    }
-
-    // Публікація: перевіряємо підпис, ставимо PUBLISHED у таблиці.
     if (req.method === 'POST' && pathname === '/api/publish') {
       const { id, initData } = JSON.parse(await readBody(req));
       const check = verifyInitData(initData);
@@ -464,9 +328,10 @@ const server = http.createServer(async (req, res) => {
 
     // Ручний прогін черги (для перевірки без очікування таймера).
     if (req.method === 'POST' && pathname === '/api/poll') {
+      const announced = await watchStages().catch(() => 0);
       const n = await pollOnce();
       cache.at = 0;
-      return json(res, 200, { checked: n });
+      return json(res, 200, { checked: n, announced });
     }
 
     // OAuth: крок 1 — відправляємо власника на згоду Google.
@@ -517,7 +382,7 @@ const server = http.createServer(async (req, res) => {
         googleMode: g.mode,
         canUpload: g.canUpload,
         googleError: g.error,
-        draft: draftStatus(),
+        watch: watchStatus(),
         poll: pollStatus(),
         serviceAccount: g.email || null,
         videoFolderSet: Boolean(videoFolderId()),

@@ -373,158 +373,11 @@
       return row;
     }
 
-    // --- Чернетки сценаріїв (теми на перевірку) -----------------------------
-    const slotName = (s) => (s === 'pm' ? 'вечірня' : 'ранкова');
-    let draftExpandInit = false;
-
-    async function draftAction(action, payload, btn, okMsg) {
-      if (!initData) { toast('Відкрий через Telegram'); return null; }
-      const old = btn.textContent; btn.disabled = true; btn.textContent = '…';
-      try {
-        const r = await fetch(`/api/draft/${action}`, {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ...payload, initData }),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || 'Помилка');
-        notify('success'); if (okMsg) toast(okMsg);
-        return data;
-      } catch (e) { notify('error'); toast(e.message); return null; }
-      finally { btn.disabled = false; btn.textContent = old; }
-    }
-
-    function draftCard(draft) {
-      // Картка згортається так само, як картка готового відео.
-      const box = el('div', 'card');
-      box.dataset.id = draft.key;
-
-      const head = el('div', 'card-head');
-      head.appendChild(el('span', 'dot pending'));
-      head.appendChild(el('div', 'head-title', `${esc(draft.theme)}`));
-      head.appendChild(el('span', 'chev', '▶'));
-      box.appendChild(head);
-
-      const wrap = el('div', 'card-body-wrap');
-      const inner = el('div', 'draft');
-      inner.style.margin = '0'; inner.style.boxShadow = 'none'; inner.style.border = '0';
-      inner.appendChild(el('div', 'kicker',
-        `${slotName(draft.slot).toUpperCase()} · ${esc(draft.date || '')}`));
-      if (draft.wow) {
-        const wow = el('div', 'simg', `💥 ${esc(draft.wow)}`);
-        wow.style.color = 'var(--text)'; wow.style.margin = '2px 0 8px';
-        inner.appendChild(wow);
-      }
-      // Розповідь абзацом — редагована: можна підправити слово без ШІ.
-      const autoFit = (ta) => {
-        const fit = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
-        ta.addEventListener('input', fit);
-        setTimeout(fit, 0);
-      };
-      let storyBox = null;
-      if (draft.story) {
-        storyBox = el('textarea', 'notes');
-        storyBox.value = draft.story;
-        storyBox.style.margin = '8px 0';
-        autoFit(storyBox);
-        inner.appendChild(storyBox);
-      }
-      if ((draft.sources || []).length) {
-        inner.appendChild(el('div', 'simg', `🔗 ${draft.sources.map((s) => esc(s)).join('  ·  ')}`));
-      }
-      // Тексти слайдів — теж редаговані прямо тут.
-      const slideInputs = [];
-      (draft.slides || []).forEach((s, i) => {
-        const row = el('div', 'slide-row');
-        row.appendChild(el('div', 'num', `СЛАЙД ${i + 1}`));
-        const ta = el('textarea', 'notes');
-        ta.value = s.text;
-        ta.style.minHeight = '0';
-        ta.style.margin = '3px 0 5px';
-        ta.style.fontWeight = '650';
-        ta.style.fontSize = '15px';
-        autoFit(ta);
-        slideInputs.push(ta);
-        row.appendChild(ta);
-        if (s.image) row.appendChild(el('div', 'simg', `🎨 ${esc(s.image)}`));
-        inner.appendChild(row);
-      });
-
-      const notes = el('textarea', 'notes');
-      notes.placeholder = 'Що поправити? Напр.: «гачок гострішим», «прибери 3-й слайд», «більше про Україну»…';
-      inner.appendChild(notes);
-
-      const key = draft.key;
-      const actions = el('div', 'actions');
-      const edit = el('button', 'btn secondary', '✏️ Редагувати');
-      edit.addEventListener('click', async () => {
-        const text = notes.value.trim();
-        if (!text) { toast('Спершу напиши зауваження'); notes.focus(); return; }
-        if (await draftAction('edit', { key, notes: text }, edit, 'Сценарій оновлено')) load();
-      });
-      const regen = el('button', 'btn secondary', '🔄 Інша тема');
-      regen.addEventListener('click', async () => {
-        if (!(await askConfirm('Згенерувати зовсім нову тему? Поточна чернетка зникне.'))) return;
-        if (await draftAction('regenerate', { key }, regen, 'Нова тема готова')) load();
-      });
-      const ok = el('button', 'btn primary', '✅ ОК — у роботу');
-      ok.addEventListener('click', async () => {
-        if (!(await askConfirm('Затвердити сценарій? Рядок ляже в таблицю — ChatGPT намалює фото.'))) return;
-        if (await draftAction('approve', { key }, ok, 'Готово — рядок у таблиці')) load();
-      });
-      // Ручні правки без ШІ: замінив слово — зберіг.
-      const save = el('button', 'btn secondary', '💾 Зберегти');
-      save.addEventListener('click', async () => {
-        const payload = {
-          key,
-          slides: slideInputs.map((ta) => ({ text: ta.value })),
-          ...(storyBox ? { story: storyBox.value } : {}),
-        };
-        if (await draftAction('save', payload, save, 'Збережено')) load();
-      });
-
-      // Копіює готовий промт для ChatGPT — без відкривання таблиці.
-      const promptBtn = el('button', 'btn secondary', '📋 Промт');
-      promptBtn.addEventListener('click', async () => {
-        const data = await draftAction('prompt', { key }, promptBtn, null);
-        if (data?.prompt) { await copyText(data.prompt); haptic('light'); toast('Промт скопійовано'); }
-      });
-
-      const del = el('button', 'btn secondary', '🗑');
-      del.title = 'Прибрати тему'; del.style.flex = '0 0 auto';
-      del.addEventListener('click', async () => {
-        if (!(await askConfirm('Прибрати цю тему? Більше не пропонуватиметься.'))) return;
-        if (await draftAction('reject', { key }, del, 'Тему прибрано')) load();
-      });
-      actions.appendChild(save); actions.appendChild(promptBtn);
-      actions.appendChild(edit); actions.appendChild(regen);
-      actions.appendChild(del); actions.appendChild(ok);
-      inner.appendChild(actions);
-      wrap.appendChild(inner);
-      box.appendChild(wrap);
-
-      const setOpen = (open) => {
-        box.classList.toggle('open', open);
-        if (open) expanded.add(key); else expanded.delete(key);
-      };
-      head.addEventListener('click', () => setOpen(!box.classList.contains('open')));
-      if (expanded.has(key)) setOpen(true);
-      return box;
-    }
-
     function render(state) {
       const app = $('#app'); app.innerHTML = '';
       const banner = $('#banner'); banner.innerHTML = '';
       if (!state.googleReady) banner.appendChild(el('div', 'banner', '⚙️ Google-доступ ще не налаштовано на сервері — черга поки порожня.'));
       else if (state.videoFolderSet === false) banner.appendChild(el('div', 'banner', '⚙️ Не задано папку Drive для відео (VIDEO_FOLDER_ID) — монтаж вимкнено.'));
-
-      // Чернетки сценаріїв — угорі, поки не затверджені.
-      const drafts = (state.drafts || []).filter((d) => d.slides && d.slides.length);
-      if (drafts.length) {
-        app.appendChild(el('h2', 'section', drafts.length > 1 ? 'Теми на перевірку' : 'Тема на перевірку'));
-        // За замовчуванням розгорнута лише найновіша тема; решта — згорнуті.
-        if (!draftExpandInit) { expanded.add(drafts[drafts.length - 1].key); draftExpandInit = true; }
-        drafts.forEach((d) => app.appendChild(draftCard(d)));
-      }
 
       const q = state.queue || [];
       $('#count').textContent = q.length ? `${q.length} до публікації` : '';
@@ -535,7 +388,7 @@
         app.appendChild(el('h2', 'section', 'До публікації'));
         q.forEach((item) => app.appendChild(queueCard(item)));
       } else {
-        app.appendChild(el('div', 'empty', '<div class="big">✅</div>Немає нових роликів.<br>Щойно ChatGPT підготує тему — я пришлю сповіщення.'));
+        app.appendChild(el('div', 'empty', '<div class="big">✅</div>Немає нових роликів.<br>О 08:00 приходить тема, о 15:00 — фото.<br>Щойно відео буде готове, я напишу.'));
       }
 
       const p = state.published || [];
@@ -547,11 +400,8 @@
 
     async function load() {
       try {
-        const [state, draftRes] = await Promise.all([
-          fetch('/api/state').then((r) => r.json()),
-          fetch('/api/draft').then((r) => r.json()).catch(() => ({ drafts: [] })),
-        ]);
-        render({ ...state, drafts: draftRes.drafts || [] });
+        const state = await fetch('/api/state').then((r) => r.json());
+        render(state);
       } catch (e) {
         $('#app').innerHTML = `<div class="empty"><div class="big">⚠️</div>Не вдалося завантажити.<br>${esc(e.message)}</div>`;
       }

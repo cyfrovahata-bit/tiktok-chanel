@@ -11,7 +11,7 @@
 import { Readable } from 'node:stream';
 import { drive } from './drive.js';
 import { appendQueueRow } from './sheets.js';
-import { promptFolderId, kyivToday, kyivMinutes } from './drafts.js';
+import { promptFolderId, kyivToday, kyivMinutes } from './kyiv.js';
 
 // Куди складати матеріали власника. За замовчуванням — та сама папка, де
 // лежить drafts.json, щоб не заводити ще одну змінну оточення.

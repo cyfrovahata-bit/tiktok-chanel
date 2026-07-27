@@ -1,7 +1,17 @@
-// Монітор черги тем. Головний критерій готовності — статус DONE у Google
-// Sheet (не час). Драйв тримає готові відео (папка «video»), і НАЯВНІСТЬ
-// файла <ID>.mp4 там = «вже змонтовано». Тому додаток без стану: Volume і
-// леджер не потрібні — джерело правди Sheet + Drive.
+// Монітор черги тем.
+//
+// Розклад ChatGPT (київський час), чотири відкладені завдання на добу:
+//   08:00 і 17:00 — придумує тему, пише сюжет, перевіряє факти веб-пошуком і
+//                   кладе рядок NEW із промтом на генерацію зображень;
+//   15:00 і 20:00 — бере найстаріший NEW, малює фото, пакує архів
+//                   (фото + script.txt), кладе його на Drive і ставить DONE.
+// Бот у це не втручається: він читає таблицю, розповідає власнику про кожен
+// етап і монтує відео, щойно з'являється DONE з архівом.
+//
+// Головний критерій готовності — статус DONE у Google Sheet (не час). Драйв
+// тримає готові відео (папка «video»), і НАЯВНІСТЬ файла <ID>.mp4 там =
+// «вже змонтовано». Тому додаток без стану: Volume і леджер не потрібні —
+// джерело правди Sheet + Drive.
 //
 // Цикл:
 //   1. читає таблицю, бере готові DONE;
@@ -15,15 +25,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { listDoneItems, readAllItems } from './sheets.js';
 import { downloadArchive } from './drive.js';
-import { listDrafts, upsertDraft, kyivToday, currentSlot, listRejectedThemes, rejectDraft } from './drafts.js';
-import { generateScenario } from './scenario.js';
+import { readNotices, writeNotices } from './notices.js';
 import { listVideos, uploadVideo, videoName, videoFolderId } from './videos.js';
 import { extractPhotoArchive } from './archive.js';
 import { assembleVideo } from './pipeline.js';
 import { sendMessage, ownerChatId } from './telegram.js';
 
-// ChatGPT стартує о 08:00 і 16:00 (Київ). Часто перевіряємо Drive вже трохи
-// до цих запусків і до часу автопублікації; поза вікнами — рідше.
+// Біля запусків ChatGPT перевіряємо часто, поза вікнами — рідше.
 const FAST_MS = Number(process.env.POLL_FAST_MS) || 2 * 60 * 1000;   // у вікні
 const SLOW_MS = Number(process.env.POLL_SLOW_MS) || 15 * 60 * 1000;  // поза вікном
 const MAX_ATTEMPTS = 3;
@@ -38,11 +46,16 @@ function kyivMinuteOfDay(now = new Date()) {
   return h * 60 + m;
 }
 
-// Активні вікна: 07:45–10:30 і 15:45–18:30. Стартуємо перевірку за 15 хв
-// до генерації; після 10:00/18:00 лишаємо запас для затриманого архіву.
+// Активні вікна під розклад ChatGPT (київський час):
+//   08:00 і 17:00 — тема й сюжет (рядок NEW);
+//   15:00 і 20:00 — фото й архів (рядок стає DONE → нам є що монтувати).
+// Стартуємо за 15 хв до кожного запуску й лишаємо запас на затримку завдання.
+// Денне вікно суцільне: 15:00 і 17:00 надто близько, щоб їх розділяти.
 export function inActiveWindow(now = new Date()) {
   const m = kyivMinuteOfDay(now);
-  return (m >= 7 * 60 + 45 && m <= 10 * 60 + 30) || (m >= 15 * 60 + 45 && m <= 18 * 60 + 30);
+  return (m >= 7 * 60 + 45 && m <= 9 * 60 + 30)
+    || (m >= 14 * 60 + 45 && m <= 18 * 60 + 30)
+    || (m >= 19 * 60 + 45 && m <= 22 * 60 + 30);
 }
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://tiktok-chanel-production.up.railway.app').replace(/\/$/, '');
 
@@ -136,60 +149,49 @@ export function pollStatus() {
   return { ...pollState, attempts: Object.fromEntries(attempts) };
 }
 
-// Останній результат спроби створити чернетку — видно в /healthz, щоб мовчазні
-// падіння не лишалися непоміченими.
-let draftState = { lastTryAt: null, lastOkAt: null, lastError: null, notifiedFor: null };
-export function draftStatus() { return { ...draftState }; }
+// --- Спостереження за етапами конвеєра --------------------------------------
+// Тему й сюжет (08:00, 17:00) і фото з архівом (15:00, 20:00) робить ChatGPT
+// за відкладеними завданнями. Бот у це не втручається — читає таблицю й розповідає
+// власнику, що змінилося. Оголошений статус кожного рядка пам'ятаємо на
+// Drive, щоб не повторювати повідомлення й переживати перезапуск.
+let watchState = { lastRunAt: null, lastError: null, announced: 0 };
+export function watchStatus() { return { ...watchState }; }
 
-// --- Чернетки сценаріїв: ранкова (з 08:00) і вечірня (з 16:00) --------------
-// Готуємо завчасно, щоб був час переглянути й перегенерувати до того, як
-// ChatGPT за відкладеним завданням візьме рядок у роботу.
-// force — примусово нова тема; slotOverride — для якого слота.
-export async function ensureDailyDraft(force = false, slotOverride = null, silent = false) {
-  const today = kyivToday();
-  const slot = slotOverride || currentSlot();
-  if (!slot) return null; // ще до 08:00 — нічого не готуємо
-  const key = `${today}-${slot}`;
-  const items = await listDrafts().catch(() => []);
-  if (!force && items.some((d) => d.key === key)) return null; // на цей слот уже є
-  draftState = { ...draftState, lastTryAt: new Date().toISOString() };
-
-  // «Інша тема»: стару тему цього слота позначаємо відхиленою, щоб генератор
-  // більше ніколи її не пропонував.
-  if (force && items.some((d) => d.key === key)) {
-    await rejectDraft(key).catch((e) => console.error('[draft] відхилення:', e.message));
+function stageMessage(item) {
+  if (item.status === 'NEW') {
+    return `📝 Тема на сьогодні:\n${item.theme}\n\n`
+      + `Сюжет готовий і перевірений${item.slides ? `, ${item.slides} слайдів` : ''}. `
+      + 'Можеш поправити текст у таблиці — далі ChatGPT почне малювати фото.';
   }
-
-  const [used, rejected] = await Promise.all([
-    readAllItems().catch(() => []),
-    listRejectedThemes().catch(() => []),
-  ]);
-  // Заборонені теми = рядки таблиці + наявні чернетки (зокрема сусіднього
-  // слота, інакше ранок і вечір вигадають те саме) + усі відхилені власником.
-  const usedTitles = [
-    ...used.map((it) => it.theme),
-    ...items.filter((d) => d.key !== key).map((d) => d.theme),
-    ...rejected,
-  ].filter(Boolean);
-  const scenario = await generateScenario(usedTitles);
-  const draft = {
-    ...scenario, key, date: today, slot,
-    status: 'pending', createdAt: new Date().toISOString(),
-  };
-  await upsertDraft(draft);
-  draftState = { lastTryAt: draftState.lastTryAt, lastOkAt: new Date().toISOString(), lastError: null, notifiedFor: null };
-  const when = slot === 'pm' ? 'вечірня' : 'ранкова';
-  console.log(`[draft] ${when} чернетка: «${draft.theme}» (${draft.slides.length} слайдів)`);
-  // Сповіщаємо лише про ПЛАНОВУ чернетку. Коли власник сам натиснув «Інша
-  // тема» — він уже в мінідодатку й побачить результат там, зайве повідомлення
-  // у Telegram тільки заважає.
-  if (!silent) {
-    await notify(
-      `📝 Тема (${when}):\n${draft.theme}\n\nСценарій із ${draft.slides.length} слайдів готовий — переглянь, за потреби виправ і затвердь.`,
-      openAppMarkup('draft'),
-    );
+  if (item.status === 'ERROR') {
+    return `⚠️ ChatGPT зупинився на темі:\n${item.theme}\n\n`
+      + `${item.note || 'Причину він не вказав.'}\n\nЦей рядок я пропускаю.`;
   }
-  return draft;
+  return null;
+}
+
+// Один прохід спостерігача: оголошує нові NEW і ERROR. Перехід у DONE
+// оголошує сам конвеєр монтажу («знайшов тему» → «відео згенеровано»),
+// тому тут DONE лише запам'ятовуємо, щоб не сказати про нього двічі.
+export async function watchStages() {
+  watchState = { ...watchState, lastRunAt: new Date().toISOString() };
+  const [items, seen] = await Promise.all([readAllItems(), readNotices()]);
+  let changed = false;
+  let announced = 0;
+  for (const item of items) {
+    if (!item.id || seen[item.id] === item.status) continue;
+    const first = seen[item.id] === undefined;
+    seen[item.id] = item.status;
+    changed = true;
+    // Рядки, які вже існували до появи цього спостерігача, не оголошуємо:
+    // інакше перший запуск вивалив би в чат усю історію таблиці.
+    if (first && item.status !== 'NEW') continue;
+    const text = stageMessage(item);
+    if (text) { await notify(text); announced++; }
+  }
+  if (changed) await writeNotices(seen);
+  watchState = { ...watchState, lastError: null, announced };
+  return announced;
 }
 
 // Один прохід черги. Лок, щоб паралельні виклики (таймер + ручний тригер) не
@@ -249,17 +251,11 @@ export function startMonitor() {
     if (!running) {
       running = true;
       try {
-        // Чернетка сценарію на слот (08:00 / 16:00) — не критична для черги,
-        // але про падіння маємо дізнатися: інакше власник просто чекає теми,
-        // якої не буде, і не розуміє чому.
-        await ensureDailyDraft().catch(async (error) => {
-          draftState = { ...draftState, lastTryAt: new Date().toISOString(), lastError: error.message };
-          console.error('[draft]', error.message);
-          const slotKey = `${kyivToday()}-${currentSlot() ?? 'none'}`;
-          if (draftState.notifiedFor !== slotKey) {
-            draftState.notifiedFor = slotKey;
-            await notify(`⚠️ Не вдалося підготувати тему:\n${error.message}\n\nСпробую ще раз автоматично.`);
-          }
+        // Спостерігач етапів — не критичний для монтажу, тож його падіння не
+        // має зупиняти чергу. Але мовчати про нього теж не можна.
+        await watchStages().catch((error) => {
+          watchState = { ...watchState, lastError: error.message };
+          console.error('[watch]', error.message);
         });
         const n = await pollOnce();
         console.log(`[monitor] перевірено чергу: ${n} готових DONE`);
