@@ -370,8 +370,11 @@ const server = http.createServer(async (req, res) => {
         // embeddable і targeting важливі: допис може бути «Публічно», але
         // з обмеженням аудиторії або забороною вбудовування — і тоді він
         // поводиться не так, як очікуєш, без жодної помилки в API.
+        // targeting на вузлі video не існує — Graph відповідає помилкою на
+        // весь запит, тож не питаємо. embeddable важливий: допис може бути
+        // «Публічно», але із забороною вбудовування.
         const fields = 'id,permalink_url,privacy,published,status,created_time,title,description,'
-          + 'embeddable,content_category,is_crossposting_eligible,targeting,universal_video_id';
+          + 'embeddable,content_category,is_crossposting_eligible,universal_video_id';
         const r = await fetch(`${base}/${encodeURIComponent(id)}?fields=${fields}&access_token=${encodeURIComponent(token)}`);
         const data = await r.json();
         if (data.error) return json(res, 200, { error: data.error.message });
@@ -383,7 +386,6 @@ const server = http.createServer(async (req, res) => {
           status: data.status || null,
           createdTime: data.created_time || null,
           embeddable: data.embeddable ?? null,
-          targeting: data.targeting ?? null,
           crosspostEligible: data.is_crossposting_eligible ?? null,
           contentCategory: data.content_category ?? null,
         });
