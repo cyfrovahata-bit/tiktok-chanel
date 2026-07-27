@@ -130,7 +130,7 @@ export async function deleteVideo(id) {
 // лишаються на місці, тож перепакування не може спричинити повторний пост.
 // Ролики, зроблені після виправлення montage.js, чіпати не треба: якщо звук уже
 // стерео 48 кГц, працювати нема над чим.
-export async function remuxVideoToSpec(id) {
+export async function remuxVideoToSpec(id, options = {}) {
   const files = await listVideoFiles();
   const file = files.get(videoName(id));
   if (!file) throw new Error(`Відео ${videoName(id)} не знайдено в папці`);
@@ -146,7 +146,7 @@ export async function remuxVideoToSpec(id) {
     await pipeline(res.data, createWriteStream(inPath));
     const before = (await stat(inPath)).size;
 
-    await remuxToReelsSpec(inPath, outPath);
+    await remuxToReelsSpec(inPath, outPath, options);
     const after = (await stat(outPath)).size;
 
     await drive().files.update({

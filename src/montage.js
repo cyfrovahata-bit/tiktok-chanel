@@ -157,15 +157,22 @@ async function burnSubtitles(inPath, assPath, outPath) {
 // Приводить уже змонтований ролик до специфікації Meta Reels. Потрібно лише
 // для файлів, зроблених до виправлення параметрів звуку: перемонтувати їх нема
 // з чого (архіви з фото давно прибрані), а публікувати як є — марно.
-export async function remuxToReelsSpec(inPath, outPath) {
+// gainDb — разова поправка рівня. Знадобилась, бо перша версія цієї функції
+// зводила в стерео через -ac 2 і тим приглушила вже перепаковані ролики на 3 дБ;
+// повторний прохід із pan рівень не повертає, бо втрата вже в файлі.
+// copyVideo — для такої поправки: відео вже за специфікацією, і переганяти його
+// втретє означало б лише зайвий раз втратити якість.
+export async function remuxToReelsSpec(inPath, outPath, { gainDb = 0, copyVideo = false } = {}) {
+  const filters = [];
+  if (gainDb) filters.push(`volume=${gainDb}dB`);
+  filters.push(TO_STEREO);
   await runFfmpeg([
     '-y',
     '-i', inPath,
-    '-c:v', 'libx264',
-    '-pix_fmt', 'yuv420p',
-    '-r', String(FPS),
-    ...GOP_ARGS,
-    '-af', TO_STEREO,
+    ...(copyVideo
+      ? ['-c:v', 'copy']
+      : ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', String(FPS), ...GOP_ARGS]),
+    '-af', filters.join(','),
     ...REELS_AUDIO_ARGS,
     '-movflags', '+faststart',
     outPath,

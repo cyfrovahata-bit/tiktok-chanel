@@ -466,8 +466,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && pathname === '/api/remux') {
       const id = url.searchParams.get('id');
       if (!id) return json(res, 200, { error: 'вкажи ?id=AUTO-РРРРММДД-ГГХХ' });
+      // ?gain=3 — поправка рівня в дБ; разом із нею відео копіюється як є.
+      const gainDb = Number(url.searchParams.get('gain')) || 0;
       try {
-        return json(res, 200, await remuxVideoToSpec(id));
+        return json(res, 200, await remuxVideoToSpec(id, { gainDb, copyVideo: gainDb !== 0 }));
       } catch (error) {
         return json(res, 200, { error: error.message });
       }
