@@ -327,6 +327,36 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Останні Reels Сторінки з їхнім станом. Відкрити facebook.com ззовні
+    // не вийде — він віддає 400 будь-якому не-браузеру, — тож єдиний чесний
+    // спосіб перевірити доступність допису це спитати Graph.
+    if (req.method === 'GET' && pathname === '/api/meta/reels') {
+      const token = process.env.META_PAGE_ACCESS_TOKEN;
+      const pageId = process.env.META_PAGE_ID;
+      if (!token || !pageId) return json(res, 200, { error: 'META_PAGE_ACCESS_TOKEN / META_PAGE_ID не задано' });
+      try {
+        const base = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v25.0'}`;
+        const fields = 'id,permalink_url,privacy,published,created_time,description';
+        const r = await fetch(
+          `${base}/${encodeURIComponent(pageId)}/video_reels?fields=${fields}&limit=10&access_token=${encodeURIComponent(token)}`,
+        );
+        const data = await r.json();
+        if (data.error) return json(res, 200, { error: data.error.message });
+        return json(res, 200, {
+          reels: (data.data || []).map((v) => ({
+            id: v.id,
+            permalink: v.permalink_url ? `https://www.facebook.com${v.permalink_url}` : null,
+            published: v.published,
+            privacy: v.privacy?.value ?? null,
+            created: v.created_time,
+            text: String(v.description || '').replace(/\s+/g, ' ').slice(0, 70),
+          })),
+        });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
     // Стан конкретного допису у Facebook: чи опублікований, яка приватність,
     // яке постійне посилання. Питання «чому одне видно без логіну, а інше ні»
     // без цього доводиться вгадувати.
