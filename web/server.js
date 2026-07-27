@@ -197,8 +197,10 @@ const server = http.createServer(async (req, res) => {
         isPageToken ? Promise.resolve(null) : get('me/accounts?fields=id,name'),
         isPageToken ? Promise.resolve(null) : get('me/permissions'),
         // Головна перевірка для Reels: чи бачить токен саме той IG-акаунт,
-        // у який ми публікуємо, і чи він Business/Creator.
-        igUserId ? get(`${encodeURIComponent(igUserId)}?fields=id,username,account_type`) : Promise.resolve(null),
+        // у який ми публікуємо. Сам факт, що вузол читається цим токеном,
+        // означає, що акаунт Business/Creator і прив'язаний до Сторінки —
+        // інакше Graph його просто не віддасть.
+        igUserId ? get(`${encodeURIComponent(igUserId)}?fields=id,username,followers_count,media_count`) : Promise.resolve(null),
       ]);
       const granted = (perms?.data || []).filter((p) => p.status === 'granted').map((p) => p.permission);
       const pageId = process.env.META_PAGE_ID || null;
@@ -208,7 +210,7 @@ const server = http.createServer(async (req, res) => {
         // Чи це саме та сторінка, у яку публікуємо.
         pageMatches: me.id && pageId ? me.id === pageId : null,
         instagram: ig
-          ? (ig.error ? `❌ ${ig.error.message}` : { id: ig.id, username: ig.username, accountType: ig.account_type })
+          ? (ig.error ? `❌ ${ig.error.message}` : { id: ig.id, username: ig.username, followers: ig.followers_count, media: ig.media_count })
           : 'META_IG_USER_ID не задано',
         pagesVisible: accounts?.data ? accounts.data.map((p) => ({ id: p.id, name: p.name })) : undefined,
         grantedPermissions: isPageToken ? '(не застосовується до токена Сторінки)' : (granted.length ? granted : (perms?.error?.message ?? 'немає')),
