@@ -187,20 +187,33 @@ const server = http.createServer(async (req, res) => {
           return await r.json();
         } catch (e) { return { error: { message: e.message } }; }
       };
-      const [me, accounts, perms] = await Promise.all([
-        get('me?fields=id,name,category'),
-        get('me/accounts?fields=id,name'),
-        get('me/permissions'),
+      const igUserId = process.env.META_IG_USER_ID;
+      // Поля accounts/permissions живуть на вузлі КОРИСТУВАЧА. Для токена
+      // Сторінки вони не існують, і Graph повертає «nonexisting field» —
+      // це не поломка, тому й не питаємо їх у цьому випадку.
+      const me = await get('me?fields=id,name,category');
+      const isPageToken = Boolean(me.category);
+      const [accounts, perms, ig] = await Promise.all([
+        isPageToken ? Promise.resolve(null) : get('me/accounts?fields=id,name'),
+        isPageToken ? Promise.resolve(null) : get('me/permissions'),
+        // Головна перевірка для Reels: чи бачить токен саме той IG-акаунт,
+        // у який ми публікуємо, і чи він Business/Creator.
+        igUserId ? get(`${encodeURIComponent(igUserId)}?fields=id,username,account_type`) : Promise.resolve(null),
       ]);
-      const granted = (perms.data || []).filter((p) => p.status === 'granted').map((p) => p.permission);
-      const isPageToken = Boolean(me.category); // у токена Сторінки є category
+      const granted = (perms?.data || []).filter((p) => p.status === 'granted').map((p) => p.permission);
+      const pageId = process.env.META_PAGE_ID || null;
       return json(res, 200, {
         tokenType: me.error ? 'невідомо (помилка)' : (isPageToken ? 'ТОКЕН СТОРІНКИ ✅' : 'ТОКЕН КОРИСТУВАЧА ⚠️'),
         me: me.error ? me.error.message : { id: me.id, name: me.name, category: me.category },
-        pagesVisible: accounts.data ? accounts.data.map((p) => ({ id: p.id, name: p.name })) : (accounts.error?.message ?? null),
-        grantedPermissions: granted.length ? granted : (perms.error?.message ?? 'немає'),
-        configuredPageId: process.env.META_PAGE_ID || null,
-        configuredIgUserId: process.env.META_IG_USER_ID || null,
+        // Чи це саме та сторінка, у яку публікуємо.
+        pageMatches: me.id && pageId ? me.id === pageId : null,
+        instagram: ig
+          ? (ig.error ? `❌ ${ig.error.message}` : { id: ig.id, username: ig.username, accountType: ig.account_type })
+          : 'META_IG_USER_ID не задано',
+        pagesVisible: accounts?.data ? accounts.data.map((p) => ({ id: p.id, name: p.name })) : undefined,
+        grantedPermissions: isPageToken ? '(не застосовується до токена Сторінки)' : (granted.length ? granted : (perms?.error?.message ?? 'немає')),
+        configuredPageId: pageId,
+        configuredIgUserId: igUserId || null,
       });
     }
 
