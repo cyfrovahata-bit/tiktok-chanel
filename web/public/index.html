@@ -310,7 +310,29 @@
       regen.addEventListener('click', (e) => { e.stopPropagation(); regenerate(item, card, regen); });
       const pub = el('button', 'btn primary', '✅ Опубліковано');
       pub.addEventListener('click', (e) => { e.stopPropagation(); publish(item, card, pub); });
-      actions.appendChild(dl); actions.appendChild(regen); actions.appendChild(pub);
+      // «Не опубліковано» — знімає мітки автопублікації, щоб ролик знову став
+      // у чергу. Потрібно, коли пост видалили в мережі або він вийшов помилково.
+      const undo = el('button', 'btn secondary', '↩️'); undo.title = 'Вважати неопублікованим';
+      undo.style.flex = '0 0 auto';
+      undo.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const old = undo.textContent;
+        undo.disabled = true; undo.textContent = '…';
+        try {
+          const r = await fetch('/api/autopost/reset', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ initData, id: item.id }),
+          });
+          const data = await r.json();
+          if (!r.ok || data.error) throw new Error(data.error || 'Помилка');
+          notify('success');
+          toast(data.skippedSlot
+            ? `Повернуто в чергу, слот ${data.skippedSlot} пропущено`
+            : 'Повернуто в чергу');
+        } catch (err) { notify('error'); toast(err.message); }
+        finally { undo.disabled = false; undo.textContent = old; }
+      });
+      actions.appendChild(dl); actions.appendChild(regen); actions.appendChild(undo); actions.appendChild(pub);
       body.appendChild(actions);
       wrap.appendChild(body);
       card.appendChild(wrap);
