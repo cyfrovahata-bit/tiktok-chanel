@@ -22,11 +22,11 @@ function readyItem(id, title = `Тема ${id}`, status = 'DONE') {
 test('publish slots follow Europe/Kyiv in summer and winter', () => {
   assert.deepEqual(
     currentPublishSlot(new Date('2026-07-22T07:00:00Z')),
-    { key: '2026-07-22-am', label: '10:00' },
+    { key: '2026-07-22-10', label: '10:00' },
   );
   assert.deepEqual(
     currentPublishSlot(new Date('2026-12-22T16:00:00Z')),
-    { key: '2026-12-22-pm', label: '18:00' },
+    { key: '2026-12-22-18', label: '18:00' },
   );
   assert.equal(currentPublishSlot(new Date('2026-07-22T06:59:59Z')), null);
 });
@@ -75,7 +75,7 @@ test('бере НАЙСТАРІШЕ готове відео, а не найсв�
     posts[0].payload.videoUrl,
     'https://app.example.com/api/video/AUTO-20260721-1600',
   );
-  assert.equal(writes[0].patch.autoPostSlot, '2026-07-22-am');
+  assert.equal(writes[0].patch.autoPostSlot, '2026-07-22-10');
   assert.ok(writes.some((write) => write.patch.facebookPostId === 'facebook-post-1'));
   assert.ok(writes.some((write) => write.patch.instagramPostId === 'instagram-post-1'));
   assert.equal(notices.length, 1);
@@ -255,7 +255,7 @@ test('скинуте вручну не виходить повторно в то
     {
       id: 'file-reset',
       name: `${item.id}.mp4`,
-      appProperties: { autoPostSkipSlot: '2026-07-22-am' },
+      appProperties: { autoPostSkipSlot: '2026-07-22-10' },
     },
   ]]);
   let publishCalls = 0;
@@ -286,4 +286,22 @@ test('скинуте вручну не виходить повторно в то
   });
   assert.equal(nextSlot.status, 'published');
   assert.deepEqual(posts, ['facebook', 'instagram']);
+});
+
+test('години публікації беруться зі змінної AUTO_PUBLISH_HOURS', async (t) => {
+  // Три пости на добу: 10:00, 15:00, 20:00 за Києвом.
+  const before = process.env.AUTO_PUBLISH_HOURS;
+  process.env.AUTO_PUBLISH_HOURS = '10,15,20';
+  const { currentPublishSlot: slotOf } = await import(`../src/autopublish.js?three=${Date.now()}`);
+  t.after(() => { process.env.AUTO_PUBLISH_HOURS = before; });
+
+  // 12:00 UTC = 15:00 Київ (літо)
+  assert.deepEqual(slotOf(new Date('2026-07-22T12:00:00Z')), { key: '2026-07-22-15', label: '15:00' });
+  // 17:00 UTC = 20:00 Київ
+  assert.deepEqual(slotOf(new Date('2026-07-22T17:00:00Z')), { key: '2026-07-22-20', label: '20:00' });
+  // 13:30 Київ — між слотами, нічого не публікуємо
+  assert.equal(slotOf(new Date('2026-07-22T10:30:00Z')), null);
+  // Три ключі різні — інакше два пости на добу злилися б в один слот
+  const keys = ['2026-07-22-10', '2026-07-22-15', '2026-07-22-20'];
+  assert.equal(new Set(keys).size, 3);
 });

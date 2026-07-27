@@ -17,6 +17,12 @@ import { sendMessage, ownerChatId } from './telegram.js';
 
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://tiktok-chanel-production.up.railway.app').replace(/\/$/, '');
 const CHECK_MS = Number(process.env.AUTO_PUBLISH_CHECK_MS) || 60 * 1000;
+// Години публікації (київські), через кому. Кожен слот живе дві години —
+// година запуску й наступна, щоб затримка монтажу не з'їдала пост.
+const PUBLISH_HOURS = String(process.env.AUTO_PUBLISH_HOURS || '10,18')
+  .split(',').map((h) => Number(String(h).trim().slice(0, 2)))
+  .filter((h) => Number.isInteger(h) && h >= 0 && h <= 23)
+  .sort((a, b) => a - b);
 const RETRY_MS = Number(process.env.AUTO_PUBLISH_RETRY_MS) || 5 * 60 * 1000;
 
 function kyivParts(now = new Date()) {
@@ -32,13 +38,15 @@ function kyivParts(now = new Date()) {
   };
 }
 
-// Даємо дві години на випадок, якщо генерація або монтаж трохи затримались.
-// У межах вікна слот той самий, тож повторного поста не буде.
+// Даємо дві години на випадок, якщо монтаж трохи затримався. У межах вікна
+// слот той самий, тож повторного поста не буде. Ключ слота містить годину,
+// а не «am/pm», інакше три слоти на добу злилися б у два.
 export function currentPublishSlot(now = new Date()) {
   const { date, hour } = kyivParts(now);
-  if (hour === 10 || hour === 11) return { key: `${date}-am`, label: '10:00' };
-  if (hour === 18 || hour === 19) return { key: `${date}-pm`, label: '18:00' };
-  return null;
+  const slot = PUBLISH_HOURS.find((h) => hour === h || hour === h + 1);
+  if (slot === undefined) return null;
+  const label = `${String(slot).padStart(2, '0')}:00`;
+  return { key: `${date}-${label.slice(0, 2)}`, label };
 }
 
 function enabledMetaPlatforms() {

@@ -1,12 +1,11 @@
 // Монітор черги тем.
 //
-// Розклад ChatGPT (київський час), чотири відкладені завдання на добу:
-//   08:00 і 17:00 — придумує тему, пише сюжет, перевіряє факти веб-пошуком і
-//                   кладе рядок NEW із промтом на генерацію зображень;
-//   15:00 і 20:00 — бере найстаріший NEW, малює фото, пакує архів
-//                   (фото + script.txt), кладе його на Drive і ставить DONE.
-// Бот у це не втручається: він читає таблицю, розповідає власнику про кожен
-// етап і монтує відео, щойно з'являється DONE з архівом.
+// ChatGPT за відкладеними завданнями пише теми (рядок NEW із промтом) і
+// малює для них фото (рядок стає DONE з архівом). Бот у це не втручається:
+// він читає таблицю, розповідає власнику про кожен етап і монтує відео,
+// щойно з'являється DONE з архівом. До розкладу ChatGPT не прив'язаний —
+// орієнтується лише на статуси, тож кількість постів на добу можна міняти,
+// не чіпаючи код.
 //
 // Головний критерій готовності — статус DONE у Google Sheet (не час). Драйв
 // тримає готові відео (папка «video»), і НАЯВНІСТЬ файла <ID>.mp4 там =
@@ -31,32 +30,14 @@ import { extractPhotoArchive } from './archive.js';
 import { assembleVideo } from './pipeline.js';
 import { sendMessage, ownerChatId } from './telegram.js';
 
-// Біля запусків ChatGPT перевіряємо часто, поза вікнами — рідше.
-const FAST_MS = Number(process.env.POLL_FAST_MS) || 2 * 60 * 1000;   // у вікні
-const SLOW_MS = Number(process.env.POLL_SLOW_MS) || 15 * 60 * 1000;  // поза вікном
+// Опитуємо таблицю рівномірно цілу добу. Раніше були «активні вікна» під
+// конкретні години ChatGPT — але розклад міняється (два пости на добу, три,
+// ручні запуски), і кожна зміна вимагала правити ще й вікна. Рівний інтервал
+// коштує кілька зайвих читань Sheets на добу й прибирає цілий клас помилок
+// «згенерував о 12:10, а бот помітив о 14:45».
+const POLL_MS = Number(process.env.POLL_MS) || 3 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
 
-// Хвилини від початку доби за київським часом.
-function kyivMinuteOfDay(now = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).formatToParts(now);
-  const h = Number(parts.find((p) => p.type === 'hour').value);
-  const m = Number(parts.find((p) => p.type === 'minute').value);
-  return h * 60 + m;
-}
-
-// Активні вікна під розклад ChatGPT (київський час):
-//   08:00 і 17:00 — тема й сюжет (рядок NEW);
-//   15:00 і 20:00 — фото й архів (рядок стає DONE → нам є що монтувати).
-// Стартуємо за 15 хв до кожного запуску й лишаємо запас на затримку завдання.
-// Денне вікно суцільне: 15:00 і 17:00 надто близько, щоб їх розділяти.
-export function inActiveWindow(now = new Date()) {
-  const m = kyivMinuteOfDay(now);
-  return (m >= 7 * 60 + 45 && m <= 9 * 60 + 30)
-    || (m >= 14 * 60 + 45 && m <= 18 * 60 + 30)
-    || (m >= 19 * 60 + 45 && m <= 22 * 60 + 30);
-}
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://tiktok-chanel-production.up.railway.app').replace(/\/$/, '');
 
 // Спроби на кожен ID у межах життя процесу (щоб не спамити «знайшов тему»
@@ -150,9 +131,8 @@ export function pollStatus() {
 }
 
 // --- Спостереження за етапами конвеєра --------------------------------------
-// Тему й сюжет (08:00, 17:00) і фото з архівом (15:00, 20:00) робить ChatGPT
-// за відкладеними завданнями. Бот у це не втручається — читає таблицю й розповідає
-// власнику, що змінилося. Оголошений статус кожного рядка пам'ятаємо на
+// Теми й фото робить ChatGPT за відкладеними завданнями. Бот у це не
+// втручається — читає таблицю й розповідає власнику, що змінилося. Оголошений статус кожного рядка пам'ятаємо на
 // Drive, щоб не повторювати повідомлення й переживати перезапуск.
 let watchState = { lastRunAt: null, lastError: null, announced: 0 };
 export function watchStatus() { return { ...watchState }; }
@@ -243,7 +223,7 @@ async function pollOnceInner() {
 }
 
 // Цикл моніторингу для процесу на Railway. Сам себе переплановує: наступний
-// прохід — через FAST_MS у вікні появи тем, інакше через SLOW_MS.
+// прохід — через POLL_MS.
 export function startMonitor() {
   let running = false;
   let timer = null;
@@ -265,10 +245,9 @@ export function startMonitor() {
         running = false;
       }
     }
-    const next = inActiveWindow() ? FAST_MS : SLOW_MS;
-    timer = setTimeout(tick, next);
+    timer = setTimeout(tick, POLL_MS);
   };
-  console.log(`[monitor] старт (вікно: ${Math.round(FAST_MS / 60000)} хв, поза вікном: ${Math.round(SLOW_MS / 60000)} хв)`);
+  console.log(`[monitor] старт (перевірка кожні ${Math.round(POLL_MS / 60000)} хв)`);
   tick(); // перший прохід одразу (ловить усе, що з'явилось під час простою)
   return { stop: () => timer && clearTimeout(timer) };
 }
