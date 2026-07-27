@@ -1,8 +1,15 @@
 // Автопублікація готових відео о 10:00 та 18:00 за Europe/Kyiv.
-// О 10:00 виходить матеріал із попереднього вечора, о 18:00 — із поточного
-// ранку. Так між генерацією та публікацією лишається час на ручні правки.
+//
+// Черга, а не розклад: щослота беремо НАЙСТАРІШЕ готове відео, яке ще не
+// публікували. Так можна клепати ролики наперед — вони самі виходитимуть по
+// два на добу, доки запас не скінчиться. Раніше слот був жорстко прив'язаний
+// до часу генерації (о 10:00 — вчорашній вечір, о 18:00 — сьогоднішній
+// ранок), і зроблений заздалегідь матеріал просто ніколи не діждався б черги.
+//
 // Таблицю не змінює: слот, ID постів і захист від дублів зберігаються в
-// appProperties самого MP4 на Google Drive.
+// appProperties самого MP4 на Google Drive. Рядок лишається в черзі
+// мінідодатку, щоб можна було забрати відео для TikTok і позначити
+// «Опубліковано» руками, коли справді все зроблено.
 import { readAllItems, isReady } from './sheets.js';
 import { listVideoFiles, setVideoAppProperties, videoName } from './videos.js';
 import { publish } from './publish.js';
@@ -25,49 +32,12 @@ function kyivParts(now = new Date()) {
   };
 }
 
-function shiftIsoDate(date, days) {
-  const value = new Date(`${date}T12:00:00Z`);
-  value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
-}
-
-// Автоматизація створює ID на кшталт AUTO-20260722-0930. Саме ID, а не
-// позиція рядка в таблиці, однозначно визначає, коли матеріал згенеровано.
-export function generationSlotForItem(item) {
-  const match = String(item?.id || '').match(
-    /^AUTO-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(?:$|[-_])/i,
-  );
-  if (!match) return null;
-
-  const [, year, month, day, hourText, minuteText] = match;
-  const hour = Number(hourText);
-  const minute = Number(minuteText);
-  if (hour > 23 || minute > 59) return null;
-
-  const date = `${year}-${month}-${day}`;
-  const parsed = new Date(`${date}T12:00:00Z`);
-  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return null;
-  return `${date}-${hour < 12 ? 'am' : 'pm'}`;
-}
-
 // Даємо дві години на випадок, якщо генерація або монтаж трохи затримались.
 // У межах вікна слот той самий, тож повторного поста не буде.
 export function currentPublishSlot(now = new Date()) {
   const { date, hour } = kyivParts(now);
-  if (hour === 10 || hour === 11) {
-    return {
-      key: `${date}-am`,
-      label: '10:00',
-      generationSlot: `${shiftIsoDate(date, -1)}-pm`,
-    };
-  }
-  if (hour === 18 || hour === 19) {
-    return {
-      key: `${date}-pm`,
-      label: '18:00',
-      generationSlot: `${date}-am`,
-    };
-  }
+  if (hour === 10 || hour === 11) return { key: `${date}-am`, label: '10:00' };
+  if (hour === 18 || hour === 19) return { key: `${date}-pm`, label: '18:00' };
   return null;
 }
 
@@ -128,25 +98,24 @@ export async function runAutoPublishOnce({
   let item = file ? findItemForFile(items, file) : null;
 
   if (!file) {
-    // Беремо лише матеріал із потрібного генераційного слота: о 10:00 — з
-    // попереднього вечора, о 18:00 — з поточного ранку. Якщо його немає,
-    // чекаємо й не підміняємо свіжішим постом. Враховуємо також marker-файли,
-    // які лишаються після перегенерації.
+    // Беремо НАЙСТАРІШЕ готове й ще не опубліковане. Порядок — як у таблиці
+    // (нові рядки дописуються в кінець), тож черга виходить сама собою.
+    // Враховуємо також marker-файли, які лишаються після перегенерації.
     const claimedItemIds = new Set(
       [...files.values()]
         .map((candidateFile) => candidateFile.appProperties?.autoPostItemId)
         .filter(Boolean),
     );
     const candidates = items
-      .filter(isReady)
-      .filter((candidate) => generationSlotForItem(candidate) === slot.generationSlot)
+      .filter(isReady) // DONE + архів + назва + опис
+      .filter((candidate) => candidate.status !== 'PUBLISHED') // вже вийшло вручну
       .map((candidate) => ({ item: candidate, file: files.get(videoName(candidate.id)) }))
       .filter(({ item: candidate, file: candidateFile }) => (
-        candidateFile
-        && !candidateFile.appProperties?.autoPostSlot
+        candidateFile // відео змонтоване
+        && !candidateFile.appProperties?.autoPostSlot // ще не бралося в роботу
         && !claimedItemIds.has(candidate.id)
       ));
-    const candidate = candidates.at(-1);
+    const candidate = candidates[0]; // найстаріший рядок згори
     if (!candidate) return { status: 'waiting-for-video', slot: slot.key };
     ({ file, item } = candidate);
     const claim = { autoPostSlot: slot.key, autoPostItemId: item.id };

@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   currentPublishSlot,
-  generationSlotForItem,
   runAutoPublishOnce,
 } from '../src/autopublish.js';
 
@@ -10,36 +9,29 @@ process.env.TELEGRAM_CHAT_ID = '1';
 process.env.ENABLE_FB = '1';
 process.env.ENABLE_IG = '1';
 
-function readyItem(id, title = `Тема ${id}`) {
+function readyItem(id, title = `Тема ${id}`, status = 'DONE') {
   return {
     id,
     title,
     description: `Опис ${id}`,
     archive: 'https://drive.google.com/file/d/archive/view',
-    status: 'DONE',
+    status,
   };
 }
 
 test('publish slots follow Europe/Kyiv in summer and winter', () => {
   assert.deepEqual(
     currentPublishSlot(new Date('2026-07-22T07:00:00Z')),
-    { key: '2026-07-22-am', label: '10:00', generationSlot: '2026-07-21-pm' },
+    { key: '2026-07-22-am', label: '10:00' },
   );
   assert.deepEqual(
     currentPublishSlot(new Date('2026-12-22T16:00:00Z')),
-    { key: '2026-12-22-pm', label: '18:00', generationSlot: '2026-12-22-am' },
+    { key: '2026-12-22-pm', label: '18:00' },
   );
   assert.equal(currentPublishSlot(new Date('2026-07-22T06:59:59Z')), null);
 });
 
-test('generation slot is derived from automation ID', () => {
-  assert.equal(generationSlotForItem(readyItem('AUTO-20260722-0930')), '2026-07-22-am');
-  assert.equal(generationSlotForItem(readyItem('AUTO-20260722-1730')), '2026-07-22-pm');
-  assert.equal(generationSlotForItem(readyItem('MANUAL-1')), null);
-  assert.equal(generationSlotForItem(readyItem('AUTO-20260231-2500')), null);
-});
-
-test('10:00 publishes newest post from previous evening, not current morning', async () => {
+test('бере НАЙСТАРІШЕ готове відео, а не найсвіжіше', async () => {
   const items = [
     readyItem('AUTO-20260721-1600'),
     readyItem('AUTO-20260721-1730'),
@@ -77,11 +69,11 @@ test('10:00 publishes newest post from previous evening, not current morning', a
   });
 
   assert.equal(first.status, 'published');
-  assert.equal(first.itemId, 'AUTO-20260721-1730');
+  assert.equal(first.itemId, 'AUTO-20260721-1600', 'черга йде від найстарішого');
   assert.deepEqual(posts.map((post) => post.platform), ['facebook', 'instagram']);
   assert.equal(
     posts[0].payload.videoUrl,
-    'https://app.example.com/api/video/AUTO-20260721-1730',
+    'https://app.example.com/api/video/AUTO-20260721-1600',
   );
   assert.equal(writes[0].patch.autoPostSlot, '2026-07-22-am');
   assert.ok(writes.some((write) => write.patch.facebookPostId === 'facebook-post-1'));
@@ -102,7 +94,7 @@ test('10:00 publishes newest post from previous evening, not current morning', a
   assert.equal(notices.length, 1, 'success notification must not repeat');
 });
 
-test('18:00 publishes current morning post, not current evening', async () => {
+test('за один слот виходить рівно один ролик', async () => {
   const items = [
     readyItem('AUTO-20260722-0930'),
     readyItem('AUTO-20260722-1730'),
@@ -130,16 +122,42 @@ test('18:00 publishes current morning post, not current evening', async () => {
   assert.deepEqual(posts, ['facebook', 'instagram']);
 });
 
-test('waits instead of publishing a post from the wrong generation slot', async () => {
+test('пропускає те, що вже опубліковано вручну', async () => {
+  // Власник натиснув «Опубліковано» в мінідодатку — статус PUBLISHED.
+  // Такий рядок автопублікація брати не має, навіть якщо відео на місці.
+  const items = [
+    readyItem('AUTO-20260721-1600', 'Старе', 'PUBLISHED'),
+    readyItem('AUTO-20260722-0930', 'Наступне в черзі'),
+  ];
+  const files = new Map(items.map((item) => [
+    `${item.id}.mp4`,
+    { id: `file-${item.id}`, name: `${item.id}.mp4`, appProperties: {} },
+  ]));
+  const posts = [];
+
+  const result = await runAutoPublishOnce({
+    now: new Date('2026-07-22T07:00:00Z'),
+    listItems: async () => items,
+    listFiles: async () => files,
+    setProperties: async () => {},
+    publishPlatform: async (platform) => {
+      posts.push(platform);
+      return { platform, status: 'published', id: `${platform}-id` };
+    },
+    notifyFn: async () => {},
+  });
+
+  assert.equal(result.itemId, 'AUTO-20260722-0930');
+  assert.equal(posts.length, 2);
+});
+
+test('чекає, коли готового відео немає', async () => {
   const item = readyItem('AUTO-20260722-0930');
   let publishCalls = 0;
   const result = await runAutoPublishOnce({
     now: new Date('2026-07-22T07:00:00Z'),
     listItems: async () => [item],
-    listFiles: async () => new Map([[
-      `${item.id}.mp4`,
-      { id: 'file-morning', name: `${item.id}.mp4`, appProperties: {} },
-    ]]),
+    listFiles: async () => new Map(), // архів є, а відео ще не змонтоване
     setProperties: async () => {},
     publishPlatform: async () => { publishCalls++; },
     notifyFn: async () => {},
