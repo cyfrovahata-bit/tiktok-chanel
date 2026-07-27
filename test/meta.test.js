@@ -102,6 +102,61 @@ test('Facebook: ШІ-позначку можна вимкнути через MET
   assert.equal(calls[2].options.body.has('is_ai_generated'), false);
 });
 
+test('Facebook: за наявності байтів файл ллється напряму, а не за посиланням', async () => {
+  const calls = [];
+  const responses = [
+    reply({ video_id: 'fb-video-3', upload_url: 'https://rupload.facebook.test/upload' }),
+    reply({ success: true }),
+    reply({ success: true }),
+  ];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    return responses.shift();
+  };
+
+  const bytes = Buffer.from('відео-байти');
+  await publishFacebookReel(
+    { videoUrl: 'https://example.com/video.mp4', videoBuffer: bytes, description: 'Опис' },
+    { token: 'page-token', pageId: '456', fetchImpl },
+  );
+
+  const upload = calls[1];
+  assert.equal(upload.options.headers.file_url, undefined, 'посилання не передаємо');
+  assert.equal(upload.options.headers.offset, '0');
+  assert.equal(upload.options.headers.file_size, String(bytes.length));
+  assert.equal(upload.options.headers['content-type'], 'application/octet-stream');
+  assert.ok(Buffer.isBuffer(upload.options.body));
+  assert.equal(upload.options.body.toString(), 'відео-байти');
+});
+
+test('Facebook: META_UPLOAD_MODE=url повертає завантаження за посиланням', async () => {
+  const calls = [];
+  const responses = [
+    reply({ video_id: 'fb-video-4', upload_url: 'https://rupload.facebook.test/upload' }),
+    reply({ success: true }),
+    reply({ success: true }),
+  ];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    return responses.shift();
+  };
+
+  const previous = process.env.META_UPLOAD_MODE;
+  process.env.META_UPLOAD_MODE = 'url';
+  try {
+    await publishFacebookReel(
+      { videoUrl: 'https://example.com/video.mp4', videoBuffer: Buffer.from('x'), description: '' },
+      { token: 'page-token', pageId: '456', fetchImpl },
+    );
+  } finally {
+    if (previous === undefined) delete process.env.META_UPLOAD_MODE;
+    else process.env.META_UPLOAD_MODE = previous;
+  }
+
+  assert.equal(calls[1].options.headers.file_url, 'https://example.com/video.mp4');
+  assert.equal(calls[1].options.headers.offset, undefined);
+});
+
 test('Meta errors include API code', async () => {
   const fetchImpl = async () => reply({
     error: { message: 'Invalid token', code: 190, error_subcode: 463 },

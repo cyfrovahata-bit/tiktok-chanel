@@ -39,8 +39,11 @@ export async function publish(platform, payload) {
 
   const caption = String(payload.description || payload.title || '');
   if (platform === 'facebook') {
+    // Байтами, а не посиланням — причина в коментарі до transferReelFile.
+    const byUrl = process.env.META_UPLOAD_MODE === 'url';
     const result = await publishFacebookReel({
       videoUrl: payload.videoUrl,
+      videoBuffer: byUrl || !payload.videoBuffer ? null : await payload.videoBuffer(),
       description: caption,
     });
     return {

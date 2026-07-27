@@ -175,13 +175,17 @@ export async function runAutoPublishOnce({
   await setProperties(file.id, attemptPatch);
   applyLocalProperties(file, attemptPatch);
 
+  // Байти потрібні і TikTok, і Facebook. Тягнемо з Drive ліниво й один раз на
+  // рядок: платформ до трьох, а ролик важить кілька мегабайтів.
+  let bufferOnce = null;
   const payload = {
     videoUrl: `${String(publicUrl).replace(/\/$/, '')}/api/video/${encodeURIComponent(item.id)}`,
     title: item.title,
     description: item.description,
-    // TikTok вантажить байти, а не посилання. Ліниво: Meta цього не торкається,
-    // тож зайвого завантаження з Drive не буде, якщо TikTok вимкнено.
-    videoBuffer: () => fetchVideoBuffer(file.id),
+    videoBuffer: () => {
+      if (!bufferOnce) bufferOnce = fetchVideoBuffer(file.id);
+      return bufferOnce;
+    },
   };
   const results = [];
   for (const platform of missing) {

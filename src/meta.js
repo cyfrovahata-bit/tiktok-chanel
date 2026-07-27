@@ -154,11 +154,43 @@ export async function publishInstagramReel({ videoUrl, caption }, options = {}) 
   return { id: String(published.id), containerId: String(container.id) };
 }
 
-export async function publishFacebookReel({ videoUrl, description }, options = {}) {
+// Файл для Reel Facebook приймає двома способами. «Hosted file upload» — ми
+// даємо посилання в заголовку file_url, і Facebook качає сам. «Local file
+// upload» — ллємо байти самі, з offset і file_size.
+//
+// Ллємо байтами. Причина: два однакові ролики з нашого ж конвеєра повелися
+// по-різному — опублікований за посиланням не отримав сутності «Оригінальний
+// звук», не з'явився в публічній вкладці Reels і набрав 18 переглядів, тоді як
+// залитий файлом набрав 585. Звук у файлі при цьому нормальний (перевірено
+// ffprobe на тих самих байтах, які отримав Facebook), тож справа не у відео.
+// META_UPLOAD_MODE=url повертає старий спосіб, якщо здогадка не підтвердиться.
+async function transferReelFile({ uploadUrl, token, source, buffer, fetchImpl }) {
+  if (buffer) {
+    return requestJson(uploadUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `OAuth ${token}`,
+        offset: '0',
+        file_size: String(buffer.length),
+        'content-type': 'application/octet-stream',
+      },
+      body: buffer,
+    }, fetchImpl);
+  }
+  return requestJson(uploadUrl, {
+    method: 'POST',
+    headers: { Authorization: `OAuth ${token}`, file_url: publicVideoUrl(source) },
+  }, fetchImpl);
+}
+
+export async function publishFacebookReel({ videoUrl, videoBuffer, description }, options = {}) {
   const token = required(options.token || process.env.META_PAGE_ACCESS_TOKEN, 'META_PAGE_ACCESS_TOKEN');
   const pageId = required(options.pageId || process.env.META_PAGE_ID, 'META_PAGE_ID');
-  const source = publicVideoUrl(videoUrl);
   const fetchImpl = options.fetchImpl || fetch;
+  const buffer = process.env.META_UPLOAD_MODE === 'url' || !videoBuffer
+    ? null
+    : Buffer.from(videoBuffer);
+  if (!buffer) publicVideoUrl(videoUrl); // без байтів посилання обов'язкове й має бути HTTPS
 
   const started = await graphRequest(`${encodeURIComponent(pageId)}/video_reels`, {
     method: 'POST', params: { upload_phase: 'start' }, token, fetchImpl,
@@ -167,13 +199,9 @@ export async function publishFacebookReel({ videoUrl, description }, options = {
     throw new Error('Facebook не повернув video_id або upload_url для Reel');
   }
 
-  const transferred = await requestJson(started.upload_url, {
-    method: 'POST',
-    headers: {
-      Authorization: `OAuth ${token}`,
-      file_url: source,
-    },
-  }, fetchImpl);
+  const transferred = await transferReelFile({
+    uploadUrl: started.upload_url, token, source: videoUrl, buffer, fetchImpl,
+  });
   if (transferred.success === false) throw new Error('Facebook не прийняв файл Reel');
 
   // is_ai_generated немає в посібнику «Publish a Reel» — його таблиця параметрів
