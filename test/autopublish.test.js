@@ -245,3 +245,45 @@ test('a regeneration marker prevents the same item from being posted next slot',
   assert.equal(result.status, 'waiting-for-video');
   assert.equal(publishCalls, 0);
 });
+
+test('скинуте вручну не виходить повторно в тому ж вікні', async () => {
+  // Пост видалили в соцмережі й зняли мітки. У поточному вікні матеріал
+  // пропускаємо, інакше він опублікувався б тим самим тиком.
+  const item = readyItem('AUTO-20260722-0930');
+  const files = new Map([[
+    `${item.id}.mp4`,
+    {
+      id: 'file-reset',
+      name: `${item.id}.mp4`,
+      appProperties: { autoPostSkipSlot: '2026-07-22-am' },
+    },
+  ]]);
+  let publishCalls = 0;
+
+  const inSameSlot = await runAutoPublishOnce({
+    now: new Date('2026-07-22T07:30:00Z'), // 10:30 Київ — те саме вікно
+    listItems: async () => [item],
+    listFiles: async () => files,
+    setProperties: async () => {},
+    publishPlatform: async () => { publishCalls++; },
+    notifyFn: async () => {},
+  });
+  assert.equal(inSameSlot.status, 'waiting-for-video');
+  assert.equal(publishCalls, 0);
+
+  // Наступне вікно (18:00) — уже можна.
+  const posts = [];
+  const nextSlot = await runAutoPublishOnce({
+    now: new Date('2026-07-22T15:00:00Z'),
+    listItems: async () => [item],
+    listFiles: async () => files,
+    setProperties: async () => {},
+    publishPlatform: async (platform) => {
+      posts.push(platform);
+      return { platform, status: 'published', id: `${platform}-id` };
+    },
+    notifyFn: async () => {},
+  });
+  assert.equal(nextSlot.status, 'published');
+  assert.deepEqual(posts, ['facebook', 'instagram']);
+});

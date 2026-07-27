@@ -113,6 +113,9 @@ export async function runAutoPublishOnce({
       .filter(({ item: candidate, file: candidateFile }) => (
         candidateFile // відео змонтоване
         && !candidateFile.appProperties?.autoPostSlot // ще не бралося в роботу
+        // Скинуте вручну в цьому ж вікні: інакше воно вийшло б повторно
+        // тим самим тиком, і скидання не мало б сенсу.
+        && candidateFile.appProperties?.autoPostSkipSlot !== slot.key
         && !claimedItemIds.has(candidate.id)
       ));
     const candidate = candidates[0]; // найстаріший рядок згори

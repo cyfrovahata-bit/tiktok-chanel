@@ -15,14 +15,14 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady, listNewItems, updateRowPrompt, deleteQueueRow, appendRejectedTheme, listRejectedThemes } from '../src/sheets.js';
 import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-prompt.js';
-import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
+import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
 import { forgetNotice } from '../src/notices.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { createSubmission, addPhoto, submitOwn, deleteOwnFolder } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
-import { startAutoPublisher } from '../src/autopublish.js';
+import { startAutoPublisher, currentPublishSlot } from '../src/autopublish.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
 
@@ -297,6 +297,45 @@ const server = http.createServer(async (req, res) => {
         await updateRowPrompt(body.id, { theme: body.theme, prompt });
         cache.at = 0;
         return json(res, 200, { ok: true, slides: (body.slides || []).length });
+      } catch (error) {
+        return json(res, 400, { error: error.message });
+      }
+    }
+
+    // «Вважати неопублікованим»: знімає з відео всі мітки автопублікації, щоб
+    // воно знову стало в чергу. Потрібно, коли пост у соцмережі видалили
+    // руками або він вийшов помилково. Поточне вікно при цьому закриваємо —
+    // інакше матеріал вилетів би повторно вже наступним тиком.
+    if (req.method === 'POST' && pathname === '/api/autopost/reset') {
+      const body = JSON.parse(await readBody(req));
+      const check = verifyInitData(body.initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Може лише власник каналу' });
+      try {
+        const id = String(body.id || '');
+        const files = await listVideoFiles();
+        const file = files.get(videoName(id));
+        if (!file) throw new Error(`Відео для ${id} не знайдено в Drive`);
+        const slot = currentPublishSlot();
+        const cleared = await setVideoAppProperties(file.id, {
+          autoPostSlot: null,
+          autoPostItemId: null,
+          autoPostDone: null,
+          autoPostNotified: null,
+          autoPostLastAttemptAt: null,
+          facebookPostId: null,
+          facebookPublishedAt: null,
+          instagramPostId: null,
+          instagramPublishedAt: null,
+          // Якщо зараз усередині вікна — пропускаємо саме його, вийде в наступне.
+          autoPostSkipSlot: slot ? slot.key : null,
+        });
+        cache.at = 0;
+        return json(res, 200, {
+          ok: true, id,
+          skippedSlot: slot ? slot.label : null,
+          remaining: Object.keys(cleared),
+        });
       } catch (error) {
         return json(res, 400, { error: error.message });
       }
