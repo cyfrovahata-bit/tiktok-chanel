@@ -1,6 +1,7 @@
-// Єдина точка публікації по платформах. Facebook та Instagram реалізовані
-// через Meta Graph API; TikTok і YouTube навмисно лишаються ручними.
+// Єдина точка публікації по платформах. Facebook та Instagram — через Meta
+// Graph API, TikTok — через Content Posting API. YouTube поки що вручну.
 import { publishFacebookReel, publishInstagramReel } from './meta.js';
+import { publishTikTokVideo } from './tiktok.js';
 
 // name — людська назва; flag — змінна середовища, що вмикає платформу;
 // коли реальний код з'явиться, він живе у полі publish кожного запису.
@@ -59,6 +60,20 @@ export async function publish(platform, payload) {
       status: 'published',
       id: result.id,
       detail: `Instagram Reel ${result.id}`,
+    };
+  }
+
+  if (platform === 'tiktok') {
+    // TikTok приймає БАЙТИ, а не посилання, тож качаємо готовий ролик до себе.
+    const buffer = await payload.videoBuffer();
+    const result = await publishTikTokVideo({ videoBuffer: buffer, title: caption });
+    return {
+      platform,
+      status: 'published',
+      id: result.id,
+      detail: result.mode === 'direct'
+        ? `TikTok ${result.id} (${result.privacy})`
+        : `TikTok ${result.id} — у чернетках застосунку (скоуп video.upload)`,
     };
   }
 

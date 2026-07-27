@@ -23,6 +23,8 @@ import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { createSubmission, addPhoto, submitOwn, deleteOwnFolder } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher, currentPublishSlot } from '../src/autopublish.js';
+import { tiktokConfigured, consentUrl as tiktokConsentUrl, exchangeCode as tiktokExchangeCode, redirectUri as tiktokRedirectUri, accessToken as tiktokAccessToken, creatorInfo as tiktokCreatorInfo } from '../src/tiktok.js';
+import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
 
@@ -487,6 +489,62 @@ const server = http.createServer(async (req, res) => {
       const n = await pollOnce();
       cache.at = 0;
       return json(res, 200, { checked: n, announced });
+    }
+
+    // --- TikTok --------------------------------------------------------------
+    // Крок 1: згода. Redirect URI має бути доданий у налаштуваннях застосунку.
+    if (req.method === 'GET' && pathname === '/tiktok/start') {
+      if (!tiktokConfigured()) {
+        return json(res, 200, { error: 'Задай TIKTOK_CLIENT_KEY і TIKTOK_CLIENT_SECRET' });
+      }
+      res.writeHead(302, { location: tiktokConsentUrl() });
+      return res.end();
+    }
+
+    // Крок 2: TikTok повертає code — міняємо на токени й кладемо їх на Drive.
+    if (req.method === 'GET' && pathname === '/tiktok/callback') {
+      const code = url.searchParams.get('code');
+      const error = url.searchParams.get('error');
+      if (error || !code) {
+        res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(`<h2>TikTok не дав дозвіл</h2><p>${error || 'немає code'}</p>`);
+      }
+      try {
+        const saved = await tiktokExchangeCode(code);
+        const direct = String(saved.scope || '').includes('video.publish');
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(
+          '<h2>TikTok підключено ✅</h2>'
+          + `<p>Дозволи: <code>${saved.scope || '—'}</code></p>`
+          + `<p>Режим: <b>${direct ? 'пряма публікація у стрічку' : 'чернетки застосунку (скоуп video.upload)'}</b></p>`
+          + '<p>Токен збережено на Drive. Це вікно можна закрити.</p>',
+        );
+      } catch (e) {
+        res.writeHead(500, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end(`<h2>Не вдалося обміняти код</h2><pre>${e.message}</pre>`);
+      }
+    }
+
+    // Діагностика: чи живий токен, який режим і що дозволяє акаунт.
+    // Самих токенів НЕ повертає.
+    if (req.method === 'GET' && pathname === '/api/tiktok/check') {
+      if (!tiktokConfigured()) return json(res, 200, { error: 'TIKTOK_CLIENT_KEY / SECRET не задано' });
+      const out = { redirectUri: tiktokRedirectUri(), token: await tiktokTokenStatus() };
+      try {
+        const tokens = await tiktokAccessToken();
+        out.scope = tokens.scope || null;
+        out.mode = String(tokens.scope || '').includes('video.publish')
+          ? 'пряма публікація ✅' : 'чернетки (video.upload)';
+        const info = await tiktokCreatorInfo(tokens.accessToken);
+        out.creator = {
+          nickname: info.creator_nickname ?? null,
+          privacyOptions: info.privacy_level_options ?? null,
+          maxDurationSec: info.max_video_post_duration_sec ?? null,
+        };
+      } catch (e) {
+        out.error = e.message;
+      }
+      return json(res, 200, out);
     }
 
     // OAuth: крок 1 — відправляємо власника на згоду Google.

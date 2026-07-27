@@ -11,7 +11,7 @@
 // мінідодатку, щоб можна було забрати відео для TikTok і позначити
 // «Опубліковано» руками, коли справді все зроблено.
 import { readAllItems, isReady } from './sheets.js';
-import { listVideoFiles, setVideoAppProperties, videoName } from './videos.js';
+import { listVideoFiles, setVideoAppProperties, videoName, streamVideo } from './videos.js';
 import { publish } from './publish.js';
 import { sendMessage, ownerChatId } from './telegram.js';
 
@@ -53,20 +53,35 @@ function enabledMetaPlatforms() {
   const platforms = [];
   if (process.env.ENABLE_FB === '1') platforms.push('facebook');
   if (process.env.ENABLE_IG === '1') platforms.push('instagram');
+  if (process.env.ENABLE_TIKTOK === '1') platforms.push('tiktok');
   return platforms;
 }
 
+const PLATFORM_META = {
+  facebook: { idProperty: 'facebookPostId', label: 'Facebook' },
+  instagram: { idProperty: 'instagramPostId', label: 'Instagram' },
+  tiktok: { idProperty: 'tiktokPostId', label: 'TikTok' },
+};
+
 function platformIdProperty(platform) {
-  return platform === 'facebook' ? 'facebookPostId' : 'instagramPostId';
+  return PLATFORM_META[platform]?.idProperty ?? `${platform}PostId`;
 }
 
 function platformLabel(platform) {
-  return platform === 'facebook' ? 'Facebook' : 'Instagram';
+  return PLATFORM_META[platform]?.label ?? platform;
 }
 
 async function notify(text, notifyFn = sendMessage) {
   try { await notifyFn(ownerChatId(), text); }
   catch (error) { console.error('[autopublish] Telegram:', error.message); }
+}
+
+// Завантажує готовий MP4 із Drive у пам'ять (ролики ~5 МБ).
+async function fetchVideoBuffer(fileId) {
+  const { stream } = await streamVideo(fileId);
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks);
 }
 
 function applyLocalProperties(file, patch) {
@@ -164,6 +179,9 @@ export async function runAutoPublishOnce({
     videoUrl: `${String(publicUrl).replace(/\/$/, '')}/api/video/${encodeURIComponent(item.id)}`,
     title: item.title,
     description: item.description,
+    // TikTok вантажить байти, а не посилання. Ліниво: Meta цього не торкається,
+    // тож зайвого завантаження з Drive не буде, якщо TikTok вимкнено.
+    videoBuffer: () => fetchVideoBuffer(file.id),
   };
   const results = [];
   for (const platform of missing) {
