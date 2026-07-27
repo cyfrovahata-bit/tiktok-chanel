@@ -327,6 +327,38 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Дописи у СТРІЧЦІ Сторінки. Reel і запис у стрічці — різні обʼєкти:
+    // ролик може існувати як Reel, але не мати story у стрічці, і тоді
+    // story.php по його ID не відкривається, а охоплення йде лише через
+    // вкладку Reels. Саме це відрізняє публікацію через API від ручної.
+    if (req.method === 'GET' && pathname === '/api/meta/feed') {
+      const token = process.env.META_PAGE_ACCESS_TOKEN;
+      const pageId = process.env.META_PAGE_ID;
+      if (!token || !pageId) return json(res, 200, { error: 'META_PAGE_ACCESS_TOKEN / META_PAGE_ID не задано' });
+      try {
+        const base = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v25.0'}`;
+        const r = await fetch(
+          `${base}/${encodeURIComponent(pageId)}/posts`
+          + `?fields=id,created_time,permalink_url,status_type,attachments{media_type,target}`
+          + `&limit=10&access_token=${encodeURIComponent(token)}`,
+        );
+        const data = await r.json();
+        if (data.error) return json(res, 200, { error: data.error.message });
+        return json(res, 200, {
+          posts: (data.data || []).map((p) => ({
+            id: p.id,
+            created: p.created_time,
+            statusType: p.status_type ?? null,
+            mediaType: p.attachments?.data?.[0]?.media_type ?? null,
+            targetId: p.attachments?.data?.[0]?.target?.id ?? null,
+            permalink: p.permalink_url ?? null,
+          })),
+        });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
     // Останні Reels Сторінки з їхнім станом. Відкрити facebook.com ззовні
     // не вийде — він віддає 400 будь-якому не-браузеру, — тож єдиний чесний
     // спосіб перевірити доступність допису це спитати Graph.
