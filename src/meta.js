@@ -125,6 +125,11 @@ export async function publishInstagramReel({ videoUrl, caption }, options = {}) 
       video_url: source,
       caption: String(caption || ''),
       share_to_feed: 'true',
+      // Самодекларація ШІ-контенту: кадри малює нейромережа, тож Instagram
+      // має показати позначку «AI info». Ставимо завжди, крім явного
+      // META_AI_LABEL=0 — краще позначити зайвий раз, ніж отримати
+      // приховане зниження охоплення за недекларований ШІ.
+      ...(process.env.META_AI_LABEL === '0' ? {} : { is_ai_generated: 'true' }),
     },
     token,
     fetchImpl: options.fetchImpl,

@@ -87,3 +87,22 @@ test('Meta errors include API code', async () => {
     /Invalid token \(code 190, subcode 463\)/,
   );
 });
+
+test('Instagram Reel декларується як згенерований ШІ', async () => {
+  // POST-параметри йдуть у тілі запиту, а не в URL.
+  const bodies = [];
+  const responses = [
+    { id: 'container-1' },
+    { status_code: 'FINISHED' },
+    { id: 'reel-1' },
+  ];
+  const fetchImpl = async (_url, options) => {
+    bodies.push(String(options?.body ?? ''));
+    return { ok: true, status: 200, text: async () => JSON.stringify(responses.shift()) };
+  };
+  await publishInstagramReel(
+    { videoUrl: 'https://app.example.com/api/video/X', caption: 'опис' },
+    { token: 't', igUserId: '1', fetchImpl, sleep: async () => {} },
+  );
+  assert.match(bodies[0], /is_ai_generated=true/, 'контейнер має нести самодекларацію ШІ');
+});
