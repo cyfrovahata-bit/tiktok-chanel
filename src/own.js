@@ -165,3 +165,23 @@ export async function submitOwn({ id, story, photoCount, folderUrl, folderName, 
   });
   return { id, photoCount };
 }
+
+// Прибирає папку з матеріалами власника (коли він відхилив свій сюжет).
+// Шукаємо за назвою: ID папки ніде не збережений, а назва починається з ID
+// рядка — цього досить і не вимагає ще одного стану.
+export async function deleteOwnFolder(id) {
+  const res = await drive().files.list({
+    q: `'${parentFolderId()}' in parents and name contains '${id}' `
+      + "and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+    fields: 'files(id, name)',
+    pageSize: 10,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  let removed = 0;
+  for (const f of res.data.files || []) {
+    await drive().files.delete({ fileId: f.id, supportsAllDrives: true });
+    removed++;
+  }
+  return removed;
+}

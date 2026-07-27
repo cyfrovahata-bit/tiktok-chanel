@@ -48,3 +48,13 @@ export async function writeNotices(seen) {
     });
   }
 }
+
+// Забути рядок (після видалення з таблиці), щоб він не «висів» у пам'яті
+// оголошених статусів і не заважав, якщо той самий ID колись повториться.
+export async function forgetNotice(id) {
+  const seen = await readNotices();
+  if (!(id in seen)) return false;
+  delete seen[id];
+  await writeNotices(seen);
+  return true;
+}

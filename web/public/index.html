@@ -417,6 +417,34 @@
       autoFit(themeBox);
 
       const actions = el('div', 'actions');
+
+      // Відхилення незворотне (рядок зникає з таблиці), тож питаємо підтвердження.
+      const drop = el('button', 'btn secondary', '🗑');
+      drop.title = 'Відхилити тему';
+      drop.style.flex = '0 0 auto';
+      drop.addEventListener('click', () => {
+        const ask = (fn) => (tg?.showConfirm
+          ? tg.showConfirm('Відхилити цю тему? Рядок зникне з таблиці, а тема більше не пропонуватиметься.', (ok) => ok && fn())
+          : (confirm('Відхилити цю тему?') && fn()));
+        ask(async () => {
+          const old = drop.textContent;
+          drop.disabled = true; drop.textContent = '…';
+          try {
+            const r = await fetch('/api/pending/reject', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ initData, id: item.id }),
+            });
+            const data = await r.json();
+            if (!r.ok || data.error) throw new Error(data.error || 'Помилка');
+            notify('success'); toast('Тема відхилена');
+            box.remove();
+            load();
+          } catch (e) { notify('error'); toast(e.message); }
+          finally { drop.disabled = false; drop.textContent = old; }
+        });
+      });
+      actions.appendChild(drop);
+
       const save = el('button', 'btn primary', '💾 Зберегти');
       save.addEventListener('click', async () => {
         const old = save.textContent;

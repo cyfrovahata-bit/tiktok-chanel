@@ -13,13 +13,14 @@ import { readFile, mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady, listNewItems, updateRowPrompt } from '../src/sheets.js';
+import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady, listNewItems, updateRowPrompt, deleteQueueRow, appendRejectedTheme, listRejectedThemes } from '../src/sheets.js';
 import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-prompt.js';
 import { listVideos, streamVideo, videoName, videoFolderId, deleteVideo } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
+import { forgetNotice } from '../src/notices.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
-import { createSubmission, addPhoto, submitOwn } from '../src/own.js';
+import { createSubmission, addPhoto, submitOwn, deleteOwnFolder } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher } from '../src/autopublish.js';
 import { metaStatus } from '../src/meta.js';
@@ -283,6 +284,54 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { ok: true, slides: (body.slides || []).length });
       } catch (error) {
         return json(res, 400, { error: error.message });
+      }
+    }
+
+    // Відхилення теми: прибираємо її звідусіль і запам'ятовуємо, що вона не
+    // сподобалась. Рядок зникає з черги, тож без окремого запису генератор
+    // запропонував би те саме вже наступного разу.
+    if (req.method === 'POST' && pathname === '/api/pending/reject') {
+      const body = JSON.parse(await readBody(req));
+      const check = verifyInitData(body.initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Відхиляти може лише власник каналу' });
+      try {
+        const id = String(body.id || '');
+        const item = (await readAllItems()).find((it) => it.id === id);
+        if (!item) throw new Error(`Рядок ${id} не знайдено`);
+
+        // Спершу стоп-лист: якщо далі щось впаде, тема принаймні не повернеться.
+        await appendRejectedTheme({
+          theme: item.theme,
+          id,
+          reason: String(body.reason || 'відхилено власником у мінідодатку'),
+        });
+        await deleteQueueRow(id);
+        // Супутнє: змонтоване відео, папка з фото власника, пам'ять сповіщень.
+        const cleanup = await Promise.allSettled([
+          deleteVideo(id),
+          id.startsWith('OWN-') ? deleteOwnFolder(id) : Promise.resolve(0),
+          forgetNotice(id),
+        ]);
+        forget(id);
+        cache.at = 0;
+        return json(res, 200, {
+          ok: true,
+          theme: item.theme,
+          videoRemoved: cleanup[0].status === 'fulfilled' && cleanup[0].value === true,
+        });
+      } catch (error) {
+        return json(res, 400, { error: error.message });
+      }
+    }
+
+    // Скільки тем уже у стоп-листі (діагностика).
+    if (req.method === 'GET' && pathname === '/api/rejected') {
+      try {
+        const themes = await listRejectedThemes();
+        return json(res, 200, { count: themes.length, themes });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
       }
     }
 
