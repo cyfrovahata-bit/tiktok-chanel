@@ -58,21 +58,76 @@ export function numberToUkrainian(num) {
   return words.join(' ').replace(/\s+/g, ' ').trim();
 }
 
+
+// --- Порядкові числівники ----------------------------------------------------
+// Дати вимовляються порядковим числівником, а не кількісним: «1 травня» —
+// це «першого травня», а не «один травня». Порядковою стає ЛИШЕ остання
+// ненульова складова, решта лишається кількісною: 1986 → «тисяча дев'ятсот
+// вісімдесят» + «шостого».
+const ORD_UNITS = ['', 'перш', 'друг', 'треть', 'четверт', "п'ят", 'шост', 'сьом', 'восьм', "дев'ят"];
+const ORD_TEENS = ['десят', 'одинадцят', 'дванадцят', 'тринадцят', 'чотирнадцят', "п'ятнадцят", 'шістнадцят', 'сімнадцят', 'вісімнадцят', "дев'ятнадцят"];
+const ORD_TENS = ['', '', 'двадцят', 'тридцят', 'сороков', "п'ятдесят", 'шістдесят', 'сімдесят', 'вісімдесят', "дев'яност"];
+const ORD_HUNDREDS = ['', 'сот', 'двохсот', 'трьохсот', 'чотирьохсот', "п'ятисот", 'шестисот', 'семисот', 'восьмисот', "дев'ятисот"];
+// «двох тисячн» навмисно двома словами: суцільне «двохтисячному» ElevenLabs
+// вимовляє гірше. Форма перевірена на слух і закріплена тестом.
+const ORD_THOUSANDS = ['', 'тисячн', 'двох тисячн', 'трьох тисячн', 'чотирьох тисячн', "п'яти тисячн"];
+
+// Розкладає число на «кількісний хвіст + порядкова остання складова».
+function ordinalParts(value) {
+  const m100 = value % 100;
+  if (m100 >= 10 && m100 <= 19) return { prefix: value - m100, stem: ORD_TEENS[m100 - 10] };
+  const units = value % 10;
+  if (units) return { prefix: value - units, stem: ORD_UNITS[units] };
+  if (m100) return { prefix: value - m100, stem: ORD_TENS[m100 / 10] };
+  const m1000 = value % 1000;
+  if (m1000) return { prefix: value - m1000, stem: ORD_HUNDREDS[m1000 / 100] };
+  // Кругла тисяча: 1000 → тисячного, 2000 → двохтисячного.
+  const thousands = value / 1000;
+  if (thousands < ORD_THOUSANDS.length) return { prefix: 0, stem: ORD_THOUSANDS[thousands] };
+  return null; // надто велике — краще лишити кількісним, ніж вигадувати форму
+}
+
+// ending: 'ого' (родовий: «1986 року») або 'ому' (місцевий: «у 1986 році»).
+export function ordinalUkrainian(num, ending = 'ого') {
+  const value = Math.trunc(Math.abs(Number(num)));
+  if (!Number.isFinite(value) || value === 0) return numberToUkrainian(num);
+  const parts = ordinalParts(value);
+  if (!parts || !parts.stem) return numberToUkrainian(value);
+  const head = parts.prefix ? `${numberToUkrainian(parts.prefix)} ` : '';
+  return `${head}${parts.stem}${ending}`;
+}
+
+const MONTHS_GEN = 'січня|лютого|березня|квітня|травня|червня|липня|серпня|вересня|жовтня|листопада|грудня';
+
 // Замінює числа в тексті на слова (для голосу). Підтримує пробіл-роздільник
 // тисяч («15 000», включно з нерозривним пробілом). Числа, зліплені з
 // літерами («3D», «COVID19»), НЕ чіпає.
 export function numbersToWords(text) {
-  // Рік потребує порядкового відмінка, а не звичайного кількісного
-  // числівника. Без цього «у 2000 році» ставало «у дві тисячі році», що
-  // ElevenLabs вимовляв неприродно й інколи повторював останнє слово.
-  // Це лише TTS-нормалізація: напис «У 2000 РОЦІ» на слайді не змінюється.
-  const withYearForms = String(text).replace(
-    /(?<!\p{L})([ув])\s+2000\s+році(?!\p{L})/giu,
-    (_match, preposition) => `${preposition} двох тисячному році`,
+  let out = String(text);
+
+  // «у 1986 році» / «в 2000 році» — місцевий відмінок.
+  out = out.replace(
+    new RegExp(String.raw`(?<!\p{L})([ув])\s+(\d{3,4})\s+(роц[іе])(?!\p{L})`, 'giu'),
+    (_m, prep, year) => `${prep} ${ordinalUkrainian(year, 'ому')} році`,
   );
 
-  return withYearForms.replace(
-    /(?<![\p{L}\d])(\d{1,3}(?:[  ]\d{3})+|\d+)(?![\p{L}\d])/gu,
-    (m) => numberToUkrainian(m.replace(/[  ]/g, '')),
+  // «1986 року» — родовий відмінок.
+  out = out.replace(
+    new RegExp(String.raw`(?<![\p{L}\d])(\d{3,4})\s+(року|роках)(?!\p{L})`, 'giu'),
+    (_m, year, word) => `${ordinalUkrainian(year, 'ого')} ${word}`,
+  );
+
+  // «1 травня», «20 жовтня» — день місяця теж порядковий.
+  out = out.replace(
+    new RegExp(String.raw`(?<![\p{L}\d])(\d{1,2})\s+(${MONTHS_GEN})(?!\p{L})`, 'giu'),
+    (_m, day, month) => `${ordinalUkrainian(day, 'ого')} ${month}`,
+  );
+
+  // Решта чисел — звичайним кількісним числівником. Підтримує пробіл-роздільник
+  // тисяч («15 000», включно з нерозривним пробілом). Числа, зліплені з
+  // літерами («3D», «COVID19»), НЕ чіпає.
+  return out.replace(
+    /(?<![\p{L}\d])(\d{1,3}(?:[  ]\d{3})+|\d+)(?![\p{L}\d])/gu,
+    (m) => numberToUkrainian(m.replace(/[  ]/g, '')),
   );
 }
