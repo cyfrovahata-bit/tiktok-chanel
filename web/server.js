@@ -76,7 +76,9 @@ const TIKTOK_STATE_TTL = 15 * 60 * 1000;
 function issueTiktokState() {
   const now = Date.now();
   for (const [key, at] of tiktokStates) if (now - at > TIKTOK_STATE_TTL) tiktokStates.delete(key);
-  const state = crypto.randomBytes(16).toString('hex');
+  // Префікс дозволяє стороннім обробникам (напр. переадресації на чужому
+  // домені) відрізнити НАШУ авторизацію від власної й не ламати її.
+  const state = `cvz-${crypto.randomBytes(16).toString('hex')}`;
   tiktokStates.set(state, now);
   return state;
 }
