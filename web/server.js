@@ -337,17 +337,24 @@ const server = http.createServer(async (req, res) => {
       if (!token) return json(res, 200, { error: 'META_PAGE_ACCESS_TOKEN не задано' });
       try {
         const base = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v25.0'}`;
-        // post_video_views прибрано: Graph відхиляє ВЕСЬ запит, якщо хоч одна
-        // метрика недійсна для цього типу допису.
-        const metrics = url.searchParams.get('metric') || 'post_impressions,post_impressions_unique';
-        const r = await fetch(
-          `${base}/${encodeURIComponent(storyId)}/insights?metric=${metrics}&access_token=${encodeURIComponent(token)}`,
-        );
-        const data = await r.json();
-        if (data.error) return json(res, 200, { error: data.error.message });
-        const out = {};
-        for (const m of data.data || []) out[m.name] = m.values?.[0]?.value ?? null;
-        return json(res, 200, { id: storyId, ...out });
+        // У Reels свій набір метрик і свій edge. Пробуємо обидва: спершу
+        // звичайні покази допису, потім показники відео. Graph відхиляє ВЕСЬ
+        // запит через одну недійсну метрику, тож змішувати їх не можна.
+        const attempts = [
+          { edge: 'insights', metric: 'post_impressions,post_impressions_unique' },
+          { edge: 'video_insights', metric: 'total_video_impressions,total_video_views' },
+        ];
+        const out = { id: storyId, tried: [] };
+        for (const a of attempts) {
+          const r = await fetch(
+            `${base}/${encodeURIComponent(storyId)}/${a.edge}?metric=${a.metric}`
+            + `&access_token=${encodeURIComponent(token)}`,
+          );
+          const data = await r.json();
+          if (data.error) { out.tried.push(`${a.edge}: ${data.error.message}`); continue; }
+          for (const m of data.data || []) out[m.name] = m.values?.[0]?.value ?? m.value ?? null;
+        }
+        return json(res, 200, out);
       } catch (error) {
         return json(res, 200, { error: error.message });
       }
