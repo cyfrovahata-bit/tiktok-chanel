@@ -337,7 +337,9 @@ const server = http.createServer(async (req, res) => {
       if (!token) return json(res, 200, { error: 'META_PAGE_ACCESS_TOKEN не задано' });
       try {
         const base = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v25.0'}`;
-        const metrics = 'post_impressions,post_impressions_unique,post_video_views';
+        // post_video_views прибрано: Graph відхиляє ВЕСЬ запит, якщо хоч одна
+        // метрика недійсна для цього типу допису.
+        const metrics = url.searchParams.get('metric') || 'post_impressions,post_impressions_unique';
         const r = await fetch(
           `${base}/${encodeURIComponent(storyId)}/insights?metric=${metrics}&access_token=${encodeURIComponent(token)}`,
         );
