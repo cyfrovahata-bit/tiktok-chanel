@@ -302,6 +302,28 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Що саме автопублікація вже відправила: мітки живуть у appProperties
+    // самого MP4, і без цього подивитися на них нема як.
+    if (req.method === 'GET' && pathname === '/api/autopost/status') {
+      try {
+        const files = await listVideoFiles();
+        const rows = [...files.values()]
+          .filter((f) => Object.keys(f.appProperties || {}).length)
+          .map((f) => ({
+            file: f.name,
+            slot: f.appProperties.autoPostSlot || null,
+            skipSlot: f.appProperties.autoPostSkipSlot || null,
+            facebook: f.appProperties.facebookPostId || null,
+            facebookAt: f.appProperties.facebookPublishedAt || null,
+            instagram: f.appProperties.instagramPostId || null,
+            instagramAt: f.appProperties.instagramPublishedAt || null,
+          }));
+        return json(res, 200, { slot: currentPublishSlot()?.label ?? 'поза вікном', rows });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
     // «Вважати неопублікованим»: знімає з відео всі мітки автопублікації, щоб
     // воно знову стало в чергу. Потрібно, коли пост у соцмережі видалили
     // руками або він вийшов помилково. Поточне вікно при цьому закриваємо —
