@@ -16,6 +16,18 @@ const FPS = 25;
 // ставив ключовий кадр раз на ~10 с — на статичних кадрах із повільним zoompan
 // детектор зміни сцени просто не спрацьовував.
 const GOP_ARGS = ['-g', String(FPS * 2), '-keyint_min', String(FPS * 2), '-sc_threshold', '0', '-flags', '+cgop'];
+
+// Звук за вимогами Meta до Reels: AAC-LC, 48 кГц, стерео, від 128 кбіт/с.
+//
+// Ціль 192k, а не 128k: -b:a задає ціль, а не гарантію, і на мовленні з паузами
+// AAC витрачає помітно менше — при цілі 128k реальний середній вийшов 106k,
+// тобто нижче вимоги. При 192k виходить ~163k, із запасом.
+//
+// Моно→стерео робимо через pan, а не -ac 2: ffmpeg при -ac 2 ділить потужність
+// між каналами і глушить доріжку рівно на 3 дБ. pan дублює канал як є.
+// (aresample=rematrix_volume=1 не допомагає — перевірено, ті самі -3 дБ.)
+const TO_STEREO = 'pan=stereo|c0=c0|c1=c0';
+const REELS_AUDIO_ARGS = ['-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '48000', '-b:a', '192k'];
 export const DEFAULT_SLIDE_SECONDS = 4;
 export const FADE_SECONDS = 0.5;
 // J-cut: озвучка наступного слайда починається на стільки раніше за зміну
@@ -153,11 +165,8 @@ export async function remuxToReelsSpec(inPath, outPath) {
     '-pix_fmt', 'yuv420p',
     '-r', String(FPS),
     ...GOP_ARGS,
-    '-c:a', 'aac',
-    '-profile:a', 'aac_low',
-    '-ar', '48000',
-    '-ac', '2',
-    '-b:a', '128k',
+    '-af', TO_STEREO,
+    ...REELS_AUDIO_ARGS,
     '-movflags', '+faststart',
     outPath,
   ]);
@@ -173,7 +182,7 @@ export async function remuxToReelsSpec(inPath, outPath) {
 // створював для нього «Оригінальний звук» і не пускав у стрічку Reels: у
 // публічній вкладці сторінки його не бачили ні сторонні, ні підписники.
 // Руками той самий ролик публікувався нормально, бо застосунок на телефоні
-// перекодовує файл перед відправкою і тим самим лагодить усі три параметри.
+// перекодовує файл перед відправкою і тим самим лагодить усі ці параметри.
 export async function mixAudio(videoPath, audioPath, outputPath) {
   await runFfmpeg([
     '-y',
@@ -182,12 +191,8 @@ export async function mixAudio(videoPath, audioPath, outputPath) {
     '-map', '0:v',
     '-map', '1:a',
     '-c:v', 'copy',
-    '-c:a', 'aac',
-    '-profile:a', 'aac_low',
-    '-ar', '48000',
-    '-ac', '2',
-    '-b:a', '128k',
-    '-af', 'apad',
+    ...REELS_AUDIO_ARGS,
+    '-af', `apad,${TO_STEREO}`,
     '-shortest',
     '-movflags', '+faststart',
     outputPath,
