@@ -18,11 +18,12 @@ import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-promp
 import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoFolderId, deleteVideo, remuxVideoToSpec } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
 import { forgetNotice } from '../src/notices.js';
+import { nextDailyTimes } from '../src/kyiv.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { createSubmission, addPhoto, submitOwn, deleteOwnFolder } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
-import { startAutoPublisher, currentPublishSlot } from '../src/autopublish.js';
+import { startAutoPublisher, currentPublishSlot, publishHours } from '../src/autopublish.js';
 import { tiktokConfigured, consentUrl as tiktokConsentUrl, exchangeCode as tiktokExchangeCode, redirectUri as tiktokRedirectUri, accessToken as tiktokAccessToken, creatorInfo as tiktokCreatorInfo } from '../src/tiktok.js';
 import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
@@ -104,31 +105,81 @@ let cache = { at: 0, done: [], published: [], videos: new Map(), pending: [] };
 
 async function refreshCache() {
   if (Date.now() - cache.at < CACHE_MS) return cache;
-  const [done, published, videos, pending] = await Promise.all([
+  // Беремо файли разом з appProperties: без них не порахувати, кому який слот
+  // публікації дістанеться — мітки автопублікації живуть саме там.
+  const [done, published, files, pending] = await Promise.all([
     listDoneItems().catch(() => []),
     listPublishedItems().catch(() => []),
-    listVideos().catch(() => new Map()),
+    listVideoFiles().catch(() => new Map()),
     listNewItems().catch(() => []),
   ]);
-  cache = { at: Date.now(), done, published, videos, pending };
+  const videos = new Map([...files].map(([name, file]) => [name, file.id]));
+  cache = { at: Date.now(), done, published, files, videos, pending };
   return cache;
+}
+
+// Години, коли ChatGPT за відкладеним завданням малює фото. Наш код їх не
+// запускає — це зовнішній розклад, — але знати його треба, щоб показати,
+// скільки лишилось чекати на відео.
+function photoHours() {
+  return String(process.env.AUTO_PHOTO_HOURS || '7,12,16')
+    .split(',')
+    .map((h) => Number(String(h).trim()))
+    .filter((h) => Number.isInteger(h) && h >= 0 && h <= 23);
+}
+
+// Кому який слот публікації дістанеться. Правила відбору й порядок мусять
+// збігатися з autopublish.js — інакше відлік показував би не те, що станеться.
+function publishSchedule(c, now = new Date()) {
+  const claimed = new Set(
+    [...c.files.values()].map((f) => f.appProperties?.autoPostItemId).filter(Boolean),
+  );
+  const waiting = c.done.filter((it) => {
+    const file = c.files.get(videoName(it.id));
+    return file && !file.appProperties?.autoPostSlot && !claimed.has(it.id);
+  });
+  if (!waiting.length) return new Map();
+
+  const slots = nextDailyTimes(publishHours(), waiting.length, now);
+  // Якщо вікно вже відкрите й ніхто його не зайняв, найстаріший вийде за
+  // кілька хвилин, а не в наступне вікно.
+  const slot = currentPublishSlot(now);
+  const takenNow = slot
+    && [...c.files.values()].some((f) => f.appProperties?.autoPostSlot === slot.key);
+  if (slot && !takenNow) slots.unshift(now);
+
+  const at = new Map();
+  waiting.forEach((item, i) => { if (slots[i]) at.set(item.id, slots[i].toISOString()); });
+  return at;
 }
 
 // Готові до публікації: DONE-рядки, для яких у Drive вже є відео.
 // Найновіші (внизу таблиці) — зверху списку.
-function queueFrom(c) {
+const POST_ID_KEYS = ['facebookPostId', 'instagramPostId', 'tiktokPostId', 'youtubePostId'];
+
+function queueFrom(c, now = new Date()) {
+  const schedule = publishSchedule(c, now);
   return c.done
     .filter((it) => c.videos.has(videoName(it.id)))
     .reverse()
-    .map((it) => ({
-      id: it.id,
-      title: it.title,
-      description: it.description,
-      theme: it.theme,
-      videoUrl: `/api/video/${encodeURIComponent(it.id)}`,
-      downloadUrl: `/api/video/${encodeURIComponent(it.id)}?download=1`,
-      fileName: videoName(it.id),
-    }));
+    .map((it) => {
+      const props = c.files.get(videoName(it.id))?.appProperties || {};
+      const autoPosted = POST_ID_KEYS.some((key) => props[key]);
+      return {
+        id: it.id,
+        title: it.title,
+        description: it.description,
+        theme: it.theme,
+        videoUrl: `/api/video/${encodeURIComponent(it.id)}`,
+        downloadUrl: `/api/video/${encodeURIComponent(it.id)}?download=1`,
+        fileName: videoName(it.id),
+        publishAt: schedule.get(it.id) || null,
+        autoPosted,
+        // Заявка є, а публікації немає: ролик випав із черги й повернути його
+        // може лише кнопка ↩️.
+        stalled: Boolean(props.autoPostSlot) && !autoPosted,
+      };
+    });
 }
 
 // Telegram Mini Apps downloadFile() вимагає Content-Disposition та CORS для
@@ -186,6 +237,8 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && (pathname === '/api/state' || pathname === '/api/queue')) {
       const c = await refreshCache();
+      const now = new Date();
+      const photoAt = nextDailyTimes(photoHours(), 1, now)[0]?.toISOString() || null;
       json(res, 200, {
         // Теми, які ChatGPT уже написав, але ще не малював: їх можна правити.
         pending: c.pending.map((it) => ({
@@ -194,8 +247,9 @@ const server = http.createServer(async (req, res) => {
           slides: parseSlideLines(it.extra),
           note: it.note,
           created: it.created,
+          photoAt,
         })),
-        queue: queueFrom(c),
+        queue: queueFrom(c, now),
         published: c.published.map((it) => ({
           id: it.id, title: it.title || it.theme, theme: it.theme, pubDate: it.pubDate,
         })),

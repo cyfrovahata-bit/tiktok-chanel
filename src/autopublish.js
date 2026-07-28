@@ -25,6 +25,11 @@ const PUBLISH_HOURS = String(process.env.AUTO_PUBLISH_HOURS || '10,18')
   .sort((a, b) => a - b);
 const RETRY_MS = Number(process.env.AUTO_PUBLISH_RETRY_MS) || 5 * 60 * 1000;
 
+// Години публікації назовні — мінідодаток рахує з них зворотний відлік.
+export function publishHours() {
+  return [...PUBLISH_HOURS];
+}
+
 function kyivParts(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit',

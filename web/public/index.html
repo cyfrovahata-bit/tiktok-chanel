@@ -86,6 +86,15 @@
     .card-body { padding: 14px 15px 16px; }
 
     .kicker { font-size: 11.5px; color: var(--muted); letter-spacing: .3px; margin-bottom: 8px; }
+    /* Зворотний відлік у шапці картки. Моноширинні цифри — щоб рядок не
+       смикався щосекунди, коли змінюється ширина цифр. */
+    .cd {
+      flex: 0 0 auto; font-size: 11px; line-height: 1.25; text-align: right;
+      color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    .cd b { display: block; font-size: 12px; font-weight: 600; color: var(--fg); }
+    .cd.soon b { color: var(--warn, #d08700); }
+    .cd.done b { color: var(--ok); }
 
     .copyable {
       position: relative; border: 1px solid var(--border); border-radius: 13px;
@@ -283,6 +292,45 @@
     const expanded = new Set();
     let expandInit = false;
 
+    // --- Зворотний відлік ----------------------------------------------------
+    // Сервер віддає момент часу, клієнт лише малює залишок і перераховує його
+    // щосекунди. Рахувати на клієнті не можна: годинник телефона може бути
+    // зсунутий, а розклад київський.
+    function countdown(at, label) {
+      const box = el('div', 'cd');
+      box.dataset.at = at || '';
+      box.dataset.label = label;
+      return box;
+    }
+
+    function humanLeft(ms) {
+      if (ms <= 0) return 'ось-ось';
+      const min = Math.floor(ms / 60000);
+      if (min < 1) return 'менш як хвилина';
+      if (min < 60) return `${min} хв`;
+      const h = Math.floor(min / 60);
+      const rest = min % 60;
+      if (h < 24) return rest ? `${h} год ${rest} хв` : `${h} год`;
+      const d = Math.floor(h / 24);
+      return `${d} дн ${h % 24} год`;
+    }
+
+    function kyivClock(iso) {
+      return new Date(iso).toLocaleTimeString('uk-UA', {
+        timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit',
+      });
+    }
+
+    function tickCountdowns() {
+      document.querySelectorAll('.cd').forEach((box) => {
+        const at = box.dataset.at;
+        if (!at) { box.innerHTML = `<b>—</b>${esc(box.dataset.label)}`; return; }
+        const left = new Date(at).getTime() - Date.now();
+        box.classList.toggle('soon', left <= 15 * 60000);
+        box.innerHTML = `<b>${esc(humanLeft(left))}</b>${esc(box.dataset.label)} ${esc(kyivClock(at))}`;
+      });
+    }
+
     function queueCard(item) {
       const card = el('div', 'card'); card.dataset.id = item.id;
 
@@ -290,6 +338,15 @@
       const head = el('div', 'card-head');
       head.appendChild(el('span', 'dot pending'));
       head.appendChild(el('div', 'head-title', esc(item.title)));
+      if (item.autoPosted) {
+        const done = el('div', 'cd done'); done.innerHTML = '<b>уже вийшло</b>автопублікація';
+        head.appendChild(done);
+      } else if (item.stalled) {
+        const stuck = el('div', 'cd'); stuck.innerHTML = '<b>поза чергою</b>поверни через ↩️';
+        head.appendChild(stuck);
+      } else {
+        head.appendChild(countdown(item.publishAt, 'до публікації о'));
+      }
       head.appendChild(el('span', 'chev', '▶'));
       card.appendChild(head);
 
@@ -403,6 +460,7 @@
       const head = el('div', 'card-head');
       head.appendChild(el('span', 'dot pending'));
       head.appendChild(el('div', 'head-title', esc(item.theme || item.id)));
+      head.appendChild(countdown(item.photoAt, 'до малювання фото о'));
       head.appendChild(el('span', 'chev', '▶'));
       box.appendChild(head);
 
@@ -532,6 +590,7 @@
       try {
         const state = await fetch('/api/state').then((r) => r.json());
         render(state);
+        tickCountdowns();
       } catch (e) {
         $('#app').innerHTML = `<div class="empty"><div class="big">⚠️</div>Не вдалося завантажити.<br>${esc(e.message)}</div>`;
       }
@@ -618,6 +677,9 @@
     });
 
     load();
+    // Відлік перемальовуємо щосекунди, дані ж перезапитуємо лише при поверненні
+    // у вікно — сервер за секунду однаково нічого нового не скаже.
+    setInterval(tickCountdowns, 1000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
   </script>
 </body>
