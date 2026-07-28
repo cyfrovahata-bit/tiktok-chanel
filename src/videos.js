@@ -68,16 +68,20 @@ export async function setVideoAppProperties(fileId, patch) {
   });
   const merged = { ...(current.data.appProperties || {}) };
   for (const [key, value] of Object.entries(patch || {})) {
-    if (value == null) delete merged[key];
-    else merged[key] = String(value);
+    // Ключ видаляється, ЛИШЕ якщо надіслати його зі значенням null. Раніше тут
+    // стояло delete merged[key] — ключ просто зникав із запиту, а Drive
+    // залишає без змін те, чого в запиті немає. Через це «Вважати
+    // неопублікованим» нічого не чистило: мітки автопублікації й ID дописів
+    // лишалися на місці, і ролик назавжди випадав із черги.
+    merged[key] = value == null ? null : String(value);
   }
-  await drive().files.update({
+  const res = await drive().files.update({
     fileId,
     requestBody: { appProperties: merged },
     fields: 'id, appProperties',
     supportsAllDrives: true,
   });
-  return merged;
+  return res.data.appProperties || {};
 }
 
 // Вивантажує локальне відео у папку як <ID>.mp4. Повертає fileId.

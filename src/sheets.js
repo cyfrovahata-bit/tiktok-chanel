@@ -108,9 +108,16 @@ export async function listPublishedItems() {
 // уже не в статусі DONE (захист від повторної обробки).
 export async function markPublished(id, when = new Date()) {
   const items = await readAllItems();
-  const item = items.find((it) => it.id === id);
-  if (!item) throw new Error(`ID ${id} не знайдено в таблиці`);
-  if (item.status === 'PUBLISHED') return { rowNumber: item.rowNumber, alreadyPublished: true };
+  // ID у таблиці мали б бути унікальними, але ChatGPT їх колись дублював
+  // (двічі той самий AUTO-РРРРММДД-0800). Простий find() брав ПЕРШИЙ рядок,
+  // натикався на вже опублікований дубль і мовчки відповідав «вже готово» —
+  // мінідодаток рапортував успіх, а потрібний рядок лишався DONE і картка не
+  // зникала. Тому серед однойменних беремо саме той, який чекає на публікацію.
+  const matches = items.filter((it) => it.id === id);
+  if (!matches.length) throw new Error(`ID ${id} не знайдено в таблиці`);
+  const item = matches.find((it) => it.status === 'DONE') || matches[0];
+  const duplicates = matches.length > 1 ? matches.length : undefined;
+  if (item.status === 'PUBLISHED') return { rowNumber: item.rowNumber, alreadyPublished: true, duplicates };
   if (item.status !== 'DONE') {
     throw new Error(`ID ${id} у статусі ${item.status}, а не DONE — не публікую`);
   }
@@ -121,7 +128,7 @@ export async function markPublished(id, when = new Date()) {
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [[date, 'PUBLISHED']] },
   });
-  return { rowNumber: item.rowNumber, date };
+  return { rowNumber: item.rowNumber, date, duplicates };
 }
 
 // Рядки, які ChatGPT уже підготував, але ще не малював (статус NEW). Саме їх
