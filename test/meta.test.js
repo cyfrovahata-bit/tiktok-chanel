@@ -218,3 +218,24 @@ test('Instagram Reel декларується як згенерований ШІ
   );
   assert.match(bodies[0], /is_ai_generated=true/, 'контейнер має нести самодекларацію ШІ');
 });
+
+test('Instagram: оригінальний звук отримує назву', async () => {
+  const bodies = [];
+  const responses = [{ id: 'c1' }, { status_code: 'FINISHED' }, { id: 'r1' }];
+  const fetchImpl = async (_url, options) => {
+    bodies.push(String(options?.body ?? ''));
+    return { ok: true, status: 200, text: async () => JSON.stringify(responses.shift()) };
+  };
+  const previous = process.env.IG_AUDIO_NAME;
+  process.env.IG_AUDIO_NAME = 'Чи Ви Знали?';
+  try {
+    await publishInstagramReel(
+      { videoUrl: 'https://app.example.com/api/video/X', caption: 'опис' },
+      { token: 't', igUserId: '1', fetchImpl, sleep: async () => {} },
+    );
+  } finally {
+    if (previous === undefined) delete process.env.IG_AUDIO_NAME;
+    else process.env.IG_AUDIO_NAME = previous;
+  }
+  assert.match(bodies[0], /audio_name=%D0%A7%D0%B8\+%D0%92%D0%B8\+%D0%97%D0%BD%D0%B0%D0%BB%D0%B8/);
+});
