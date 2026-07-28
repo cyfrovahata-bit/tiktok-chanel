@@ -29,7 +29,9 @@ import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, youtubeConsentUrl, exchangeCode, tokenScopes, youtubeTokenScopes, youtubeTokenSource } from '../src/google-auth.js';
 import { channelInfo } from '../src/youtube.js';
-import { startCommentWatcher, checkComments } from '../src/yt-comments.js';
+import { registerPlatform, startCommentWatcher, checkAll } from '../src/comment-flow.js';
+import { youtubeAdapter } from '../src/yt-comments.js';
+import { facebookAdapter, instagramAdapter } from '../src/meta-comments.js';
 import { startTelegramLoop } from '../src/telegram-loop.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -543,9 +545,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Ручний прогін перевірки коментарів — щоб не чекати чверть години.
-    if (req.method === 'GET' && pathname === '/api/yt/comments') {
+    if (req.method === 'GET' && pathname === '/api/comments') {
       try {
-        return json(res, 200, await checkComments());
+        return json(res, 200, await checkAll());
       } catch (error) {
         return json(res, 200, { error: error.message });
       }
@@ -947,7 +949,14 @@ if (process.env.ENABLE_WEB === '1' && import.meta.url === pathToFileURL(process.
     startAutoPublisher();
     // Кнопки під картками коментарів працюють лише поки хтось читає оновлення
     // Telegram, тож цикл стартує разом зі спостерігачем, а не окремо.
-    if (process.env.ENABLE_YT_COMMENTS === '1') {
+    // Платформи реєструються лише ті, які ввімкнені: адаптер без токена лише
+    // сипав би помилками кожні чверть години.
+    if (process.env.ENABLE_YT_COMMENTS === '1') registerPlatform(youtubeAdapter);
+    if (process.env.ENABLE_FB_COMMENTS === '1') registerPlatform(facebookAdapter);
+    if (process.env.ENABLE_IG_COMMENTS === '1') registerPlatform(instagramAdapter);
+    if (process.env.ENABLE_YT_COMMENTS === '1'
+      || process.env.ENABLE_FB_COMMENTS === '1'
+      || process.env.ENABLE_IG_COMMENTS === '1') {
       startTelegramLoop();
       startCommentWatcher();
     }

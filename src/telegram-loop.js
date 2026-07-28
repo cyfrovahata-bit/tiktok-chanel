@@ -5,7 +5,7 @@
 // скрипт check.js теж опитує бота, але він запускається окремо й у продакшені
 // не працює; якщо колись знадобиться — вмикати треба щось одне.
 import { getUpdates } from './telegram.js';
-import { handleCallback, handleMessage } from './yt-comments.js';
+import { handleCallback, handleMessage } from './comment-flow.js';
 
 // Довге опитування: Telegram тримає запит до 25 секунд і віддає оновлення
 // щойно вони з'являються. Замість ~17 000 запитів на добу — близько 3 500,
