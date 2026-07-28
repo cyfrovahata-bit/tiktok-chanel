@@ -211,12 +211,20 @@ export async function publishFacebookReel({ videoUrl, videoBuffer, description }
   // перемикач «Додати значок ШІ», що видно при ручній публікації; без нього
   // Facebook вважає ролик недекларованим ШІ-контентом і може тихо, без жодної
   // помилки в API, обмежити його показ.
+  // FB_REEL_STATE=DRAFT кладе ролик у чернетки Reels замість того, щоб одразу
+  // публікувати. Навіщо: опубліковані через API Reels на цій сторінці стабільно
+  // не отримують розповсюдження — 17 і 29 переглядів проти 69 і 644 у тих самих
+  // роликів, опублікованих із застосунку. Причину ззовні встановити не вдалося:
+  // всі поля Graph у обох випадках однакові, файл відповідає специфікації Meta.
+  // Чернетка лишає завантаження й метадані автоматичними, а фінальний дотик
+  // переносить у застосунок — тобто на той шлях, який працює.
+  const state = process.env.FB_REEL_STATE === 'DRAFT' ? 'DRAFT' : 'PUBLISHED';
   const finished = await graphRequest(`${encodeURIComponent(pageId)}/video_reels`, {
     method: 'POST',
     params: {
       upload_phase: 'finish',
       video_id: started.video_id,
-      video_state: 'PUBLISHED',
+      video_state: state,
       description: String(description || ''),
       ...(process.env.META_AI_LABEL === '0' ? {} : { is_ai_generated: 'true' }),
     },
@@ -224,7 +232,7 @@ export async function publishFacebookReel({ videoUrl, videoBuffer, description }
     fetchImpl,
   });
   if (finished.success === false) throw new Error('Facebook не опублікував Reel');
-  return { id: String(started.video_id) };
+  return { id: String(started.video_id), state };
 }
 
 export { graphRequest, waitForInstagramContainer };

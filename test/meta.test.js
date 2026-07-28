@@ -64,7 +64,7 @@ test('Facebook: starts upload, transfers by public URL and publishes Reel', asyn
     fetchImpl,
   });
 
-  assert.deepEqual(result, { id: 'fb-video-1' });
+  assert.deepEqual(result, { id: 'fb-video-1', state: 'PUBLISHED' });
   assert.equal(calls.length, 3);
   assert.equal(calls[0].options.body.get('upload_phase'), 'start');
   assert.equal(calls[1].options.headers.Authorization, 'OAuth page-token');
@@ -155,6 +155,35 @@ test('Facebook: META_UPLOAD_MODE=url повертає завантаження �
 
   assert.equal(calls[1].options.headers.file_url, 'https://example.com/video.mp4');
   assert.equal(calls[1].options.headers.offset, undefined);
+});
+
+test('Facebook: FB_REEL_STATE=DRAFT кладе ролик у чернетки', async () => {
+  const calls = [];
+  const responses = [
+    reply({ video_id: 'fb-video-5', upload_url: 'https://rupload.facebook.test/upload' }),
+    reply({ success: true }),
+    reply({ success: true }),
+  ];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    return responses.shift();
+  };
+
+  const previous = process.env.FB_REEL_STATE;
+  process.env.FB_REEL_STATE = 'DRAFT';
+  let result;
+  try {
+    result = await publishFacebookReel(
+      { videoUrl: 'https://example.com/video.mp4', description: 'Опис' },
+      { token: 'page-token', pageId: '456', fetchImpl },
+    );
+  } finally {
+    if (previous === undefined) delete process.env.FB_REEL_STATE;
+    else process.env.FB_REEL_STATE = previous;
+  }
+
+  assert.equal(calls[2].options.body.get('video_state'), 'DRAFT');
+  assert.equal(result.state, 'DRAFT');
 });
 
 test('Meta errors include API code', async () => {

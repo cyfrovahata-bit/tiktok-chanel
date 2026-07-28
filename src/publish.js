@@ -51,7 +51,9 @@ export async function publish(platform, payload) {
       platform,
       status: 'published',
       id: result.id,
-      detail: `Facebook Reel ${result.id}`,
+      detail: result.state === 'DRAFT'
+        ? `Facebook Reel ${result.id} — у ЧЕРНЕТКАХ, опублікуй у застосунку`
+        : `Facebook Reel ${result.id}`,
     };
   }
   if (platform === 'instagram') {
