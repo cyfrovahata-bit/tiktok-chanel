@@ -139,6 +139,10 @@ export function watchStatus() { return { ...watchState }; }
 
 function stageMessage(item) {
   if (item.status === 'NEW') {
+    // Рядки OWN- створює сам власник із мінідодатка, і про них він уже отримав
+    // підтвердження в момент надсилання. Головне — не написати про них «сюжет
+    // готовий і перевірений»: там лише сира розповідь, ChatGPT її ще не бачив.
+    if (String(item.id).startsWith('OWN-')) return null;
     return `📝 Тема на сьогодні:\n${item.theme}\n\n`
       + `Сюжет готовий і перевірений${item.slides ? `, ${item.slides} слайдів` : ''}. `
       + 'Можеш поправити текст у таблиці — далі ChatGPT почне малювати фото.';
