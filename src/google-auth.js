@@ -14,11 +14,17 @@ import { google } from 'googleapis';
 const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/drive',
-  // Заливання Shorts і читання даних каналу. Додавання скоупу НЕ розширює
-  // наявний refresh-токен: права зашиті в нього в момент згоди. Щоб YouTube
-  // запрацював, треба ще раз пройти /oauth/start і оновити
-  // GOOGLE_OAUTH_REFRESH_TOKEN. Доки цього не зроблено, Drive і Sheets
-  // працюють як раніше, а YouTube відповідатиме помилкою про брак прав.
+  // YouTube лишаємо і тут — на випадок, коли канал і Диск на одному акаунті:
+  // тоді достатньо єдиного токена й окремий не потрібен.
+  'https://www.googleapis.com/auth/youtube.upload',
+  'https://www.googleapis.com/auth/youtube.readonly',
+];
+
+// Права лише для YouTube. Потрібні, коли канал живе на ІНШОМУ акаунті Google,
+// ніж Таблиця з Диском: токен Google завжди належить одному акаунту, тож
+// покрити обидва одним неможливо. Тоді основний токен лишається за Диском, а
+// сюди береться окремий — з акаунта каналу.
+const YOUTUBE_SCOPES = [
   'https://www.googleapis.com/auth/youtube.upload',
   'https://www.googleapis.com/auth/youtube.readonly',
 ];
@@ -55,6 +61,33 @@ export function consentUrl() {
     prompt: 'consent select_account',
     scope: SCOPES,
   });
+}
+
+// Згода лише на YouTube — для акаунта, якому належить канал. Повертається на
+// той самий /oauth/callback (інший довелося б реєструвати в Google Console),
+// а state каже сторінці, у яку змінну класти отриманий токен.
+export function youtubeConsentUrl() {
+  return oauthClient().generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent select_account',
+    scope: YOUTUBE_SCOPES,
+    state: 'youtube',
+  });
+}
+
+// Авторизація для YouTube: окремий токен, якщо він заданий, інакше основний
+// (коли канал і Диск на одному акаунті).
+export function youtubeAuth() {
+  const refreshToken = process.env.YOUTUBE_OAUTH_REFRESH_TOKEN;
+  if (!refreshToken) return googleAuth();
+  if (!oauthConfigured()) throw new Error('Немає GOOGLE_OAUTH_CLIENT_ID / SECRET для YouTube');
+  const client = oauthClient();
+  client.setCredentials({ refresh_token: refreshToken });
+  return client;
+}
+
+export function youtubeTokenSource() {
+  return process.env.YOUTUBE_OAUTH_REFRESH_TOKEN ? 'окремий токен YouTube' : 'основний токен Google';
 }
 
 // Обмінює code (з /oauth/callback) на токени; повертає tokens (із refresh_token).

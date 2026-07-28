@@ -26,7 +26,7 @@ import { startAutoPublisher, currentPublishSlot } from '../src/autopublish.js';
 import { tiktokConfigured, consentUrl as tiktokConsentUrl, exchangeCode as tiktokExchangeCode, redirectUri as tiktokRedirectUri, accessToken as tiktokAccessToken, creatorInfo as tiktokCreatorInfo } from '../src/tiktok.js';
 import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
-import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode, tokenScopes } from '../src/google-auth.js';
+import { googleConfigured, googleStatus, oauthConfigured, consentUrl, youtubeConsentUrl, exchangeCode, tokenScopes, youtubeTokenSource } from '../src/google-auth.js';
 import { channelInfo } from '../src/youtube.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -748,16 +748,17 @@ const server = http.createServer(async (req, res) => {
       const out = {
         enabled: process.env.ENABLE_YOUTUBE === '1',
         google: googleStatus().mode,
+        tokenSource: youtubeTokenSource(),
         privacyRequested: process.env.YOUTUBE_PRIVACY || 'public',
         aiLabel: process.env.YOUTUBE_AI_LABEL !== '0',
       };
       try {
         out.channel = await channelInfo();
-        if (!out.channel) out.error = 'токен не бачить жодного каналу YouTube';
+        if (!out.channel) out.error = 'цей акаунт не має каналу YouTube — пройди /oauth/youtube/start з акаунта, якому належить канал';
       } catch (e) {
         out.error = e.message;
         if (/insufficient|scope|permission/i.test(e.message)) {
-          out.hint = 'у токена немає прав YouTube — пройди /oauth/start ще раз і онови GOOGLE_OAUTH_REFRESH_TOKEN';
+          out.hint = 'у токена немає прав YouTube — пройди /oauth/youtube/start з акаунта каналу і задай YOUTUBE_OAUTH_REFRESH_TOKEN';
         }
       }
       return json(res, 200, out);
@@ -771,6 +772,20 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       res.writeHead(302, { location: consentUrl() });
+      res.end();
+      return;
+    }
+
+    // Окрема згода для YouTube — коли канал на іншому акаунті Google, ніж
+    // Таблиця з Диском. Просить ЛИШЕ права YouTube, щоб випадкова згода з
+    // чужого акаунта не могла підмінити доступ до Диска.
+    if (req.method === 'GET' && pathname === '/oauth/youtube/start') {
+      if (!oauthConfigured()) {
+        res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
+        res.end('<h2>Спершу задай GOOGLE_OAUTH_CLIENT_ID і GOOGLE_OAUTH_CLIENT_SECRET у Railway.</h2>');
+        return;
+      }
+      res.writeHead(302, { location: youtubeConsentUrl() });
       res.end();
       return;
     }
@@ -789,10 +804,14 @@ const server = http.createServer(async (req, res) => {
           res.end('<h2>Google не повернув refresh_token.</h2><p>Відклич доступ на myaccount.google.com/permissions і спробуй /oauth/start ще раз (потрібен prompt=consent).</p>');
           return;
         }
+        // state каже, яку саме згоду ми проходили: спільну чи лише YouTube.
+        // Без цього легко вставити токен не в ту змінну й зламати Диск.
+        const forYoutube = url.searchParams.get('state') === 'youtube';
+        const variable = forYoutube ? 'YOUTUBE_OAUTH_REFRESH_TOKEN' : 'GOOGLE_OAUTH_REFRESH_TOKEN';
         res.end(
           '<div style="font-family:system-ui;max-width:640px;margin:40px auto;padding:0 16px;line-height:1.6">' +
-          '<h2>✅ Готово!</h2>' +
-          '<p>Скопіюй цей <b>refresh token</b> і встав у Railway як змінну <code>GOOGLE_OAUTH_REFRESH_TOKEN</code>, потім збережи (буде редеплой):</p>' +
+          `<h2>✅ Готово${forYoutube ? ' — токен YouTube' : ''}!</h2>` +
+          `<p>Скопіюй цей <b>refresh token</b> і встав у Railway як змінну <code>${variable}</code>, потім збережи (буде редеплой):</p>` +
           `<textarea readonly style="width:100%;height:90px;font-family:monospace;font-size:13px;padding:10px" onclick="this.select()">${rt}</textarea>` +
           '<p style="color:#888">Цю сторінку більше нікому не показуй — токен дає доступ до твого Google.</p>' +
           '</div>',

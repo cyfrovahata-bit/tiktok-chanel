@@ -13,7 +13,7 @@
 // 1080×1920 і ~25 секунд, тож нічого додатково позначати не треба.
 import { Readable } from 'node:stream';
 import { google } from 'googleapis';
-import { googleAuth, googleStatus } from './google-auth.js';
+import { youtubeAuth, googleStatus } from './google-auth.js';
 
 // Освіта — найближча категорія для каналу фактів. Повний перелік залежить від
 // регіону, тож лишаємо змінною на випадок, якщо схочеш іншу.
@@ -23,7 +23,7 @@ const DESCRIPTION_LIMIT = 5000;
 
 let api = null;
 function youtube() {
-  if (!api) api = google.youtube({ version: 'v3', auth: googleAuth() });
+  if (!api) api = google.youtube({ version: 'v3', auth: youtubeAuth() });
   return api;
 }
 
