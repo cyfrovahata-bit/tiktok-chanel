@@ -26,7 +26,7 @@ import { startAutoPublisher, currentPublishSlot } from '../src/autopublish.js';
 import { tiktokConfigured, consentUrl as tiktokConsentUrl, exchangeCode as tiktokExchangeCode, redirectUri as tiktokRedirectUri, accessToken as tiktokAccessToken, creatorInfo as tiktokCreatorInfo } from '../src/tiktok.js';
 import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
-import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
+import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode, tokenScopes } from '../src/google-auth.js';
 import { channelInfo } from '../src/youtube.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -730,6 +730,15 @@ const server = http.createServer(async (req, res) => {
         out.error = e.message;
       }
       return json(res, 200, out);
+    }
+
+    // Що саме дозволяє нинішній токен Google і чий це акаунт.
+    if (req.method === 'GET' && pathname === '/api/google/scopes') {
+      try {
+        return json(res, 200, await tokenScopes());
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
     }
 
     // Чи бачить наш токен канал YouTube і чи вистачає йому прав. Найчастіша

@@ -123,6 +123,25 @@ export function googleConfigured() {
   return s.ready && s.canUpload;
 }
 
+// Які права насправді має нинішній токен і чий це акаунт. Питає Google
+// напряму (tokeninfo), бо «немає доступу» однаково виглядає і коли згоду дали
+// не з того акаунта, і коли на екрані згоди зняли галочку з частини прав.
+// Самого токена не повертаємо — лише перелік прав і пошту, якщо Google її дає.
+export async function tokenScopes() {
+  const client = googleAuth();
+  if (typeof client.getAccessToken !== 'function') throw new Error('не OAuth-режим');
+  const { token } = await client.getAccessToken();
+  if (!token) throw new Error('не вдалося отримати access-токен');
+  const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error_description || data.error);
+  return {
+    scopes: String(data.scope || '').split(' ').filter(Boolean),
+    email: data.email || null,
+    expiresIn: data.expires_in || null,
+  };
+}
+
 export function serviceAccountEmail() {
   const s = googleStatus();
   return s.email ?? null;
