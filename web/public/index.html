@@ -456,17 +456,21 @@
     // ChatGPT уже написав сюжет, але ще не малює. Тут його можна поправити —
     // зміни лягають назад у промт, за яким малюватимуться кадри.
     function pendingCard(item) {
+      const slideCount = (item.slides || []).length;
       const box = el('div', 'card');
       const head = el('div', 'card-head');
       head.appendChild(el('span', 'dot pending'));
       head.appendChild(el('div', 'head-title', esc(item.theme || item.id)));
-      head.appendChild(countdown(item.photoAt, 'до малювання фото о'));
+      // Черга спільна: ChatGPT бере ОДИН найстаріший рядок за запуск, тому в
+      // кожного рядка своя година. Поки сюжет не розбито на слайди, той запуск
+      // зробить саме розбір, а не малювання.
+      head.appendChild(countdown(item.photoAt,
+        slideCount ? 'до малювання фото о' : 'до розбору сюжету о'));
       head.appendChild(el('span', 'chev', '▶'));
       box.appendChild(head);
 
       const wrap = el('div', 'card-body-wrap');
       const body = el('div', 'card-body');
-      const slideCount = (item.slides || []).length;
       body.appendChild(el('div', 'kicker',
         `${esc(item.id)} · ${slideCount ? `${slideCount} слайдів` : 'сюжет ще не розбито'}`
         + `${item.created ? ` · ${esc(item.created)}` : ''}`));

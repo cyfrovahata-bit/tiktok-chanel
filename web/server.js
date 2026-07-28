@@ -19,6 +19,7 @@ import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoNa
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
 import { forgetNotice } from '../src/notices.js';
 import { nextDailyTimes } from '../src/kyiv.js';
+import { photoSchedule } from '../src/photo-plan.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { createSubmission, addPhoto, submitOwn, deleteOwnFolder } from '../src/own.js';
@@ -242,7 +243,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && (pathname === '/api/state' || pathname === '/api/queue')) {
       const c = await refreshCache();
       const now = new Date();
-      const photoAt = nextDailyTimes(photoHours(), 1, now)[0]?.toISOString() || null;
+      // Кожному рядку — своя година: ChatGPT малює по одному рядку за запуск.
+      const photoAt = photoSchedule(c.pending, photoHours(), now);
       json(res, 200, {
         // Теми, які ChatGPT уже написав, але ще не малював: їх можна правити.
         pending: c.pending.map((it) => ({
@@ -251,7 +253,7 @@ const server = http.createServer(async (req, res) => {
           slides: parseSlideLines(it.extra),
           note: it.note,
           created: it.created,
-          photoAt,
+          photoAt: photoAt.get(it.id) || null,
         })),
         queue: queueFrom(c, now),
         published: c.published.map((it) => ({
