@@ -298,6 +298,39 @@ export async function pendingSummary() {
   return { pending: byPlatform, seen: statuses, platforms: [...platforms.keys()] };
 }
 
+// Прибирання застарілих карток. Якщо коментаря вже немає серед актуальних
+// (відповіли деінде або він вийшов із вікна пошуку), картка втратила сенс:
+// знімаємо з неї кнопки й помічаємо коментар як закритий. Інакше власникові
+// довелося б тиснути «Пропустити» на кожній вручну.
+export async function cleanupStale(options = {}) {
+  const state = options.state || await readState();
+  const chatId = options.chatId || ownerChatId();
+  const cleared = {};
+
+  for (const adapter of platforms.values()) {
+    if (adapter.enabled && !adapter.enabled()) continue;
+    const pending = Object.keys(state.drafts)
+      .filter((key) => key.startsWith(`${adapter.key}:`));
+    if (!pending.length) continue;
+
+    const live = new Set((await adapter.fetch(options)).map((c) => c.id));
+    for (const key of pending) {
+      const commentId = key.slice(adapter.key.length + 1);
+      if (live.has(commentId)) continue; // ще актуальний — лишаємо
+      const draft = state.drafts[key];
+      if (draft?.messageId) {
+        await editMessageReplyMarkup(chatId, draft.messageId).catch(() => {});
+      }
+      delete state.drafts[key];
+      state.seen[key] = 'skipped';
+      cleared[adapter.key] = (cleared[adapter.key] || 0) + 1;
+    }
+  }
+
+  await writeState(state);
+  return { cleared, left: Object.keys(state.drafts).length };
+}
+
 // --- Спостерігач -------------------------------------------------------------
 
 const WATCH_MS = Number(process.env.COMMENTS_POLL_MS) || 15 * 60 * 1000;
