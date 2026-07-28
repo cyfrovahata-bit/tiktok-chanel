@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terms of Service — Chy Vy Znaly publishing automation</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1b1a17; --muted: #6b6862; --line: #e4e1da; --accent: #7a5c2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16151a; --fg: #ece9e3; --muted: #9d9890; --line: #2c2a31; --accent: #d3ab6a; }
+  }
+  :root[data-theme="dark"] { --bg: #16151a; --fg: #ece9e3; --muted: #9d9890; --line: #2c2a31; --accent: #d3ab6a; }
+  :root[data-theme="light"] { --bg: #fbfbfa; --fg: #1b1a17; --muted: #6b6862; --line: #e4e1da; --accent: #7a5c2e; }
+  body {
+    background: var(--bg); color: var(--fg); margin: 0;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+  h1 { font-size: 1.8rem; line-height: 1.2; text-wrap: balance; margin: 0 0 .3rem; }
+  h2 { font-size: 1.1rem; margin: 2.2rem 0 .5rem; }
+  .updated { color: var(--muted); margin: 0 0 2rem; font-size: .92rem; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  a { color: var(--accent); }
+  code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: .1em .35em; border-radius: 3px; font-size: .9em; }
+  footer { margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Terms of Service</h1>
+  <p class="updated">Chy Vy Znaly publishing automation · Last updated 28 July 2026</p>
+
+  <h2>1. Acceptance</h2>
+  <p>
+    These terms govern the use of the Chy Vy Znaly Publisher tool ("the Tool"). The Tool is
+    operated by an individual creator ("the Operator") for the Operator's own social media
+    accounts. By using the Tool, the Operator accepts these terms.
+  </p>
+
+  <h2>2. What the Tool does</h2>
+  <p>
+    The Tool publishes short videos that the Operator has already produced to the Operator's own
+    accounts, including one YouTube channel, together with a title, description and tags written by
+    the Operator. It performs no other function.
+  </p>
+
+  <h2>3. Authorised users</h2>
+  <p>
+    The Tool has exactly one authorised user: the Operator. Access is bound to a single Telegram
+    account and every request is verified against a Telegram HMAC signature. There is no
+    registration, no public interface and no mechanism by which any other person can obtain access.
+  </p>
+
+  <h2>4. YouTube API Services</h2>
+  <p>
+    The Tool uses YouTube API Services. By using it, the Operator agrees to be bound by the
+    <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a> and acknowledges the
+    <a href="https://policies.google.com/privacy">Google Privacy Policy</a>. The Tool calls only
+    <code>videos.insert</code>, to upload the Operator's own video to the Operator's own channel,
+    and <code>channels.list</code>, to confirm the destination channel. It does not search YouTube,
+    read channels or videos the Operator does not own, collect information about viewers, or
+    display or embed YouTube content.
+  </p>
+  <p>
+    Authorisation may be reviewed or revoked at any time at
+    <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>, which
+    immediately and permanently ends the Tool's access to YouTube.
+  </p>
+
+  <h2>5. Acceptable use</h2>
+  <ul>
+    <li>Only content owned by the Operator is uploaded.</li>
+    <li>API data is never sold, transferred or made available to any third party.</li>
+    <li>YouTube data is never combined with data from other services or shown to end users.</li>
+    <li>Videos produced with generative models are disclosed as synthetic content on upload.</li>
+  </ul>
+
+  <h2>6. Content ownership</h2>
+  <p>
+    All videos, titles and descriptions handled by the Tool belong to the Operator. The Tool claims
+    no rights over them and creates no rights for anyone else.
+  </p>
+
+  <h2>7. Availability and liability</h2>
+  <p>
+    The Tool is a personal utility provided as is, with no warranty of availability or fitness for
+    any purpose. It may be suspended or discontinued at any time. Because it has no users other
+    than the Operator, no liability towards third parties arises from its operation.
+  </p>
+
+  <h2>8. Termination</h2>
+  <p>
+    The Operator may stop using the Tool at any time by revoking its authorisations and removing
+    the stored tokens. Google may suspend or terminate API access if the Tool fails to comply with
+    the YouTube API Services Terms of Service or Developer Policies.
+  </p>
+
+  <h2>9. Changes to these terms</h2>
+  <p>
+    These terms may be updated; the date at the top of this page reflects the current version.
+  </p>
+
+  <h2>10. Contact</h2>
+  <p><a href="mailto:cyfrovahata@gmail.com">cyfrovahata@gmail.com</a></p>
+
+  <footer>
+    <p><a href="/about">About this tool</a> · <a href="/privacy">Privacy policy</a></p>
+  </footer>
+</main>
+</body>
+</html>

@@ -26,12 +26,34 @@
   code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: .1em .35em; border-radius: 3px; font-size: .9em; }
   a { color: var(--accent); }
   footer { margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+  /* Блок бренду YouTube і юридичних посилань. Аудит окремо вимагає скриншот
+     головної, на якому ВИДНО і бренд YouTube, і посилання на політику
+     конфіденційності, тож він навмисно помітний і стоїть високо на сторінці. */
+  .yt {
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 1rem 1.15rem; margin: 1.5rem 0 0;
+    background: color-mix(in srgb, var(--fg) 3%, transparent);
+  }
+  .yt p { margin: 0 0 .5rem; }
+  .yt .legal { display: flex; flex-wrap: wrap; gap: .4rem 1.1rem; margin: 0; font-size: .93rem; }
+  .brand { font-weight: 700; letter-spacing: -.01em; }
 </style>
 </head>
 <body>
 <main>
   <h1>Chy Vy Znaly — publishing automation</h1>
   <p class="lede">A private tool that publishes short educational videos to the operator's own social accounts, including one YouTube channel.</p>
+
+  <section class="yt">
+    <p>This tool uses <span class="brand">YouTube</span> API Services.</p>
+    <p class="legal">
+      <a href="/privacy">Privacy Policy</a>
+      <a href="/terms">Terms of Service</a>
+      <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>
+      <a href="https://policies.google.com/privacy">Google Privacy Policy</a>
+      <a href="https://myaccount.google.com/permissions">Revoke access</a>
+    </p>
+  </section>
 
   <h2>What this tool does</h2>
   <p>
@@ -74,7 +96,7 @@
   </p>
 
   <footer>
-    <p><a href="/privacy">Privacy policy</a></p>
+    <p><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a></p>
     <p>Contact: cyfrovahata@gmail.com</p>
   </footer>
 </main>
