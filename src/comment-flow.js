@@ -120,15 +120,15 @@ export async function draftReply(comment, options = {}) {
 
 // --- Картка в Telegram -------------------------------------------------------
 
-function keyboard(platformKey, commentId) {
+// Без чернетки кнопки «Надіслати» немає — надсилати нічого. Лишаються
+// «Змінити» (написати свій текст) і «Пропустити».
+function keyboard(platformKey, commentId, hasDraft = true) {
   const tail = `${platformKey}:${commentId}`;
-  return {
-    inline_keyboard: [[
-      { text: '✅ Надіслати', callback_data: `c:s:${tail}` },
-      { text: '✏️ Змінити', callback_data: `c:e:${tail}` },
-      { text: '🚫 Пропустити', callback_data: `c:x:${tail}` },
-    ]],
-  };
+  const row = [];
+  if (hasDraft) row.push({ text: '✅ Надіслати', callback_data: `c:s:${tail}` });
+  row.push({ text: '✏️ Змінити', callback_data: `c:e:${tail}` });
+  row.push({ text: '🚫 Пропустити', callback_data: `c:x:${tail}` });
+  return { inline_keyboard: [row] };
 }
 
 function card(adapter, comment, draft) {
@@ -139,8 +139,8 @@ function card(adapter, comment, draft) {
     `${comment.author}:`,
     comment.text,
     '',
-    'Відповідь від ШІ:',
-    draft,
+    draft ? 'Відповідь від ШІ:' : '⚠️ Модель радить не відповідати (образа, провокація або спам).',
+    draft || 'Якщо все ж хочеш — напиши свій текст відповіддю на це повідомлення.',
   ].filter((line) => line !== null).join('\n');
 }
 
@@ -150,7 +150,7 @@ export async function checkPlatform(adapter, options = {}) {
   const state = options.state || await readState();
   const comments = await adapter.fetch(options);
   const fresh = comments.filter((c) => !state.seen[`${adapter.key}:${c.id}`]);
-  const result = { platform: adapter.key, checked: comments.length, fresh: fresh.length, asked: 0, skipped: 0 };
+  const result = { platform: adapter.key, checked: comments.length, fresh: fresh.length, asked: 0, flagged: 0 };
   if (!fresh.length) return result;
 
   const notify = options.notifyFn || sendMessage;
@@ -166,15 +166,17 @@ export async function checkPlatform(adapter, options = {}) {
       console.error(`[comments:${adapter.key}] чернетка:`, error.message);
       continue; // спробуємо наступного разу
     }
-    if (!draft) {
-      state.seen[key] = 'skipped';
-      result.skipped += 1;
-      continue;
-    }
-    const message = await notify(chatId, card(adapter, comment, draft), keyboard(adapter.key, comment.id));
+    // Картка йде ЗАВЖДИ, навіть коли модель радить промовчати: власник має
+    // бачити всі коментарі й вирішувати сам. Без чернетки просто немає кнопки
+    // «Надіслати».
+    const message = await notify(
+      chatId,
+      card(adapter, comment, draft),
+      keyboard(adapter.key, comment.id, Boolean(draft)),
+    );
     state.seen[key] = 'pending';
-    state.drafts[key] = { text: draft, messageId: message?.message_id ?? null };
-    result.asked += 1;
+    state.drafts[key] = { text: draft || null, messageId: message?.message_id ?? null };
+    if (draft) result.asked += 1; else result.flagged += 1;
   }
 
   if (!options.state) await writeState(state);
@@ -245,7 +247,12 @@ export async function handleCallback(callbackQuery, options = {}) {
     return true;
   }
   if (action === 's') {
-    if (!draft) { await answerCallbackQuery(callbackQuery.id, 'Чернетку вже використано'); return true; }
+    if (!draft?.text) {
+      await answerCallbackQuery(callbackQuery.id, draft
+        ? 'Чернетки немає — напиши свій текст відповіддю на повідомлення'
+        : 'Чернетку вже використано');
+      return true;
+    }
     try {
       await adapter.reply(commentId, draft.text, options);
       state.seen[key] = 'sent';
