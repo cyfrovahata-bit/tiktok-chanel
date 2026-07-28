@@ -46,7 +46,7 @@ function cleanTitle(value) {
 // TikTok, Instagram та Facebook цей хештег був би зайвим сміттям. Дописуємо
 // його на льоту лише для YouTube. Вимикається через YOUTUBE_SHORTS_TAG=0.
 export function withShortsTag(description) {
-  const text = String(description || '').trimEnd();
+  const text = String(description || '').trim();
   if (process.env.YOUTUBE_SHORTS_TAG === '0') return text;
   if (/#shorts\b/i.test(text)) return text; // вже є — не дублюємо
   return text ? `${text} #Shorts` : '#Shorts';
