@@ -480,9 +480,25 @@
       // крок лишився за власником, щоб не здавалося, що надсилання не спрацювало.
       if (!slideCount) {
         body.appendChild(el('div', 'empty',
-          'Матеріал прийнято. Встав у ChatGPT промт із колонки G цього рядка — '
-          + 'він розіб\'є текст на слайди й перевірить факти. Після цього тексти '
-          + 'з\'являться тут, і їх можна буде поправити перед малюванням фото.'));
+          'Матеріал прийнято, але сюжет ще ніхто не розбивав: у рядку поки лежить '
+          + 'завдання для ChatGPT. Слайди з\'являться тут аж тоді, коли той промт '
+          + 'виконається — сам за розкладом або одразу, якщо запустиш його вручну.'));
+        // Кнопка позбавляє потреби лізти в таблицю по колонку G.
+        const actions = el('div', 'actions');
+        const copyBtn = el('button', 'btn secondary', '📋 Скопіювати промт');
+        copyBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          copyBtn.disabled = true;
+          try {
+            const r = await fetch(`/api/prompt?id=${encodeURIComponent(item.id)}`).then((x) => x.json());
+            if (!r.prompt) throw new Error(r.error || 'промт порожній');
+            await copyText(r.prompt);
+            notify('success'); toast('Промт скопійовано — встав у ChatGPT');
+          } catch (err) { notify('error'); toast(err.message); }
+          copyBtn.disabled = false;
+        });
+        actions.appendChild(copyBtn);
+        body.appendChild(actions);
         wrap.appendChild(body);
         box.appendChild(wrap);
         head.addEventListener('click', () => {
