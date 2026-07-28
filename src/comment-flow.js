@@ -194,11 +194,24 @@ export async function checkAll(options = {}) {
 
 // --- Кнопки й ручний текст ---------------------------------------------------
 
+// Розбирає мітку кнопки. Крім нинішнього формату «c:<дія>:<платформа>:<id>»
+// розуміє старий «ytc:<дія>:<id>» — картки, надіслані до поділу на платформи,
+// висять у чаті й далі, а кнопка, яка мовчки нічого не робить, гірша за помилку.
+export function parseCallbackData(data) {
+  const parts = String(data || '').split(':');
+  if (parts[0] === 'c' && parts.length >= 4) {
+    return { action: parts[1], platformKey: parts[2], commentId: parts.slice(3).join(':') };
+  }
+  if (parts[0] === 'ytc' && parts.length >= 3) {
+    return { action: parts[1], platformKey: 'yt', commentId: parts.slice(2).join(':') };
+  }
+  return null;
+}
+
 export async function handleCallback(callbackQuery, options = {}) {
-  const data = String(callbackQuery?.data || '');
-  if (!data.startsWith('c:')) return false;
-  const [, action, platformKey, ...rest] = data.split(':');
-  const commentId = rest.join(':'); // id інколи містить двокрапку (Facebook)
+  const parsed = parseCallbackData(callbackQuery?.data);
+  if (!parsed) return false;
+  const { action, platformKey, commentId } = parsed;
   const chatId = ownerChatId();
   if (String(callbackQuery.from?.id) !== chatId) return true;
 
@@ -267,6 +280,22 @@ export async function handleMessage(message, options = {}) {
     await notify(ownerChatId(), `⚠️ Не вдалося опублікувати відповідь: ${error.message}`);
   }
   return true;
+}
+
+// Скільки карток чекає рішення й по яких платформах. Текстів не віддаємо —
+// у діагностиці вони ні до чого.
+export async function pendingSummary() {
+  const state = await readState();
+  const byPlatform = {};
+  for (const key of Object.keys(state.drafts || {})) {
+    const platform = key.split(':')[0];
+    byPlatform[platform] = (byPlatform[platform] || 0) + 1;
+  }
+  const statuses = {};
+  for (const value of Object.values(state.seen || {})) {
+    statuses[value] = (statuses[value] || 0) + 1;
+  }
+  return { pending: byPlatform, seen: statuses, platforms: [...platforms.keys()] };
 }
 
 // --- Спостерігач -------------------------------------------------------------

@@ -29,7 +29,7 @@ import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, youtubeConsentUrl, exchangeCode, tokenScopes, youtubeTokenScopes, youtubeTokenSource } from '../src/google-auth.js';
 import { channelInfo } from '../src/youtube.js';
-import { registerPlatform, startCommentWatcher, checkAll } from '../src/comment-flow.js';
+import { registerPlatform, startCommentWatcher, checkAll, pendingSummary } from '../src/comment-flow.js';
 import { youtubeAdapter } from '../src/yt-comments.js';
 import { facebookAdapter, instagramAdapter } from '../src/meta-comments.js';
 import { startTelegramLoop } from '../src/telegram-loop.js';
@@ -545,6 +545,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Ручний прогін перевірки коментарів — щоб не чекати чверть години.
+    if (req.method === 'GET' && pathname === '/api/comments/state') {
+      try {
+        return json(res, 200, await pendingSummary());
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
     if (req.method === 'GET' && pathname === '/api/comments') {
       try {
         return json(res, 200, await checkAll());
