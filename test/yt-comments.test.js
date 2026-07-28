@@ -81,3 +81,9 @@ test('коментарі: гілку, де ми вже відповідали, �
   const list = await fetchComments({ client: fakeClient([answered, byOther]), channelId: MINE });
   assert.deepEqual(list.map((c) => c.id), ['c4'], 'чужа відповідь у гілці не рахується за нашу');
 });
+
+test('похвала без запитання теж отримує відповідь, а не пропуск', () => {
+  const prompt = draftPrompt({ author: 'Ukrop_86', text: 'Це дуже потужно ❤️❤️❤️' });
+  assert.match(prompt, /на похвалу, подяку, короткий відгук чи саме емодзі — коротко подякуй/);
+  assert.match(prompt, /ЛИШЕ у трьох випадках: образа, відверта провокація, спам чи реклама/);
+});
