@@ -48,7 +48,11 @@ export function oauthClient() {
 export function consentUrl() {
   return oauthClient().generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent',
+    // select_account обов'язково разом із consent: без нього Google мовчки
+    // бере акаунт, під яким браузер уже залогінений. Один раз згоду так дали
+    // не з того акаунта — токен отримав YouTube, але втратив доступ до
+    // Таблиці й Диска, і конвеєр став.
+    prompt: 'consent select_account',
     scope: SCOPES,
   });
 }
