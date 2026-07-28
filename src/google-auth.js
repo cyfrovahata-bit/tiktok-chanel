@@ -168,8 +168,7 @@ export function googleConfigured() {
 // напряму (tokeninfo), бо «немає доступу» однаково виглядає і коли згоду дали
 // не з того акаунта, і коли на екрані згоди зняли галочку з частини прав.
 // Самого токена не повертаємо — лише перелік прав і пошту, якщо Google її дає.
-export async function tokenScopes() {
-  const client = googleAuth();
+export async function tokenScopes(client = googleAuth()) {
   if (typeof client.getAccessToken !== 'function') throw new Error('не OAuth-режим');
   const { token } = await client.getAccessToken();
   if (!token) throw new Error('не вдалося отримати access-токен');
@@ -181,6 +180,12 @@ export async function tokenScopes() {
     email: data.email || null,
     expiresIn: data.expires_in || null,
   };
+}
+
+// Права окремого токена YouTube — щоб після заміни одразу видно було, чи
+// доїхав force-ssl, а не з'ясовувати це першою невдалою відповіддю.
+export function youtubeTokenScopes() {
+  return tokenScopes(youtubeAuth());
 }
 
 export function serviceAccountEmail() {

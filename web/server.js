@@ -27,7 +27,7 @@ import { startAutoPublisher, currentPublishSlot, publishHours } from '../src/aut
 import { tiktokConfigured, consentUrl as tiktokConsentUrl, exchangeCode as tiktokExchangeCode, redirectUri as tiktokRedirectUri, accessToken as tiktokAccessToken, creatorInfo as tiktokCreatorInfo } from '../src/tiktok.js';
 import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
-import { googleConfigured, googleStatus, oauthConfigured, consentUrl, youtubeConsentUrl, exchangeCode, tokenScopes, youtubeTokenSource } from '../src/google-auth.js';
+import { googleConfigured, googleStatus, oauthConfigured, consentUrl, youtubeConsentUrl, exchangeCode, tokenScopes, youtubeTokenScopes, youtubeTokenSource } from '../src/google-auth.js';
 import { channelInfo } from '../src/youtube.js';
 import { startCommentWatcher, checkComments } from '../src/yt-comments.js';
 import { startTelegramLoop } from '../src/telegram-loop.js';
@@ -830,6 +830,12 @@ const server = http.createServer(async (req, res) => {
         privacyRequested: process.env.YOUTUBE_PRIVACY || 'public',
         aiLabel: process.env.YOUTUBE_AI_LABEL !== '0',
       };
+      try {
+        out.scopes = (await youtubeTokenScopes()).scopes.map((s) => s.split('/auth/')[1] || s);
+        out.canReplyToComments = out.scopes.includes('youtube.force-ssl');
+      } catch (e) {
+        out.scopesError = e.message;
+      }
       try {
         out.channel = await channelInfo();
         if (!out.channel) out.error = 'цей акаунт не має каналу YouTube — пройди /oauth/youtube/start з акаунта, якому належить канал';
