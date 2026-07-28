@@ -6,7 +6,8 @@ import {
 } from '../src/autopublish.js';
 
 process.env.TELEGRAM_CHAT_ID = '1';
-process.env.ENABLE_FB = '1';
+process.env.ENABLE_FB = '1'; // навмисно: Facebook усе одно має лишатися вимкненим
+process.env.ENABLE_TIKTOK = '1';
 process.env.ENABLE_IG = '1';
 
 function readyItem(id, title = `Тема ${id}`, status = 'DONE') {
@@ -70,13 +71,13 @@ test('бере НАЙСТАРІШЕ готове відео, а не найсв�
 
   assert.equal(first.status, 'published');
   assert.equal(first.itemId, 'AUTO-20260721-1600', 'черга йде від найстарішого');
-  assert.deepEqual(posts.map((post) => post.platform), ['facebook', 'instagram']);
+  assert.deepEqual(posts.map((post) => post.platform), ['instagram', 'tiktok']);
   assert.equal(
     posts[0].payload.videoUrl,
     'https://app.example.com/api/video/AUTO-20260721-1600',
   );
   assert.equal(writes[0].patch.autoPostSlot, '2026-07-22-10');
-  assert.ok(writes.some((write) => write.patch.facebookPostId === 'facebook-post-1'));
+  assert.ok(writes.some((write) => write.patch.tiktokPostId === 'tiktok-post-1'));
   assert.ok(writes.some((write) => write.patch.instagramPostId === 'instagram-post-1'));
   assert.equal(notices.length, 1);
 
@@ -119,7 +120,7 @@ test('за один слот виходить рівно один ролик', a
 
   assert.equal(result.status, 'published');
   assert.equal(result.itemId, 'AUTO-20260722-0930');
-  assert.deepEqual(posts, ['facebook', 'instagram']);
+  assert.deepEqual(posts, ['instagram', 'tiktok']);
 });
 
 test('пропускає те, що вже опубліковано вручну', async () => {
@@ -167,7 +168,7 @@ test('чекає, коли готового відео немає', async () => 
   assert.equal(publishCalls, 0);
 });
 
-test('does not republish Facebook when only Instagram needs a retry', async () => {
+test('не перепубліковує TikTok, коли повторити треба лише Instagram', async () => {
   const id = 'AUTO-20260721-1730';
   const items = [readyItem(id)];
   const file = { id: 'file-one', name: `${id}.mp4`, appProperties: {} };
@@ -191,7 +192,7 @@ test('does not republish Facebook when only Instagram needs a retry', async () =
     notifyFn,
   });
   assert.equal(first.status, 'partial-error');
-  assert.deepEqual(posts, ['facebook', 'instagram']);
+  assert.deepEqual(posts, ['instagram', 'tiktok']);
 
   const cooldown = await runAutoPublishOnce({
     now: new Date('2026-07-22T07:01:00Z'),
@@ -212,7 +213,7 @@ test('does not republish Facebook when only Instagram needs a retry', async () =
     notifyFn,
   });
   assert.equal(retried.status, 'published');
-  assert.deepEqual(posts, ['facebook', 'instagram', 'instagram']);
+  assert.deepEqual(posts, ['instagram', 'tiktok', 'instagram']);
 });
 
 test('a regeneration marker prevents the same item from being posted next slot', async () => {
@@ -226,7 +227,7 @@ test('a regeneration marker prevents the same item from being posted next slot',
       appProperties: {
         autoPostSlot: '2026-07-22-am',
         autoPostItemId: id,
-        facebookPostId: 'fb-old',
+        tiktokPostId: 'tt-old',
         instagramPostId: 'ig-old',
       },
     }],
@@ -285,7 +286,7 @@ test('скинуте вручну не виходить повторно в то
     notifyFn: async () => {},
   });
   assert.equal(nextSlot.status, 'published');
-  assert.deepEqual(posts, ['facebook', 'instagram']);
+  assert.deepEqual(posts, ['instagram', 'tiktok']);
 });
 
 test('години публікації беруться зі змінної AUTO_PUBLISH_HOURS', async (t) => {
@@ -304,4 +305,25 @@ test('години публікації беруться зі змінної AUT
   // Три ключі різні — інакше два пости на добу злилися б в один слот
   const keys = ['2026-07-22-10', '2026-07-22-15', '2026-07-22-20'];
   assert.equal(new Set(keys).size, 3);
+});
+
+test('Facebook не публікується навіть із ENABLE_FB=1', async () => {
+  // Автопублікацію у Facebook вимкнено в коді: Reels, залиті через Graph API,
+  // не отримують розповсюдження. Змінна оточення лишилася, тож тест стежить,
+  // щоб вимкнення не «повернулося» непомітно разом із нею.
+  const id = 'AUTO-20260722-0930';
+  const posts = [];
+  await runAutoPublishOnce({
+    now: new Date('2026-07-22T07:00:00Z'),
+    listItems: async () => [readyItem(id)],
+    listFiles: async () => new Map([[`${id}.mp4`, { id: 'v', name: `${id}.mp4`, appProperties: {} }]]),
+    setProperties: async () => {},
+    publishPlatform: async (platform) => {
+      posts.push(platform);
+      return { platform, status: 'published', id: `${platform}-id` };
+    },
+    notifyFn: async () => {},
+  });
+  assert.equal(process.env.ENABLE_FB, '1', 'змінна справді ввімкнена');
+  assert.ok(!posts.includes('facebook'), 'Facebook не має публікуватися');
 });

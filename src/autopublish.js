@@ -56,7 +56,21 @@ export function currentPublishSlot(now = new Date()) {
 
 function enabledMetaPlatforms() {
   const platforms = [];
-  if (process.env.ENABLE_FB === '1') platforms.push('facebook');
+  // Facebook свідомо вимкнено, і саме тут, а не змінною оточення — щоб не
+  // залежати від того, що стоїть в ENABLE_FB.
+  //
+  // Причина: Reels, опубліковані через Graph API, на цій сторінці не
+  // отримують розповсюдження — 17 і 29 переглядів проти 69 і 644 у тих самих
+  // роликів, опублікованих із застосунку. Перевірено й відкинуто: формат
+  // файлу (відповідає специфікації Meta до останнього параметра), спосіб
+  // доставки (посилання проти байтів), ШІ-позначка, публікація через
+  // чернетки, статус перевірки додатка (Instagram публікується тим самим
+  // додатком і показується нормально). Усі поля Graph у ручного й
+  // API-допису однакові. Причину встановити не вдалося.
+  //
+  // Facebook публікується вручну з мінідодатка. Щоб повернути автопублікацію,
+  // досить розкоментувати рядок нижче.
+  // if (process.env.ENABLE_FB === '1') platforms.push('facebook');
   if (process.env.ENABLE_IG === '1') platforms.push('instagram');
   if (process.env.ENABLE_TIKTOK === '1') platforms.push('tiktok');
   if (process.env.ENABLE_YOUTUBE === '1') platforms.push('youtube');
