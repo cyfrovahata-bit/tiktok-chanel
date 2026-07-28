@@ -31,8 +31,10 @@ async function channelId(client) {
 export async function fetchComments(options = {}) {
   const client = options.client || youtube();
   const mine = options.channelId || await channelId(client);
+  // part=replies потрібен, щоб побачити, чи ми вже відповідали в цій гілці.
+  // Квота від цього не росте: виклик коштує 1 одиницю незалежно від частин.
   const res = await client.commentThreads.list({
-    part: ['snippet'],
+    part: ['snippet', 'replies'],
     allThreadsRelatedToChannelId: mine,
     order: 'time',
     maxResults: Number(options.maxResults) || 20,
@@ -40,6 +42,11 @@ export async function fetchComments(options = {}) {
   });
   return (res.data?.items || []).map((item) => {
     const top = item.snippet?.topLevelComment;
+    // Відповідь від нашого каналу в гілці означає, що питання вже закрите —
+    // байдуже, відповів бот чи власник руками з телефона. Без цієї перевірки
+    // бот пропонував би відповісти вдруге на все, що було до його ввімкнення.
+    const answered = (item.replies?.comments || [])
+      .some((r) => r.snippet?.authorChannelId?.value === mine);
     return {
       id: top?.id,
       text: top?.snippet?.textOriginal || '',
@@ -47,8 +54,9 @@ export async function fetchComments(options = {}) {
       authorChannelId: top?.snippet?.authorChannelId?.value || '',
       videoId: item.snippet?.videoId || '',
       publishedAt: top?.snippet?.publishedAt || '',
+      answered,
     };
-  }).filter((c) => c.id && c.authorChannelId !== mine); // свої ж відповіді пропускаємо
+  }).filter((c) => c.id && c.authorChannelId !== mine && !c.answered);
 }
 
 export async function publishReply(commentId, text, options = {}) {

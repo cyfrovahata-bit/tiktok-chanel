@@ -4,8 +4,9 @@ import { fetchComments, draftReply, draftPrompt } from '../src/yt-comments.js';
 
 const MINE = 'UC-channel-mine';
 
-function thread(id, text, authorChannelId, author = 'Глядач') {
+function thread(id, text, authorChannelId, author = 'Глядач', replies = []) {
   return {
+    replies: replies.length ? { comments: replies } : undefined,
     snippet: {
       videoId: 'vid1',
       topLevelComment: {
@@ -68,4 +69,15 @@ test('промт містить текст коментаря і правило 
   assert.match(prompt, /Оля/);
   assert.match(prompt, /ПРОПУСТИТИ/);
   assert.match(prompt, /до 200 символів/);
+});
+
+test('коментарі: гілку, де ми вже відповідали, більше не пропонуємо', async () => {
+  const answered = thread('c3', 'А де це?', 'UC-viewer', 'Оля', [
+    { snippet: { authorChannelId: { value: MINE }, textOriginal: 'У Соледарі' } },
+  ]);
+  const byOther = thread('c4', 'Клас', 'UC-viewer', 'Петро', [
+    { snippet: { authorChannelId: { value: 'UC-someone' }, textOriginal: 'ага' } },
+  ]);
+  const list = await fetchComments({ client: fakeClient([answered, byOther]), channelId: MINE });
+  assert.deepEqual(list.map((c) => c.id), ['c4'], 'чужа відповідь у гілці не рахується за нашу');
 });
