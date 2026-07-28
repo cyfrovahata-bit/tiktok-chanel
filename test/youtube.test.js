@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { publishYouTubeShort, tagsFromDescription, withShortsTag } from '../src/youtube.js';
+import { publishYouTubeShort } from '../src/youtube.js';
 
 // Підроблений клієнт googleapis: запам'ятовує запит і віддає задану відповідь.
 function fakeClient(responseStatus = { privacyStatus: 'public', uploadStatus: 'uploaded' }) {
@@ -18,14 +18,14 @@ function fakeClient(responseStatus = { privacyStatus: 'public', uploadStatus: 'u
 
 const short = { videoBuffer: Buffer.from('mp4'), title: 'Соледар', description: 'Опис #Соледар #ЧиВиЗнали' };
 
-test('YouTube: надсилає назву, опис, теги і ШІ-позначку', async () => {
+test('YouTube: назва й опис із #Shorts, теги порожні, ШІ-позначка є', async () => {
   const client = fakeClient();
   const result = await publishYouTubeShort(short, { client });
 
   const body = client.calls[0].requestBody;
-  assert.equal(body.snippet.title, 'Соледар');
+  assert.equal(body.snippet.title, 'Соледар #Shorts');
   assert.equal(body.snippet.description, 'Опис #Соледар #ЧиВиЗнали #Shorts');
-  assert.deepEqual(body.snippet.tags, ['Соледар', 'ЧиВиЗнали', 'Shorts']);
+  assert.equal(body.snippet.tags, undefined, 'теги навмисно не заповнюємо');
   assert.equal(body.status.containsSyntheticMedia, true);
   assert.equal(body.status.selfDeclaredMadeForKids, false);
   assert.deepEqual(client.calls[0].part, ['snippet', 'status']);
@@ -56,12 +56,13 @@ test('YOUTUBE_AI_LABEL=0 знімає позначку явно', async () => {
   assert.equal(client.calls[0].requestBody.status.containsSyntheticMedia, false);
 });
 
-test('YouTube: назва довша за 100 символів обрізається', async () => {
+test('YouTube: довга назва ріжеться так, щоб #Shorts лишився цілим', async () => {
   const client = fakeClient();
   await publishYouTubeShort({ ...short, title: 'я'.repeat(140) }, { client });
   const title = client.calls[0].requestBody.snippet.title;
-  assert.equal(title.length, 100);
-  assert.ok(title.endsWith('…'));
+  assert.equal(title.length, 100, 'рівно ліміт YouTube');
+  assert.ok(title.endsWith(' #Shorts'), 'хештег не обрізається');
+  assert.ok(title.includes('…'), 'обрізали саме назву');
 });
 
 test('YouTube: порожній файл не заливається', async () => {
@@ -71,28 +72,23 @@ test('YouTube: порожній файл не заливається', async () 
   );
 });
 
-test('#Shorts: дописується лише для YouTube і не дублюється', () => {
-  assert.equal(withShortsTag('Опис #Умань'), 'Опис #Умань #Shorts');
-  assert.equal(withShortsTag('Опис #shorts'), 'Опис #shorts', 'уже є — не дублюємо');
-  assert.equal(withShortsTag('  Опис  '), 'Опис #Shorts');
-  assert.equal(withShortsTag(''), '#Shorts');
-});
-
-test('YOUTUBE_SHORTS_TAG=0 лишає опис як є', () => {
+test('YOUTUBE_SHORTS_TAG=0 лишає назву без хештега', async () => {
+  const client = fakeClient();
   const previous = process.env.YOUTUBE_SHORTS_TAG;
   process.env.YOUTUBE_SHORTS_TAG = '0';
   try {
-    assert.equal(withShortsTag('Опис #Умань'), 'Опис #Умань');
+    await publishYouTubeShort(short, { client });
   } finally {
     if (previous === undefined) delete process.env.YOUTUBE_SHORTS_TAG;
     else process.env.YOUTUBE_SHORTS_TAG = previous;
   }
+  assert.equal(client.calls[0].requestBody.snippet.title, 'Соледар');
+  assert.equal(client.calls[0].requestBody.snippet.description, 'Опис #Соледар #ЧиВиЗнали');
 });
 
-test('теги з опису: без дублів і без «решітки»', () => {
-  assert.deepEqual(
-    tagsFromDescription('текст #Київ #Київ #Історія'),
-    ['Київ', 'Історія'],
-  );
-  assert.deepEqual(tagsFromDescription(''), []);
+test('YouTube: #Shorts у назві не дублюється', async () => {
+  const client = fakeClient();
+  await publishYouTubeShort({ ...short, title: 'Соледар #shorts' }, { client });
+  assert.equal(client.calls[0].requestBody.snippet.title, 'Соледар #shorts');
 });
+

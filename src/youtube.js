@@ -31,41 +31,31 @@ export function youtubeConfigured() {
   return googleStatus().mode === 'oauth' && googleStatus().ready;
 }
 
-// YouTube ріже назву на 100 символах і не приймає < та >.
+const SHORTS_TAG = '#Shorts';
+
+// Назва ролика: без < та >, не довша за 100 символів, із хештегом #Shorts у
+// кінці. Хештег ставимо саме сюди, а не в опис і не в теги — так його видно
+// одразу під роликом. Якщо назва довга, ріжемо саме назву, а не хештег:
+// обрізаний хештег не спрацював би зовсім.
+// Вимикається через YOUTUBE_SHORTS_TAG=0.
 function cleanTitle(value) {
-  const text = String(value || '').replace(/[<>]/g, '').trim();
-  if (!text) throw new Error('YouTube: порожня назва ролика');
-  return text.length > TITLE_LIMIT ? `${text.slice(0, TITLE_LIMIT - 1).trimEnd()}…` : text;
+  const raw = String(value || '').replace(/[<>]/g, '').trim();
+  if (!raw) throw new Error('YouTube: порожня назва ролика');
+  const fit = (text, limit) => (text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text);
+
+  if (!wantsShortsTag(raw)) return fit(raw, TITLE_LIMIT);
+  return `${fit(raw, TITLE_LIMIT - SHORTS_TAG.length - 1)} ${SHORTS_TAG}`;
 }
 
-// Хештег #Shorts. Технічно він не обов'язковий: YouTube відносить ролик до
-// Shorts сам, за вертикальним кадром і тривалістю до 3 хвилин. Але він
-// допомагає класифікації й пошуку, тож додаємо.
-//
-// Чому тут, а не в промті ChatGPT: опис у таблиці ОДИН на всі платформи, і в
-// TikTok, Instagram та Facebook цей хештег був би зайвим сміттям. Дописуємо
-// його на льоту лише для YouTube. Вимикається через YOUTUBE_SHORTS_TAG=0.
+function wantsShortsTag(text) {
+  return process.env.YOUTUBE_SHORTS_TAG !== '0' && !/#shorts\b/i.test(text);
+}
+
+// Опис іде як є, з таблиці, плюс той самий хештег у кінці.
 export function withShortsTag(description) {
   const text = String(description || '').trim();
-  if (process.env.YOUTUBE_SHORTS_TAG === '0') return text;
-  if (/#shorts\b/i.test(text)) return text; // вже є — не дублюємо
-  return text ? `${text} #Shorts` : '#Shorts';
-}
-
-// Теги беремо з хештегів опису — окремого поля для них у таблиці немає, а
-// дублювати роботу вручну немає сенсу. YouTube обмежує суму тегів 500 символами.
-export function tagsFromDescription(description) {
-  const found = String(description || '').match(/#[^\s#]+/g) || [];
-  const tags = [];
-  let total = 0;
-  for (const raw of found) {
-    const tag = raw.slice(1);
-    if (!tag || tags.includes(tag)) continue;
-    if (total + tag.length + 1 > 500) break;
-    tags.push(tag);
-    total += tag.length + 1;
-  }
-  return tags;
+  if (!wantsShortsTag(text)) return text;
+  return text ? `${text} ${SHORTS_TAG}` : SHORTS_TAG;
 }
 
 // Заливає ролик. videoBuffer — готовий MP4.
@@ -76,15 +66,15 @@ export async function publishYouTubeShort({ videoBuffer, title, description }, o
 
   const requestedPrivacy = process.env.YOUTUBE_PRIVACY || 'public';
   const client = options.client || youtube();
-  const text = withShortsTag(description);
 
   const res = await client.videos.insert({
     part: ['snippet', 'status'],
     requestBody: {
       snippet: {
         title: cleanTitle(title),
-        description: text.slice(0, DESCRIPTION_LIMIT),
-        tags: tagsFromDescription(text),
+        // Поле tags не заповнюємо навмисно — теги YouTube на видачу майже не
+        // впливають, а дублювати ними хештеги опису це зайвий шум.
+        description: withShortsTag(description).slice(0, DESCRIPTION_LIMIT),
         categoryId: process.env.YOUTUBE_CATEGORY_ID || DEFAULT_CATEGORY_ID,
       },
       status: {
