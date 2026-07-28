@@ -1,11 +1,10 @@
 // Адаптери коментарів для Facebook і Instagram.
 //
 // Обидві платформи живуть на тому самому токені Сторінки, але дозволи різні:
-// Facebook потребує pages_manage_engagement, Instagram — instagram_manage_comments.
-// Читати можна з pages_read_engagement, який у нас точно є, тож «бачу коментарі,
-// але не можу відповісти» — цілком імовірний стан. Саме тому canReply() пробує
-// саме ЗАПИС, а не вгадує за переліком дозволів: для токена Сторінки Graph його
-// не показує.
+// читати чужі коментарі дає pages_read_user_content (НЕ pages_read_engagement —
+// той лише про метрики), відповідати — pages_manage_engagement, а в Instagram
+// усе разом робить instagram_manage_comments. Токен має бути саме Сторінки:
+// користувацький бачить Instagram, але не бачить дописів Сторінки.
 import { graphRequest } from './meta.js';
 
 const LIMIT = Number(process.env.META_COMMENTS_LIMIT) || 10;
@@ -29,7 +28,10 @@ export async function fetchFacebookComments(options = {}) {
   const pageId = process.env.META_PAGE_ID;
   const data = await graphRequest(`${encodeURIComponent(pageId)}/posts`, {
     params: {
-      fields: `id,created_time,comments.limit(25){id,message,created_time,from}`,
+      // Вкладені comments — це відповіді на коментар. Потрібні, щоб не
+      // пропонувати відповісти там, де Сторінка вже відповіла (байдуже,
+      // ботом чи руками з телефона).
+      fields: 'id,created_time,comments.limit(25){id,message,created_time,from,comments.limit(10){from}}',
       limit: options.limit || LIMIT,
     },
     token: options.token || token(),
@@ -40,6 +42,8 @@ export async function fetchFacebookComments(options = {}) {
     for (const c of post.comments?.data || []) {
       // Свої ж відповіді пропускаємо, інакше бот відповідатиме сам собі.
       if (!c.id || !c.message || c.from?.id === pageId) continue;
+      const answered = (c.comments?.data || []).some((r) => r.from?.id === pageId);
+      if (answered) continue;
       out.push({
         id: c.id,
         text: c.message,
@@ -81,7 +85,7 @@ export async function fetchInstagramComments(options = {}) {
   const igUserId = process.env.META_IG_USER_ID;
   const data = await graphRequest(`${encodeURIComponent(igUserId)}/media`, {
     params: {
-      fields: 'id,permalink,comments.limit(25){id,text,timestamp,username,from}',
+      fields: 'id,permalink,comments.limit(25){id,text,timestamp,username,from,replies{username,from}}',
       limit: options.limit || LIMIT,
     },
     token: options.token || token(),
@@ -95,6 +99,11 @@ export async function fetchInstagramComments(options = {}) {
       // Instagram не завжди віддає from, тож звіряємо ще й за іменем автора.
       if (c.from?.id === igUserId) continue;
       if (own && String(c.username || '').toLowerCase() === own) continue;
+      // Наша відповідь у гілці означає, що питання вже закрите.
+      const answered = (c.replies?.data || []).some((r) => (
+        r.from?.id === igUserId || (own && String(r.username || '').toLowerCase() === own)
+      ));
+      if (answered) continue;
       out.push({
         id: c.id,
         text: c.text,

@@ -77,3 +77,41 @@ test('Instagram: відповідь іде на ребро replies', async () =>
   await replyInstagram('IC1', 'Це Соледар', { fetchImpl });
   assert.match(calls[0], /IC1\/replies/);
 });
+
+test('Facebook: коментар, під яким Сторінка вже відповіла, не пропонується', async () => {
+  const fetchImpl = async () => reply({
+    data: [{
+      id: 'POST1',
+      comments: {
+        data: [
+          {
+            id: 'CM1', message: 'А де це?', from: { id: 'USER9', name: 'Оля' },
+            comments: { data: [{ from: { id: 'PAGE1' } }] }, // наша відповідь
+          },
+          {
+            id: 'CM2', message: 'Клас', from: { id: 'USER8', name: 'Петро' },
+            comments: { data: [{ from: { id: 'USER7' } }] }, // відповів інший глядач
+          },
+        ],
+      },
+    }],
+  });
+  const list = await fetchFacebookComments({ fetchImpl });
+  assert.deepEqual(list.map((c) => c.id), ['CM2'], 'чужа відповідь за нашу не рахується');
+});
+
+test('Instagram: гілка з нашою відповіддю не пропонується', async () => {
+  const fetchImpl = async () => reply({
+    data: [{
+      id: 'MEDIA1',
+      comments: {
+        data: [
+          { id: 'IC1', text: 'А де це?', username: 'petro', replies: { data: [{ username: 'chy_znaly_vy' }] } },
+          { id: 'IC2', text: 'Гарно', username: 'olha', replies: { data: [{ username: 'hto_s' }] } },
+        ],
+      },
+    }],
+  });
+  const list = await fetchInstagramComments({ fetchImpl });
+  assert.deepEqual(list.map((c) => c.id), ['IC2']);
+});
