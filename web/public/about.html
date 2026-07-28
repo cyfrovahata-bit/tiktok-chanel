@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chy Vy Znaly — automation tool for a single YouTube channel</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1b1a17; --muted: #6b6862; --line: #e4e1da; --accent: #7a5c2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16151a; --fg: #ece9e3; --muted: #9d9890; --line: #2c2a31; --accent: #d3ab6a; }
+  }
+  :root[data-theme="dark"] { --bg: #16151a; --fg: #ece9e3; --muted: #9d9890; --line: #2c2a31; --accent: #d3ab6a; }
+  :root[data-theme="light"] { --bg: #fbfbfa; --fg: #1b1a17; --muted: #6b6862; --line: #e4e1da; --accent: #7a5c2e; }
+  body {
+    background: var(--bg); color: var(--fg); margin: 0;
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+  h1 { font-size: 1.9rem; line-height: 1.2; text-wrap: balance; margin: 0 0 .4rem; }
+  h2 { font-size: 1.15rem; margin: 2.4rem 0 .6rem; }
+  .lede { color: var(--muted); margin: 0 0 2rem; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: .1em .35em; border-radius: 3px; font-size: .9em; }
+  a { color: var(--accent); }
+  footer { margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Chy Vy Znaly — publishing automation</h1>
+  <p class="lede">A private tool that publishes short educational videos to the operator's own social accounts, including one YouTube channel.</p>
+
+  <h2>What this tool does</h2>
+  <p>
+    The operator runs a small educational channel about Ukrainian geography, history and science.
+    Each video is assembled from still images and a narrated script, then published on a schedule.
+    This tool automates the publishing step: it takes a finished MP4 file that the operator already
+    owns and uploads it to the operator's own accounts with a title, description and tags.
+  </p>
+
+  <h2>How it uses the YouTube Data API</h2>
+  <ul>
+    <li><code>videos.insert</code> — uploads the operator's own finished video to the operator's own channel.</li>
+    <li><code>channels.list</code> (<code>mine=true</code>) — confirms which channel the authorised token belongs to, so the operator can verify the destination before enabling uploads.</li>
+  </ul>
+  <p>
+    No other endpoint is called. The tool does not search YouTube, does not read other channels,
+    does not collect data about videos or users it does not own, and does not display or embed
+    YouTube content anywhere.
+  </p>
+
+  <h2>Who can use it</h2>
+  <p>
+    Only the channel owner. The interface is a private Telegram Mini App restricted to a single
+    Telegram account; every request is verified against a Telegram HMAC signature and rejected if
+    the user is not the owner. There is no sign-up, no public interface and no other users.
+  </p>
+
+  <h2>Scale</h2>
+  <p>
+    Up to three uploads per day — roughly 90 per month. There is no advertising sold inside the
+    content, no resale of API data, and no third-party access of any kind.
+  </p>
+
+  <h2>Volume of AI-assisted content</h2>
+  <p>
+    Imagery and narration are produced with generative models. Every upload is therefore marked as
+    synthetic content through the API field <code>status.containsSyntheticMedia</code>, so viewers
+    see YouTube's altered-content disclosure. The same disclosure is set on every other platform the
+    tool publishes to.
+  </p>
+
+  <footer>
+    <p><a href="/privacy">Privacy policy</a></p>
+    <p>Contact: cyfrovahata@gmail.com</p>
+  </footer>
+</main>
+</body>
+</html>

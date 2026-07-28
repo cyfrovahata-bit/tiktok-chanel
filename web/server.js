@@ -167,6 +167,16 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const { pathname } = url;
 
+    // Публічні сторінки для аудиту YouTube API: рецензент має побачити, що це
+    // за клієнт і як він поводиться з даними. Кореневий шлях для цього не
+    // годиться — там мінідодаток, який поза Telegram виглядає порожнім.
+    if (req.method === 'GET' && (pathname === '/about' || pathname === '/privacy')) {
+      const html = await readFile(path.join(DIR, `public${pathname}.html`), 'utf8');
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(html);
+      return;
+    }
+
     if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
       const html = await readFile(path.join(DIR, 'public/index.html'), 'utf8');
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
