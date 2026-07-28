@@ -2,6 +2,7 @@
 // Graph API, TikTok — через Content Posting API. YouTube поки що вручну.
 import { publishFacebookReel, publishInstagramReel } from './meta.js';
 import { publishTikTokVideo } from './tiktok.js';
+import { publishYouTubeShort } from './youtube.js';
 
 // name — людська назва; flag — змінна середовища, що вмикає платформу;
 // коли реальний код з'явиться, він живе у полі publish кожного запису.
@@ -77,6 +78,25 @@ export async function publish(platform, payload) {
       detail: result.mode === 'direct'
         ? `TikTok ${result.id} (${result.privacy})`
         : `TikTok ${result.id} — у чернетках застосунку (скоуп video.upload)`,
+    };
+  }
+
+  if (platform === 'youtube') {
+    // YouTube приймає байти, як і TikTok.
+    const result = await publishYouTubeShort({
+      videoBuffer: await payload.videoBuffer(),
+      title: payload.title,
+      description: caption,
+    });
+    return {
+      platform,
+      status: 'published',
+      id: result.id,
+      // Приватність показуємо ту, яку повернув YouTube, а не ту, яку просили:
+      // непройдений аудит мовчки перетворює public на private.
+      detail: result.forcedPrivate
+        ? `YouTube ${result.id} — залито ПРИВАТНО (проєкт не пройшов аудит YouTube API), опублічни в Studio`
+        : `YouTube ${result.id} (${result.privacyStatus})`,
     };
   }
 

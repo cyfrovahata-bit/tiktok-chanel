@@ -54,6 +54,7 @@ function enabledMetaPlatforms() {
   if (process.env.ENABLE_FB === '1') platforms.push('facebook');
   if (process.env.ENABLE_IG === '1') platforms.push('instagram');
   if (process.env.ENABLE_TIKTOK === '1') platforms.push('tiktok');
+  if (process.env.ENABLE_YOUTUBE === '1') platforms.push('youtube');
   return platforms;
 }
 
@@ -61,6 +62,7 @@ const PLATFORM_META = {
   facebook: { idProperty: 'facebookPostId', label: 'Facebook' },
   instagram: { idProperty: 'instagramPostId', label: 'Instagram' },
   tiktok: { idProperty: 'tiktokPostId', label: 'TikTok' },
+  youtube: { idProperty: 'youtubePostId', label: 'YouTube' },
 };
 
 function platformIdProperty(platform) {

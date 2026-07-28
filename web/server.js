@@ -27,6 +27,7 @@ import { tiktokConfigured, consentUrl as tiktokConsentUrl, exchangeCode as tikto
 import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, exchangeCode } from '../src/google-auth.js';
+import { channelInfo } from '../src/youtube.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -727,6 +728,28 @@ const server = http.createServer(async (req, res) => {
         };
       } catch (e) {
         out.error = e.message;
+      }
+      return json(res, 200, out);
+    }
+
+    // Чи бачить наш токен канал YouTube і чи вистачає йому прав. Найчастіша
+    // причина помилки — refresh-токен, виданий до додавання скоупу youtube:
+    // права зашиті в токен, тож потрібна повторна згода через /oauth/start.
+    if (req.method === 'GET' && pathname === '/api/youtube/check') {
+      const out = {
+        enabled: process.env.ENABLE_YOUTUBE === '1',
+        google: googleStatus().mode,
+        privacyRequested: process.env.YOUTUBE_PRIVACY || 'public',
+        aiLabel: process.env.YOUTUBE_AI_LABEL !== '0',
+      };
+      try {
+        out.channel = await channelInfo();
+        if (!out.channel) out.error = 'токен не бачить жодного каналу YouTube';
+      } catch (e) {
+        out.error = e.message;
+        if (/insufficient|scope|permission/i.test(e.message)) {
+          out.hint = 'у токена немає прав YouTube — пройди /oauth/start ще раз і онови GOOGLE_OAUTH_REFRESH_TOKEN';
+        }
       }
       return json(res, 200, out);
     }

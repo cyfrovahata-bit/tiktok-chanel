@@ -14,6 +14,13 @@ import { google } from 'googleapis';
 const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/drive',
+  // Заливання Shorts і читання даних каналу. Додавання скоупу НЕ розширює
+  // наявний refresh-токен: права зашиті в нього в момент згоди. Щоб YouTube
+  // запрацював, треба ще раз пройти /oauth/start і оновити
+  // GOOGLE_OAUTH_REFRESH_TOKEN. Доки цього не зроблено, Drive і Sheets
+  // працюють як раніше, а YouTube відповідатиме помилкою про брак прав.
+  'https://www.googleapis.com/auth/youtube.upload',
+  'https://www.googleapis.com/auth/youtube.readonly',
 ];
 
 let cached = null;
