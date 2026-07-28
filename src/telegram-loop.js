@@ -7,17 +7,21 @@
 import { getUpdates } from './telegram.js';
 import { handleCallback, handleMessage } from './yt-comments.js';
 
-const POLL_MS = Number(process.env.TELEGRAM_POLL_MS) || 5000;
+// Довге опитування: Telegram тримає запит до 25 секунд і віддає оновлення
+// щойно вони з'являються. Замість ~17 000 запитів на добу — близько 3 500,
+// і кнопка спрацьовує миттєво, а не «десь за п'ять секунд».
+const POLL_TIMEOUT = Number(process.env.TELEGRAM_POLL_TIMEOUT) || 25;
+const RETRY_MS = 3000;
 
 let offset = 0;
-let timer = null;
+let running = false;
 
 export async function pollUpdatesOnce(handlers = {}) {
   const onCallback = handlers.onCallback || handleCallback;
   const onMessage = handlers.onMessage || handleMessage;
   const fetchUpdates = handlers.getUpdates || getUpdates;
 
-  const updates = await fetchUpdates(offset || undefined);
+  const updates = await fetchUpdates(offset || undefined, handlers.timeout ?? 0);
   for (const update of updates || []) {
     offset = Math.max(offset, Number(update.update_id) + 1);
     try {
@@ -32,12 +36,25 @@ export async function pollUpdatesOnce(handlers = {}) {
   return (updates || []).length;
 }
 
+// Цикл послідовний, а не на setInterval. Два одночасні getUpdates із тим самим
+// offset повернули б ТЕ САМЕ натискання двічі — і під коментарем з'явилися б дві
+// однакові відповіді. Наступний запит іде лише після того, як попередній
+// повністю оброблено.
 export function startTelegramLoop() {
-  if (timer) return;
-  const tick = async () => {
-    try { await pollUpdatesOnce(); }
-    catch (error) { console.error('[telegram] опитування:', error.message); }
-  };
-  timer = setInterval(tick, POLL_MS);
-  tick();
+  if (running) return;
+  running = true;
+  (async () => {
+    while (running) {
+      try {
+        await pollUpdatesOnce({ timeout: POLL_TIMEOUT });
+      } catch (error) {
+        console.error('[telegram] опитування:', error.message);
+        await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+      }
+    }
+  })();
+}
+
+export function stopTelegramLoop() {
+  running = false;
 }

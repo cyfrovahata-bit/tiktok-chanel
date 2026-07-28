@@ -29,10 +29,13 @@ async function call(method, payload = {}) {
   return data.result;
 }
 
-export function getUpdates(offset) {
+// timeout=0 — миттєва відповідь (потрібно старому скрипту check.js, який живе
+// лічені секунди). Довгоживучому серверу вигідніше довге опитування: Telegram
+// тримає з'єднання й віддає оновлення щойно вони з'являються.
+export function getUpdates(offset, timeout = 0) {
   return call('getUpdates', {
     offset,
-    timeout: 0,
+    timeout,
     allowed_updates: ['message', 'callback_query'],
   });
 }

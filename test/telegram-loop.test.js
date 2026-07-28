@@ -39,3 +39,12 @@ test('падіння одного обробника не спиняє решт�
   assert.equal(handled, 2);
   assert.deepEqual(seen, ['далі'], 'повідомлення після збою все одно оброблено');
 });
+
+test('довге опитування: timeout передається в Telegram', async () => {
+  const timeouts = [];
+  await pollUpdatesOnce({
+    timeout: 25,
+    getUpdates: async (_offset, timeout) => { timeouts.push(timeout); return []; },
+  });
+  assert.deepEqual(timeouts, [25]);
+});
