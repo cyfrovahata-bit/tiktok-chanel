@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildOwnPrompt } from '../src/own.js';
-import { parseSlideLines, applySlideLines } from '../src/queue-prompt.js';
+import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-prompt.js';
 
 const base = { rowId: 'OWN-1', folderUrl: 'https://drive.google.com/x' };
 
@@ -24,6 +24,14 @@ test('без сюжету промт просить придумати тему 
   const p = buildOwnPrompt({ ...base, story: '', photoCount: 5 });
   assert.match(p, /СЮЖЕТУ НЕМАЄ/);
   assert.match(p, /придумай за ними тему та сюжет/);
+});
+
+test('порожній шаблон у промті не показується як готові слайди', () => {
+  // Поки ChatGPT не відпрацював, у колонці G лежить завдання з шаблоном
+  // «1. {рядок 1}». Мінідодаток мусить бачити рядок як «сюжет ще не розбито».
+  const p = buildOwnPrompt({ ...base, story: 'Текст сюжету.', photoCount: 0 });
+  assert.deepEqual(parseSlideLines(p), []);
+  assert.equal(parseTheme(p), '');
 });
 
 test('сценарій із власного сюжету редагується тим самим кодом, що й звичайний', () => {

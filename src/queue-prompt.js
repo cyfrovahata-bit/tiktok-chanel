@@ -11,20 +11,34 @@
 
 const LIST_RE = /(ТЕКСТИ СЛАЙДІВ[^\n]*\n)((?:[ \t]*\d+[.)][^\n]*\n)+)/;
 
+// Промт першого етапу (розбити сюжет власника на слайди) сам НЕСЕ ВСЕРЕДИНІ
+// порожній шаблон майбутнього сценарію — із заглушками у фігурних дужках.
+// Це ще не сценарій, і «{рядок 1}» не можна показувати як текст слайда.
+const TEMPLATE_RE = /ШАБЛОН ДЛЯ КОЛОНКИ G/;
+const PLACEHOLDER_RE = /^\{[^{}]*\}$/;
+
 // Тексти слайдів із промту, по порядку. Немає блоку — порожній масив.
 export function parseSlideLines(prompt) {
-  const m = LIST_RE.exec(String(prompt || ''));
+  const text = String(prompt || '');
+  if (TEMPLATE_RE.test(text)) return [];
+  const m = LIST_RE.exec(text);
   if (!m) return [];
-  return m[2]
+  const lines = m[2]
     .split('\n')
     .map((l) => l.replace(/^[ \t]*\d+[.)][ \t]*/, '').trim())
     .filter(Boolean);
+  // Незаповнений шаблон без свого заголовка — теж не сценарій.
+  return lines.some((l) => PLACEHOLDER_RE.test(l)) ? [] : lines;
 }
 
 // Тема з рядка «ТЕМА: …» (для заголовка картки, якщо колонка C відстала).
 export function parseTheme(prompt) {
-  const m = /^ТЕМА:[ \t]*(.+)$/m.exec(String(prompt || ''));
-  return m ? m[1].trim() : '';
+  const text = String(prompt || '');
+  if (TEMPLATE_RE.test(text)) return '';
+  const m = /^ТЕМА:[ \t]*(.+)$/m.exec(text);
+  if (!m) return '';
+  const theme = m[1].trim();
+  return PLACEHOLDER_RE.test(theme) ? '' : theme;
 }
 
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
