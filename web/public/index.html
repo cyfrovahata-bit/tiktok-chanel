@@ -466,8 +466,26 @@
 
       const wrap = el('div', 'card-body-wrap');
       const body = el('div', 'card-body');
+      const slideCount = (item.slides || []).length;
       body.appendChild(el('div', 'kicker',
-        `${esc(item.id)} · ${item.slides.length} слайдів${item.created ? ` · ${esc(item.created)}` : ''}`));
+        `${esc(item.id)} · ${slideCount ? `${slideCount} слайдів` : 'сюжет ще не розбито'}`
+        + `${item.created ? ` · ${esc(item.created)}` : ''}`));
+
+      // Власний сюжет одразу після надсилання: слайдів ще немає, редагувати
+      // нічого. Показуємо стан, щоб було видно, що матеріал прийнято.
+      if (!slideCount) {
+        body.appendChild(el('div', 'empty',
+          'Матеріал прийнято. ChatGPT складе з нього слайди й намалює кадри — '
+          + 'після цього тут з\'являться тексти, які можна буде поправити.'));
+        wrap.appendChild(body);
+        box.appendChild(wrap);
+        head.addEventListener('click', () => {
+          const open = box.classList.toggle('open');
+          if (open) expanded.add(item.id); else expanded.delete(item.id);
+        });
+        if (expanded.has(item.id)) box.classList.add('open');
+        return box;
+      }
 
       // Тема окремим полем: вона йде і в колонку C, і в заголовок промту.
       const themeBox = el('textarea', 'notes');
@@ -561,7 +579,11 @@
       if (!state.googleReady) banner.appendChild(el('div', 'banner', '⚙️ Google-доступ ще не налаштовано на сервері — черга поки порожня.'));
       else if (state.videoFolderSet === false) banner.appendChild(el('div', 'banner', '⚙️ Не задано папку Drive для відео (VIDEO_FOLDER_ID) — монтаж вимкнено.'));
 
-      const pending = (state.pending || []).filter((p) => p.slides && p.slides.length);
+      // Власні сюжети показуємо навіть без слайдів: їх щойно має скласти
+      // ChatGPT із розповіді власника, а до того рядок просто зникав із
+      // застосунку — наче надсилання не спрацювало.
+      const pending = (state.pending || [])
+        .filter((p) => (p.slides && p.slides.length) || String(p.id).startsWith('OWN-'));
       if (pending.length) {
         app.appendChild(el('h2', 'section', pending.length > 1 ? 'Теми на перевірку' : 'Тема на перевірку'));
         pending.forEach((p) => app.appendChild(pendingCard(p)));
