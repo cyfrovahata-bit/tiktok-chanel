@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { publishYouTubeShort, tagsFromDescription } from '../src/youtube.js';
+import { publishYouTubeShort, tagsFromDescription, withShortsTag } from '../src/youtube.js';
 
 // Підроблений клієнт googleapis: запам'ятовує запит і віддає задану відповідь.
 function fakeClient(responseStatus = { privacyStatus: 'public', uploadStatus: 'uploaded' }) {
@@ -24,8 +24,8 @@ test('YouTube: надсилає назву, опис, теги і ШІ-позн�
 
   const body = client.calls[0].requestBody;
   assert.equal(body.snippet.title, 'Соледар');
-  assert.equal(body.snippet.description, 'Опис #Соледар #ЧиВиЗнали');
-  assert.deepEqual(body.snippet.tags, ['Соледар', 'ЧиВиЗнали']);
+  assert.equal(body.snippet.description, 'Опис #Соледар #ЧиВиЗнали #Shorts');
+  assert.deepEqual(body.snippet.tags, ['Соледар', 'ЧиВиЗнали', 'Shorts']);
   assert.equal(body.status.containsSyntheticMedia, true);
   assert.equal(body.status.selfDeclaredMadeForKids, false);
   assert.deepEqual(client.calls[0].part, ['snippet', 'status']);
@@ -69,6 +69,24 @@ test('YouTube: порожній файл не заливається', async () 
     publishYouTubeShort({ ...short, videoBuffer: Buffer.alloc(0) }, { client: fakeClient() }),
     /порожній файл/,
   );
+});
+
+test('#Shorts: дописується лише для YouTube і не дублюється', () => {
+  assert.equal(withShortsTag('Опис #Умань'), 'Опис #Умань #Shorts');
+  assert.equal(withShortsTag('Опис #shorts'), 'Опис #shorts', 'уже є — не дублюємо');
+  assert.equal(withShortsTag('  Опис  '), 'Опис #Shorts');
+  assert.equal(withShortsTag(''), '#Shorts');
+});
+
+test('YOUTUBE_SHORTS_TAG=0 лишає опис як є', () => {
+  const previous = process.env.YOUTUBE_SHORTS_TAG;
+  process.env.YOUTUBE_SHORTS_TAG = '0';
+  try {
+    assert.equal(withShortsTag('Опис #Умань'), 'Опис #Умань');
+  } finally {
+    if (previous === undefined) delete process.env.YOUTUBE_SHORTS_TAG;
+    else process.env.YOUTUBE_SHORTS_TAG = previous;
+  }
 });
 
 test('теги з опису: без дублів і без «решітки»', () => {

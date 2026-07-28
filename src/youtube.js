@@ -38,6 +38,20 @@ function cleanTitle(value) {
   return text.length > TITLE_LIMIT ? `${text.slice(0, TITLE_LIMIT - 1).trimEnd()}…` : text;
 }
 
+// Хештег #Shorts. Технічно він не обов'язковий: YouTube відносить ролик до
+// Shorts сам, за вертикальним кадром і тривалістю до 3 хвилин. Але він
+// допомагає класифікації й пошуку, тож додаємо.
+//
+// Чому тут, а не в промті ChatGPT: опис у таблиці ОДИН на всі платформи, і в
+// TikTok, Instagram та Facebook цей хештег був би зайвим сміттям. Дописуємо
+// його на льоту лише для YouTube. Вимикається через YOUTUBE_SHORTS_TAG=0.
+export function withShortsTag(description) {
+  const text = String(description || '').trimEnd();
+  if (process.env.YOUTUBE_SHORTS_TAG === '0') return text;
+  if (/#shorts\b/i.test(text)) return text; // вже є — не дублюємо
+  return text ? `${text} #Shorts` : '#Shorts';
+}
+
 // Теги беремо з хештегів опису — окремого поля для них у таблиці немає, а
 // дублювати роботу вручну немає сенсу. YouTube обмежує суму тегів 500 символами.
 export function tagsFromDescription(description) {
@@ -62,14 +76,15 @@ export async function publishYouTubeShort({ videoBuffer, title, description }, o
 
   const requestedPrivacy = process.env.YOUTUBE_PRIVACY || 'public';
   const client = options.client || youtube();
+  const text = withShortsTag(description);
 
   const res = await client.videos.insert({
     part: ['snippet', 'status'],
     requestBody: {
       snippet: {
         title: cleanTitle(title),
-        description: String(description || '').slice(0, DESCRIPTION_LIMIT),
-        tags: tagsFromDescription(description),
+        description: text.slice(0, DESCRIPTION_LIMIT),
+        tags: tagsFromDescription(text),
         categoryId: process.env.YOUTUBE_CATEGORY_ID || DEFAULT_CATEGORY_ID,
       },
       status: {
