@@ -555,6 +555,9 @@ const server = http.createServer(async (req, res) => {
             facebookAt: f.appProperties.facebookPublishedAt || null,
             instagram: f.appProperties.instagramPostId || null,
             instagramAt: f.appProperties.instagramPublishedAt || null,
+            tiktok: f.appProperties.tiktokPostId || null,
+            youtube: f.appProperties.youtubePostId || null,
+            youtubeAt: f.appProperties.youtubePublishedAt || null,
           }));
         return json(res, 200, { slot: currentPublishSlot()?.label ?? 'поза вікном', rows });
       } catch (error) {
