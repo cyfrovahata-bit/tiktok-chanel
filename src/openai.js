@@ -57,6 +57,11 @@ function pickCategory() {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
+// Один запит до моделі без обгорток — для відповідей на коментарі.
+export function chatOnce(prompt, options = {}) {
+  return chat(prompt, options);
+}
+
 export async function generateTheme(usedTitles) {
   // Спершу — випадковий (не по категоріях підряд) ще не використаний факт
   // із кураторського пулу; GPT не викликається, поки пул не вичерпано.

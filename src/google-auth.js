@@ -27,6 +27,10 @@ const SCOPES = [
 const YOUTUBE_SCOPES = [
   'https://www.googleapis.com/auth/youtube.upload',
   'https://www.googleapis.com/auth/youtube.readonly',
+  // Відповіді на коментарі. Вужчого скоупа саме під коментарі YouTube не має:
+  // force-ssl дає повне керування каналом, тож екран згоди виглядає страшніше,
+  // ніж хотілося б, але без нього comments.insert не працює.
+  'https://www.googleapis.com/auth/youtube.force-ssl',
 ];
 
 let cached = null;

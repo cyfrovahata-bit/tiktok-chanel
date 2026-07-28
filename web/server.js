@@ -29,6 +29,8 @@ import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, youtubeConsentUrl, exchangeCode, tokenScopes, youtubeTokenSource } from '../src/google-auth.js';
 import { channelInfo } from '../src/youtube.js';
+import { startCommentWatcher, checkComments } from '../src/yt-comments.js';
+import { startTelegramLoop } from '../src/telegram-loop.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -540,6 +542,15 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Ручний прогін перевірки коментарів — щоб не чекати чверть години.
+    if (req.method === 'GET' && pathname === '/api/yt/comments') {
+      try {
+        return json(res, 200, await checkComments());
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
     // Що саме автопублікація вже відправила: мітки живуть у appProperties
     // самого MP4, і без цього подивитися на них нема як.
     if (req.method === 'GET' && pathname === '/api/autopost/status') {
@@ -928,6 +939,12 @@ if (process.env.ENABLE_WEB === '1' && import.meta.url === pathToFileURL(process.
   if (googleConfigured()) {
     startMonitor();
     startAutoPublisher();
+    // Кнопки під картками коментарів працюють лише поки хтось читає оновлення
+    // Telegram, тож цикл стартує разом зі спостерігачем, а не окремо.
+    if (process.env.ENABLE_YT_COMMENTS === '1') {
+      startTelegramLoop();
+      startCommentWatcher();
+    }
   } else {
     console.warn('GOOGLE_SERVICE_ACCOUNT_JSON не задано — монітор черги вимкнено (немає доступу до таблиці).');
   }
