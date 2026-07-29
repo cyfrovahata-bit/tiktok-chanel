@@ -24,7 +24,7 @@ import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { createSubmission, addPhoto, submitOwn, deleteOwnFolder } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
-import { startAutoPublisher, currentPublishSlot, publishHours } from '../src/autopublish.js';
+import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty } from '../src/autopublish.js';
 import { tiktokConfigured, consentUrl as tiktokConsentUrl, exchangeCode as tiktokExchangeCode, redirectUri as tiktokRedirectUri, accessToken as tiktokAccessToken, creatorInfo as tiktokCreatorInfo } from '../src/tiktok.js';
 import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
@@ -619,16 +619,27 @@ const server = http.createServer(async (req, res) => {
         const file = files.get(videoName(id));
         if (!file) throw new Error(`Відео для ${id} не знайдено в Drive`);
         const slot = currentPublishSlot();
+        // Мітки на кожну платформу окремо: з роздільним розкладом у файлі
+        // лежить autoSlotYoutube, autoSlotTiktok тощо, і лишити хоч одну
+        // означало б, що ця платформа більше ніколи не візьме ролик у чергу.
+        const perPlatform = {};
+        for (const platform of ['facebook', 'instagram', 'tiktok', 'youtube']) {
+          const key = claimProperty(platform);
+          perPlatform[key] = null;
+          perPlatform[`${key}Notified`] = null;
+          perPlatform[`${key}ErrNotified`] = null;
+          perPlatform[`${key}At`] = null;
+          perPlatform[`${platform}PostId`] = null;
+          perPlatform[`${platform}PublishedAt`] = null;
+        }
         const cleared = await setVideoAppProperties(file.id, {
+          ...perPlatform,
           autoPostSlot: null,
           autoPostItemId: null,
           autoPostDone: null,
           autoPostNotified: null,
           autoPostLastAttemptAt: null,
-          facebookPostId: null,
-          facebookPublishedAt: null,
-          instagramPostId: null,
-          instagramPublishedAt: null,
+          facebookRemindedAt: null,
           // Якщо зараз усередині вікна — пропускаємо саме його, вийде в наступне.
           autoPostSkipSlot: slot ? slot.key : null,
         });
@@ -963,6 +974,14 @@ const server = http.createServer(async (req, res) => {
           // навіть тоді, коли AUTO_PUBLISH_HOURS давно був інший, і збивала
           // з пантелику під час розбору «чому не опублікувалось».
           schedule: publishHours().map((h) => `${String(h).padStart(2, '0')}:00`),
+          // Розклад кожної платформи окремо — щоб було видно, що куди й коли.
+          perPlatform: Object.fromEntries(
+            ['youtube', 'tiktok', 'instagram', 'facebook'].map((platform) => [
+              platform,
+              platformHours(platform).map((h) => `${String(h).padStart(2, '0')}:00`),
+            ]),
+          ),
+          facebookReminder: process.env.ENABLE_FB_REMINDER === '1',
           timeZone: 'Europe/Kyiv',
         },
       });

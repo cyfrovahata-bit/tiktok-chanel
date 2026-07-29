@@ -327,3 +327,76 @@ test('Facebook не публікується навіть із ENABLE_FB=1', asy
   assert.equal(process.env.ENABLE_FB, '1', 'змінна справді ввімкнена');
   assert.ok(!posts.includes('facebook'), 'Facebook не має публікуватися');
 });
+
+test('у кожної платформи свій розклад — кожна публікується у своє вікно', async (t) => {
+  const before = { ...process.env };
+  process.env.AUTO_PUBLISH_HOURS_TIKTOK = '12';
+  process.env.AUTO_PUBLISH_HOURS_INSTAGRAM = '19';
+  t.after(() => {
+    delete process.env.AUTO_PUBLISH_HOURS_TIKTOK;
+    delete process.env.AUTO_PUBLISH_HOURS_INSTAGRAM;
+    process.env.AUTO_PUBLISH_HOURS = before.AUTO_PUBLISH_HOURS;
+  });
+  const mod = await import(`../src/autopublish.js?split=${Date.now()}`);
+
+  const id = 'AUTO-20260722-0930';
+  const file = { id: 'file-one', name: `${id}.mp4`, appProperties: {} };
+  const files = new Map([[`${id}.mp4`, file]]);
+  const posts = [];
+  const run = (iso) => mod.runAutoPublishOnce({
+    now: new Date(iso),
+    listItems: async () => [readyItem(id)],
+    listFiles: async () => files,
+    setProperties: async () => {},
+    publishPlatform: async (platform) => {
+      posts.push(platform);
+      return { platform, status: 'published', id: `${platform}-id` };
+    },
+    notifyFn: async () => {},
+  });
+
+  // 09:00 UTC = 12:00 Київ — вікно лише TikTok.
+  const noon = await run('2026-07-22T09:00:00Z');
+  assert.equal(noon.status, 'published');
+  assert.deepEqual(posts, ['tiktok'], 'Instagram о 12:00 не публікується');
+
+  // 16:00 UTC = 19:00 Київ — вікно лише Instagram, той самий ролик.
+  const evening = await run('2026-07-22T16:00:00Z');
+  assert.equal(evening.status, 'published');
+  assert.deepEqual(posts, ['tiktok', 'instagram'], 'той самий ролик виходить у своє вікно');
+
+  // 15:00 Київ — поза вікнами обох (кожен слот живе дві години: 12–13 і 19–20).
+  assert.equal((await run('2026-07-22T12:00:00Z')).status, 'outside-window');
+});
+
+test('нагадування про Facebook приходить раз на ролик і нічого не публікує', async (t) => {
+  process.env.ENABLE_FB_REMINDER = '1';
+  t.after(() => { delete process.env.ENABLE_FB_REMINDER; });
+  const mod = await import(`../src/autopublish.js?fb=${Date.now()}`);
+
+  const id = 'AUTO-20260722-0930';
+  const file = { id: 'file-fb', name: `${id}.mp4`, appProperties: {} };
+  const files = new Map([[`${id}.mp4`, file]]);
+  const notices = [];
+  const posts = [];
+  const opts = {
+    listItems: async () => [readyItem(id)],
+    listFiles: async () => files,
+    setProperties: async (_fileId, patch) => { Object.assign(file.appProperties, patch); },
+    publishPlatform: async (platform) => {
+      posts.push(platform);
+      return { platform, status: 'published', id: `${platform}-id` };
+    },
+    notifyFn: async (_chat, text) => { notices.push(text); },
+    publicUrl: 'https://app.example.com',
+  };
+
+  await mod.remindFacebookOnce({ ...opts, now: new Date('2026-07-22T07:00:00Z') });
+  assert.equal(notices.length, 1);
+  assert.match(notices[0], /Facebook чекає на тебе/);
+  assert.match(notices[0], /https:\/\/app\.example\.com\/api\/video\/AUTO-20260722-0930/);
+  assert.ok(!posts.includes('facebook'), 'нагадування не публікує');
+
+  await mod.remindFacebookOnce({ ...opts, now: new Date('2026-07-22T07:30:00Z') });
+  assert.equal(notices.length, 1, 'нагадування не повторюється');
+});

@@ -17,17 +17,39 @@ import { sendMessage, ownerChatId } from './telegram.js';
 
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://tiktok-chanel-production.up.railway.app').replace(/\/$/, '');
 const CHECK_MS = Number(process.env.AUTO_PUBLISH_CHECK_MS) || 60 * 1000;
-// Години публікації (київські), через кому. Кожен слот живе дві години —
-// година запуску й наступна, щоб затримка монтажу не з'їдала пост.
-const PUBLISH_HOURS = String(process.env.AUTO_PUBLISH_HOURS || '10,18')
-  .split(',').map((h) => Number(String(h).trim().slice(0, 2)))
-  .filter((h) => Number.isInteger(h) && h >= 0 && h <= 23)
-  .sort((a, b) => a - b);
 const RETRY_MS = Number(process.env.AUTO_PUBLISH_RETRY_MS) || 5 * 60 * 1000;
 
+// Години публікації (київські), через кому. Кожен слот живе дві години —
+// година запуску й наступна, щоб затримка монтажу не з'їдала пост.
+//
+// У кожної платформи свій найкращий час, тож розклад задається окремо:
+// AUTO_PUBLISH_HOURS_YOUTUBE, _TIKTOK, _INSTAGRAM, _FACEBOOK. Якщо для
+// платформи змінної немає, береться спільна AUTO_PUBLISH_HOURS — так
+// поведінка каналів, які нічого не міняли, лишається тією самою.
+const DEFAULT_HOURS = '10,18';
+
+function parseHours(raw) {
+  return String(raw)
+    .split(',').map((h) => Number(String(h).trim().slice(0, 2)))
+    .filter((h) => Number.isInteger(h) && h >= 0 && h <= 23)
+    .sort((a, b) => a - b);
+}
+
+export function platformHours(platform) {
+  const own = process.env[`AUTO_PUBLISH_HOURS_${String(platform).toUpperCase()}`];
+  const hours = parseHours(own || process.env.AUTO_PUBLISH_HOURS || DEFAULT_HOURS);
+  return hours.length ? hours : parseHours(DEFAULT_HOURS);
+}
+
 // Години публікації назовні — мінідодаток рахує з них зворотний відлік.
+// Об'єднання розкладів усіх увімкнених платформ: відлік показує найближчу
+// подію, хай навіть вона стосується лише однієї з них.
 export function publishHours() {
-  return [...PUBLISH_HOURS];
+  const platforms = enabledMetaPlatforms();
+  if (!platforms.length) return parseHours(process.env.AUTO_PUBLISH_HOURS || DEFAULT_HOURS);
+  const all = new Set();
+  for (const platform of platforms) for (const hour of platformHours(platform)) all.add(hour);
+  return [...all].sort((a, b) => a - b);
 }
 
 function kyivParts(now = new Date()) {
@@ -46,12 +68,17 @@ function kyivParts(now = new Date()) {
 // Даємо дві години на випадок, якщо монтаж трохи затримався. У межах вікна
 // слот той самий, тож повторного поста не буде. Ключ слота містить годину,
 // а не «am/pm», інакше три слоти на добу злилися б у два.
-export function currentPublishSlot(now = new Date()) {
+function slotFor(hours, now = new Date()) {
   const { date, hour } = kyivParts(now);
-  const slot = PUBLISH_HOURS.find((h) => hour === h || hour === h + 1);
+  const slot = hours.find((h) => hour === h || hour === h + 1);
   if (slot === undefined) return null;
   const label = `${String(slot).padStart(2, '0')}:00`;
   return { key: `${date}-${label.slice(0, 2)}`, label };
+}
+
+// Спільне вікно (об'єднання всіх платформ) — для мінідодатка й діагностики.
+export function currentPublishSlot(now = new Date()) {
+  return slotFor(publishHours(), now);
 }
 
 function enabledMetaPlatforms() {
@@ -88,6 +115,14 @@ function platformIdProperty(platform) {
   return PLATFORM_META[platform]?.idProperty ?? `${platform}PostId`;
 }
 
+// Мітка «цей ролик узято в роботу для цієї платформи в цьому вікні». Раніше
+// мітка була одна на всі платформи (autoPostSlot), але з роздільним розкладом
+// YouTube може публікуватися ввечері, а TikTok опівдні — і спільна мітка
+// назавжди закривала б ролик для тих, чиє вікно ще не настало.
+export function claimProperty(platform) {
+  return `autoSlot${String(platform).charAt(0).toUpperCase()}${String(platform).slice(1)}`;
+}
+
 function platformLabel(platform) {
   return PLATFORM_META[platform]?.label ?? platform;
 }
@@ -109,8 +144,9 @@ function applyLocalProperties(file, patch) {
   file.appProperties = { ...(file.appProperties || {}), ...patch };
 }
 
-function findClaimedFile(files, slotKey) {
-  return [...files.values()].find((file) => file.appProperties?.autoPostSlot === slotKey) || null;
+function findClaimedFile(files, slotKey, platform) {
+  const key = claimProperty(platform);
+  return [...files.values()].find((file) => file.appProperties?.[key] === slotKey) || null;
 }
 
 function findItemForFile(items, file) {
@@ -120,43 +156,134 @@ function findItemForFile(items, file) {
     || null;
 }
 
-// Один безпечний прохід. Залежності ін'єктуються для тестів; у Railway
-// використовуються Google Sheet, Drive, Meta API та Telegram.
-export async function runAutoPublishOnce({
+// Нагадування про Facebook. Автопублікації там немає свідомо (див. коментар
+// в enabledMetaPlatforms), тож у своє вікно ми не постимо, а пишемо власникові:
+// ось готовий ролик, опублікуй руками. Рівно один раз на ролик — нагадування,
+// а не докучання. Вмикається змінною ENABLE_FB_REMINDER=1.
+export async function remindFacebookOnce({
   now = new Date(),
   listItems = readAllItems,
   listFiles = listVideoFiles,
   setProperties = setVideoAppProperties,
-  publishPlatform = publish,
   notifyFn = sendMessage,
   publicUrl = PUBLIC_URL,
 } = {}) {
-  const slot = currentPublishSlot(now);
-  if (!slot) return { status: 'outside-window' };
-
-  const platforms = enabledMetaPlatforms();
-  if (!platforms.length) return { status: 'disabled', slot: slot.key };
+  if (process.env.ENABLE_FB_REMINDER !== '1') return null;
+  const slot = slotFor(platformHours('facebook'), now);
+  if (!slot) return null;
 
   const [items, files] = await Promise.all([listItems(), listFiles()]);
-  let file = findClaimedFile(files, slot.key);
+  const candidate = items
+    .filter(isReady)
+    .filter((item) => item.status !== 'PUBLISHED')
+    .map((item) => ({ item, file: files.get(videoName(item.id)) }))
+    .find(({ file }) => (
+      file
+      && !file.appProperties?.facebookPostId
+      && !file.appProperties?.facebookRemindedAt
+    ));
+  if (!candidate) return null;
+
+  const { item, file } = candidate;
+  await notify(
+    `📘 Facebook чекає на тебе:\n${item.title}\n\n`
+    + `Відео: ${String(publicUrl).replace(/\/$/, '')}/api/video/${encodeURIComponent(item.id)}\n`
+    + 'Назву й опис бери в мінідодатку — там кнопка «копіювати».\n\n'
+    + 'Нагадую про цей ролик один раз.',
+    notifyFn,
+  );
+  const patch = { facebookRemindedAt: now.toISOString() };
+  await setProperties(file.id, patch);
+  applyLocalProperties(file, patch);
+  return { itemId: item.id, slot: slot.key };
+}
+
+// Один безпечний прохід. Залежності ін'єктуються для тестів; у Railway
+// використовуються Google Sheet, Drive, Meta API та Telegram.
+export async function runAutoPublishOnce(options = {}) {
+  const {
+    now = new Date(),
+    listItems = readAllItems,
+    listFiles = listVideoFiles,
+  } = options;
+
+  const reminder = await remindFacebookOnce(options).catch((error) => {
+    console.error('[autopublish] нагадування про Facebook:', error.message);
+    return null;
+  });
+
+  // Платформи з роздільним розкладом групуються за вікном: ті, у кого воно
+  // зараз спільне, обробляються разом і дістають один ролик на всіх — як було
+  // до появи окремих годин. У кого вікно своє — той іде власною чергою.
+  const groups = new Map();
+  for (const platform of enabledMetaPlatforms()) {
+    const slot = slotFor(platformHours(platform), now);
+    if (!slot) continue;
+    if (!groups.has(slot.key)) groups.set(slot.key, { slot, platforms: [] });
+    groups.get(slot.key).platforms.push(platform);
+  }
+  if (!groups.size) {
+    return reminder
+      ? { status: 'facebook-reminded', itemId: reminder.itemId }
+      : { status: 'outside-window' };
+  }
+
+  const [items, files] = await Promise.all([listItems(), listFiles()]);
+  const results = [];
+  for (const group of groups.values()) {
+    results.push(await runGroup({ ...options, items, files, ...group }));
+  }
+  if (results.length === 1) {
+    return reminder ? { ...results[0], facebookReminded: reminder.itemId } : results[0];
+  }
+  return { status: 'multi', results, facebookReminded: reminder?.itemId };
+}
+
+async function runGroup({
+  now = new Date(),
+  slot,
+  platforms,
+  items,
+  files,
+  setProperties = setVideoAppProperties,
+  publishPlatform = publish,
+  notifyFn = sendMessage,
+  publicUrl = PUBLIC_URL,
+}) {
+  // Службові мітки теж на групу, а не на файл цілком: інакше дві групи в
+  // одному вікні перетирали б одна одній «уже сповістив» і «остання спроба».
+  const groupKey = claimProperty(platforms[0]);
+  const NOTIFIED = `${groupKey}Notified`;
+  const ERR_NOTIFIED = `${groupKey}ErrNotified`;
+  const ATTEMPT_AT = `${groupKey}At`;
+
+  let file = findClaimedFile(files, slot.key, platforms[0]);
   let item = file ? findItemForFile(items, file) : null;
 
   if (!file) {
     // Беремо НАЙСТАРІШЕ готове й ще не опубліковане. Порядок — як у таблиці
     // (нові рядки дописуються в кінець), тож черга виходить сама собою.
     // Враховуємо також marker-файли, які лишаються після перегенерації.
+    // Marker-файли лишаються після перегенерації і пам'ятають, що цей ролик
+    // уже кудись виходив. Беремо саме їх, а не всі файли: мітка на самому
+    // відео тепер означає лише «взято в роботу однією з платформ», і чужа
+    // платформа не повинна через неї втрачати свою чергу.
     const claimedItemIds = new Set(
       [...files.values()]
+        .filter((candidateFile) => String(candidateFile.name || '').endsWith('.autopost.json'))
         .map((candidateFile) => candidateFile.appProperties?.autoPostItemId)
         .filter(Boolean),
     );
+    const claimKey = claimProperty(platforms[0]);
     const candidates = items
       .filter(isReady) // DONE + архів + назва + опис
       .filter((candidate) => candidate.status !== 'PUBLISHED') // вже вийшло вручну
       .map((candidate) => ({ item: candidate, file: files.get(videoName(candidate.id)) }))
       .filter(({ item: candidate, file: candidateFile }) => (
         candidateFile // відео змонтоване
-        && !candidateFile.appProperties?.autoPostSlot // ще не бралося в роботу
+        && !candidateFile.appProperties?.[claimKey] // ще не бралося цією групою
+        // Уже опубліковане на всіх платформах групи — черга йде далі.
+        && platforms.some((platform) => !candidateFile.appProperties?.[platformIdProperty(platform)])
         // Скинуте вручну в цьому ж вікні: інакше воно вийшло б повторно
         // тим самим тиком, і скидання не мало б сенсу.
         && candidateFile.appProperties?.autoPostSkipSlot !== slot.key
@@ -165,7 +292,10 @@ export async function runAutoPublishOnce({
     const candidate = candidates[0]; // найстаріший рядок згори
     if (!candidate) return { status: 'waiting-for-video', slot: slot.key };
     ({ file, item } = candidate);
+    // autoPostSlot/autoPostItemId лишаються як спільна мітка: на них
+    // спираються мінідодаток і збереження історії при перегенерації.
     const claim = { autoPostSlot: slot.key, autoPostItemId: item.id };
+    for (const platform of platforms) claim[claimProperty(platform)] = slot.key;
     await setProperties(file.id, claim);
     applyLocalProperties(file, claim);
   }
@@ -176,23 +306,23 @@ export async function runAutoPublishOnce({
 
   const missing = platforms.filter((platform) => !file.appProperties?.[platformIdProperty(platform)]);
   if (!missing.length) {
-    if (file.appProperties?.autoPostNotified !== slot.key) {
+    if (file.appProperties?.[NOTIFIED] !== slot.key) {
       await notify(
         `✅ Автопублікація завершена:\n${item.title}\n\n${platforms.map(platformLabel).join(' та ')} — опубліковано.\nТаблицю не змінював.`,
         notifyFn,
       );
-      const patch = { autoPostDone: '1', autoPostNotified: slot.key };
+      const patch = { autoPostDone: '1', [NOTIFIED]: slot.key };
       await setProperties(file.id, patch);
       applyLocalProperties(file, patch);
     }
     return { status: 'published', slot: slot.key, itemId: item.id };
   }
 
-  const lastAttempt = Date.parse(file.appProperties?.autoPostLastAttemptAt || '');
+  const lastAttempt = Date.parse(file.appProperties?.[ATTEMPT_AT] || '');
   if (Number.isFinite(lastAttempt) && now.getTime() - lastAttempt < RETRY_MS) {
     return { status: 'cooldown', slot: slot.key, itemId: item.id };
   }
-  const attemptPatch = { autoPostLastAttemptAt: now.toISOString() };
+  const attemptPatch = { [ATTEMPT_AT]: now.toISOString() };
   await setProperties(file.id, attemptPatch);
   applyLocalProperties(file, attemptPatch);
 
@@ -231,14 +361,14 @@ export async function runAutoPublishOnce({
   const errors = results.filter((result) => result.status === 'error');
   const stillMissing = platforms.filter((platform) => !file.appProperties?.[platformIdProperty(platform)]);
   if (errors.length) {
-    if (file.appProperties?.autoPostErrorNotified !== slot.key) {
+    if (file.appProperties?.[ERR_NOTIFIED] !== slot.key) {
       const ok = platforms.filter((platform) => !stillMissing.includes(platform)).map(platformLabel);
       const failed = errors.map((result) => `${platformLabel(result.platform)}: ${result.detail}`).join('\n');
       await notify(
         `⚠️ Автопублікація не завершена:\n${item.title}\n\n${ok.length ? `Успішно: ${ok.join(', ')}\n` : ''}${failed}\n\nПовторю спробу автоматично. Таблицю не змінював.`,
         notifyFn,
       );
-      const patch = { autoPostErrorNotified: slot.key };
+      const patch = { [ERR_NOTIFIED]: slot.key };
       await setProperties(file.id, patch);
       applyLocalProperties(file, patch);
     }
@@ -250,7 +380,7 @@ export async function runAutoPublishOnce({
       `✅ Автопублікація завершена:\n${item.title}\n\n${platforms.map(platformLabel).join(' та ')} — опубліковано.\nТаблицю не змінював.`,
       notifyFn,
     );
-    const patch = { autoPostDone: '1', autoPostNotified: slot.key };
+    const patch = { autoPostDone: '1', [NOTIFIED]: slot.key };
     await setProperties(file.id, patch);
     applyLocalProperties(file, patch);
     return { status: 'published', slot: slot.key, itemId: item.id, results };
@@ -284,7 +414,13 @@ export function startAutoPublisher() {
     }
   };
 
-  console.log('[autopublish] розклад 10:00 та 18:00 Europe/Kyiv');
+  const schedule = enabledMetaPlatforms()
+    .map((platform) => `${platformLabel(platform)} ${platformHours(platform).map((h) => `${String(h).padStart(2, '0')}:00`).join(', ')}`)
+    .join(' · ') || 'платформи вимкнені';
+  const fb = process.env.ENABLE_FB_REMINDER === '1'
+    ? ` · нагадування Facebook ${platformHours('facebook').map((h) => `${String(h).padStart(2, '0')}:00`).join(', ')}`
+    : '';
+  console.log(`[autopublish] розклад Europe/Kyiv — ${schedule}${fb}`);
   tick();
   return {
     stop() {
