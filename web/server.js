@@ -958,7 +958,11 @@ const server = http.createServer(async (req, res) => {
         },
         meta: {
           ...metaStatus(),
-          schedule: ['10:00', '18:00'],
+          // Саме ті години, за якими живе автопублікація. Раніше тут стояв
+          // зашитий список ['10:00','18:00'] — діагностика показувала його
+          // навіть тоді, коли AUTO_PUBLISH_HOURS давно був інший, і збивала
+          // з пантелику під час розбору «чому не опублікувалось».
+          schedule: publishHours().map((h) => `${String(h).padStart(2, '0')}:00`),
           timeZone: 'Europe/Kyiv',
         },
       });
