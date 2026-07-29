@@ -400,3 +400,36 @@ test('нагадування про Facebook приходить раз на ро
   await mod.remindFacebookOnce({ ...opts, now: new Date('2026-07-22T07:30:00Z') });
   assert.equal(notices.length, 1, 'нагадування не повторюється');
 });
+
+test('нагадування про Facebook не обстрілює всю чергу за одне вікно', async (t) => {
+  process.env.ENABLE_FB_REMINDER = '1';
+  t.after(() => { delete process.env.ENABLE_FB_REMINDER; });
+  const mod = await import(`../src/autopublish.js?fbq=${Date.now()}`);
+
+  const ids = ['AUTO-20260722-0800', 'AUTO-20260722-0900', 'AUTO-20260722-1000'];
+  const files = new Map(ids.map((id) => [
+    `${id}.mp4`, { id: `file-${id}`, name: `${id}.mp4`, appProperties: {} },
+  ]));
+  const notices = [];
+  const opts = {
+    listItems: async () => ids.map((id) => readyItem(id)),
+    listFiles: async () => files,
+    setProperties: async (fileId, patch) => {
+      const file = [...files.values()].find((f) => f.id === fileId);
+      Object.assign(file.appProperties, patch);
+    },
+    notifyFn: async (_chat, text) => { notices.push(text); },
+  };
+
+  // Три тики поспіль усередині одного вікна.
+  await mod.remindFacebookOnce({ ...opts, now: new Date('2026-07-22T07:00:00Z') });
+  await mod.remindFacebookOnce({ ...opts, now: new Date('2026-07-22T07:01:00Z') });
+  await mod.remindFacebookOnce({ ...opts, now: new Date('2026-07-22T07:02:00Z') });
+  assert.equal(notices.length, 1, 'за вікно — рівно одне нагадування');
+  assert.match(notices[0], /AUTO-20260722-0800/, 'нагадує про найстаріше');
+
+  // Наступне вікно — наступний ролик.
+  await mod.remindFacebookOnce({ ...opts, now: new Date('2026-07-22T15:00:00Z') });
+  assert.equal(notices.length, 2);
+  assert.match(notices[1], /AUTO-20260722-0900/);
+});

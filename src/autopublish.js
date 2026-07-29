@@ -173,6 +173,14 @@ export async function remindFacebookOnce({
   if (!slot) return null;
 
   const [items, files] = await Promise.all([listItems(), listFiles()]);
+
+  // Одне нагадування на вікно. Без цієї перевірки після позначки першого
+  // ролика наступний тик (через хвилину) узяв би другий, потім третій — і
+  // замість нагадування вийшов би обстріл усією чергою за три хвилини.
+  const alreadyThisSlot = [...files.values()]
+    .some((file) => file.appProperties?.facebookRemindedSlot === slot.key);
+  if (alreadyThisSlot) return null;
+
   const candidate = items
     .filter(isReady)
     .filter((item) => item.status !== 'PUBLISHED')
@@ -192,7 +200,7 @@ export async function remindFacebookOnce({
     + 'Нагадую про цей ролик один раз.',
     notifyFn,
   );
-  const patch = { facebookRemindedAt: now.toISOString() };
+  const patch = { facebookRemindedAt: now.toISOString(), facebookRemindedSlot: slot.key };
   await setProperties(file.id, patch);
   applyLocalProperties(file, patch);
   return { itemId: item.id, slot: slot.key };
