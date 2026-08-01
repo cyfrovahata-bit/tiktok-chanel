@@ -133,28 +133,52 @@ function photoHours() {
     .filter((h) => Number.isInteger(h) && h >= 0 && h <= 23);
 }
 
-// Кому який слот публікації дістанеться. Правила відбору й порядок мусять
-// збігатися з autopublish.js — інакше відлік показував би не те, що станеться.
+// Коли ролик почне виходити. Раніше тут була проста арифметика «скільки в
+// черзі — стільки й наступних вікон підряд», і з роздільним розкладом вона
+// брехала: новому ролику показувалося найближче вікно будь-якої платформи,
+// хоча насправді перед ним стоять ті, кому ще бракує своїх платформ.
+//
+// Тому програємо чергу так само, як це робить autopublish: черга спільна,
+// кожне вікно належить конкретній платформі, і поки головний ролик не
+// отримали ВСІ, наступний не рушає.
 function publishSchedule(c, now = new Date()) {
-  const claimed = new Set(
-    [...c.files.values()].map((f) => f.appProperties?.autoPostItemId).filter(Boolean),
-  );
-  const waiting = c.done.filter((it) => {
-    const file = c.files.get(videoName(it.id));
-    return file && !file.appProperties?.autoPostSlot && !claimed.has(it.id);
-  });
-  if (!waiting.length) return new Map();
+  const wanted = PLATFORM_KEYS.filter(platformEnabled);
+  if (!wanted.length) return new Map();
 
-  const slots = nextDailyTimes(publishHours(), waiting.length, now);
-  // Якщо вікно вже відкрите й ніхто його не зайняв, найстаріший вийде за
-  // кілька хвилин, а не в наступне вікно.
-  const slot = currentPublishSlot(now);
-  const takenNow = slot
-    && [...c.files.values()].some((f) => f.appProperties?.autoPostSlot === slot.key);
-  if (slot && !takenNow) slots.unshift(now);
+  // Порядок як у таблиці: найстаріші рядки згори — саме так їх бере черга.
+  const pending = c.done
+    .filter((it) => c.videos.has(videoName(it.id)))
+    .map((it) => {
+      const props = c.files.get(videoName(it.id))?.appProperties || {};
+      return { id: it.id, need: new Set(wanted.filter((p) => !props[`${p}PostId`])) };
+    })
+    .filter((row) => row.need.size);
+  if (!pending.length) return new Map();
+
+  // Майбутні вікна, згруповані за часом: платформи з однаковою годиною
+  // обробляються разом і беруть ОДИН ролик на всіх — так само, як у runGroup.
+  const windows = new Map();
+  for (const platform of wanted) {
+    for (const at of nextDailyTimes(platformHours(platform), 12, now)) {
+      const key = at.getTime();
+      if (!windows.has(key)) windows.set(key, []);
+      windows.get(key).push(platform);
+    }
+  }
 
   const at = new Map();
-  waiting.forEach((item, i) => { if (slots[i]) at.set(item.id, slots[i].toISOString()); });
+  let head = 0;
+  for (const key of [...windows.keys()].sort((a, b) => a - b)) {
+    if (head >= pending.length) break;
+    const row = pending[head];
+    // Група вже має цей ролик — вікно проходить вхолосту (in-step), і на
+    // наступний ролик вона в цьому ж вікні НЕ переходить.
+    const acting = windows.get(key).filter((platform) => row.need.has(platform));
+    if (!acting.length) continue;
+    if (!at.has(row.id)) at.set(row.id, new Date(key).toISOString());
+    for (const platform of acting) row.need.delete(platform);
+    if (!row.need.size) head += 1;
+  }
   return at;
 }
 
