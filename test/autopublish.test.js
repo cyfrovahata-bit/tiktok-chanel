@@ -433,3 +433,53 @@ test('нагадування про Facebook не обстрілює всю че
   assert.equal(notices.length, 2);
   assert.match(notices[1], /AUTO-20260722-0900/);
 });
+
+test('черга одна на всі платформи: пізня платформа не пропускає ролик', async (t) => {
+  // Instagram публікує об 11:00, TikTok о 18:00. Ролик змонтовано о 17:00 —
+  // TikTok забирає його того ж дня, Instagram аж наступного ранку. Раніше
+  // Instagram за цей час «переїжджав» на новіший ролик і старий губився.
+  const before = process.env.AUTO_PUBLISH_HOURS;
+  process.env.AUTO_PUBLISH_HOURS_TIKTOK = '18';
+  process.env.AUTO_PUBLISH_HOURS_INSTAGRAM = '11';
+  t.after(() => {
+    delete process.env.AUTO_PUBLISH_HOURS_TIKTOK;
+    delete process.env.AUTO_PUBLISH_HOURS_INSTAGRAM;
+    process.env.AUTO_PUBLISH_HOURS = before;
+  });
+  const mod = await import(`../src/autopublish.js?lock=${Date.now()}`);
+
+  const older = 'AUTO-20260730-1700';
+  const newer = 'AUTO-20260731-0900';
+  const files = new Map([
+    [`${older}.mp4`, { id: 'f-old', name: `${older}.mp4`, appProperties: {} }],
+  ]);
+  const items = [readyItem(older)];
+  const posts = [];
+  const run = (iso) => mod.runAutoPublishOnce({
+    now: new Date(iso),
+    listItems: async () => items,
+    listFiles: async () => files,
+    setProperties: async () => {},
+    publishPlatform: async (platform) => {
+      posts.push(`${platform}:${posts.length}`);
+      return { platform, status: 'published', id: `${platform}-id` };
+    },
+    notifyFn: async () => {},
+  });
+
+  // 30.07, 18:00 Київ — TikTok бере старий ролик.
+  await run('2026-07-30T15:00:00Z');
+  assert.deepEqual(posts, ['tiktok:0']);
+
+  // За ніч змонтувався новіший ролик.
+  items.push(readyItem(newer));
+  files.set(`${newer}.mp4`, { id: 'f-new', name: `${newer}.mp4`, appProperties: {} });
+
+  // 31.07, 11:00 Київ — Instagram мусить узяти СТАРИЙ, а не перескочити.
+  const morning = await run('2026-07-31T08:00:00Z');
+  assert.equal(morning.itemId, older, 'Instagram лишається на спільному ролику');
+  assert.equal(posts.length, 2);
+  assert.match(posts[1], /^instagram/);
+  assert.ok(files.get(`${older}.mp4`).appProperties.instagramPostId, 'старий ролик отримав Instagram');
+  assert.ok(!files.get(`${newer}.mp4`).appProperties.instagramPostId, 'новіший ще чекає черги');
+});

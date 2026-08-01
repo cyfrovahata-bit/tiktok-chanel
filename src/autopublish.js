@@ -282,16 +282,26 @@ async function runGroup({
         .map((candidateFile) => candidateFile.appProperties?.autoPostItemId)
         .filter(Boolean),
     );
-    const claimKey = claimProperty(platforms[0]);
+    // Черга ОДНА на всі платформи, хоч години в кожної свої. Беремо
+    // найстаріший ролик, якого бракує хоч комусь із увімкнених, — і саме його
+    // ця група публікує у своє вікно.
+    //
+    // Раніше кожна платформа шукала «найстаріше, чого немає в НЕЇ», і черги
+    // розповзалися: ролик, змонтований о 17:00, TikTok забирав о 18:00 того ж
+    // дня, а Instagram аж наступного об 11:00 — і відставав на крок назавжди,
+    // бо теж робив три на добу. Виходило по різному відео на кожній платформі.
+    const wanted = enabledMetaPlatforms();
     const candidates = items
       .filter(isReady) // DONE + архів + назва + опис
       .filter((candidate) => candidate.status !== 'PUBLISHED') // вже вийшло вручну
       .map((candidate) => ({ item: candidate, file: files.get(videoName(candidate.id)) }))
       .filter(({ item: candidate, file: candidateFile }) => (
         candidateFile // відео змонтоване
-        && !candidateFile.appProperties?.[claimKey] // ще не бралося цією групою
-        // Уже опубліковане на всіх платформах групи — черга йде далі.
-        && platforms.some((platform) => !candidateFile.appProperties?.[platformIdProperty(platform)])
+        // Комусь із увімкнених платформ цього ролика ще бракує — отже черга
+        // на ньому й стоїть, поки всі не отримають своє. Стару мітку клейма
+        // тут НЕ перевіряємо: група могла взяти ролик учора, опублікувати
+        // своє й далі чекати решту — і завтра має лишитися на ньому ж.
+        && wanted.some((platform) => !candidateFile.appProperties?.[platformIdProperty(platform)])
         // Скинуте вручну в цьому ж вікні: інакше воно вийшло б повторно
         // тим самим тиком, і скидання не мало б сенсу.
         && candidateFile.appProperties?.autoPostSkipSlot !== slot.key
@@ -300,6 +310,12 @@ async function runGroup({
     const candidate = candidates[0]; // найстаріший рядок згори
     if (!candidate) return { status: 'waiting-for-video', slot: slot.key };
     ({ file, item } = candidate);
+    // Цій групі на спільному ролику вже нічого робити — вона своє віддала й
+    // чекає, поки дотягнуться платформи з пізнішими вікнами. Клейм не ставимо
+    // й повідомлень не шлемо, інакше кожне вікно давало б «уже опубліковано».
+    if (!platforms.some((platform) => !file.appProperties?.[platformIdProperty(platform)])) {
+      return { status: 'in-step', slot: slot.key, itemId: item.id };
+    }
     // autoPostSlot/autoPostItemId лишаються як спільна мітка: на них
     // спираються мінідодаток і збереження історії при перегенерації.
     const claim = { autoPostSlot: slot.key, autoPostItemId: item.id };
