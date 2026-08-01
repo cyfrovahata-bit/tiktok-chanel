@@ -161,6 +161,15 @@ function publishSchedule(c, now = new Date()) {
 // Готові до публікації: DONE-рядки, для яких у Drive вже є відео.
 // Найновіші (внизу таблиці) — зверху списку.
 const POST_ID_KEYS = ['facebookPostId', 'instagramPostId', 'tiktokPostId', 'youtubePostId'];
+const PLATFORM_KEYS = ['youtube', 'tiktok', 'instagram', 'facebook'];
+
+// Чи публікує цю платформу автопублікація. Facebook вимкнено в коді
+// (див. autopublish.js), тож він завжди «вручну» — і ніколи не тримає
+// картку в очікуванні.
+function platformEnabled(platform) {
+  if (platform === 'facebook') return false;
+  return process.env[`ENABLE_${platform === 'instagram' ? 'IG' : platform.toUpperCase()}`] === '1';
+}
 
 function queueFrom(c, now = new Date()) {
   const schedule = publishSchedule(c, now);
@@ -170,6 +179,17 @@ function queueFrom(c, now = new Date()) {
     .map((it) => {
       const props = c.files.get(videoName(it.id))?.appProperties || {};
       const autoPosted = POST_ID_KEYS.some((key) => props[key]);
+      // Стан кожної платформи окремо. Без цього картка показувала єдиний
+      // прапорець «опубліковано», який вмикався від першої ж платформи — і
+      // не було видно, що решта ще чекає свого вікна. Через це «Опубліковано»
+      // тиснули зарано, а рядок у статусі PUBLISHED автопублікація вже не
+      // бере, тож ті платформи лишалися без ролика назавжди.
+      const platforms = PLATFORM_KEYS.map((platform) => ({
+        platform,
+        enabled: platformEnabled(platform),
+        done: Boolean(props[`${platform}PostId`]),
+        at: props[`${platform}PublishedAt`] || null,
+      }));
       return {
         id: it.id,
         title: it.title,
@@ -180,6 +200,10 @@ function queueFrom(c, now = new Date()) {
         fileName: videoName(it.id),
         publishAt: schedule.get(it.id) || null,
         autoPosted,
+        platforms,
+        // Чекають ще платформи, у яких увімкнена автопублікація — тиснути
+        // «Опубліковано» рано.
+        awaiting: platforms.filter((p) => p.enabled && !p.done).map((p) => p.platform),
         // Заявка є, а публікації немає: ролик випав із черги й повернути його
         // може лише кнопка ↩️.
         stalled: Boolean(props.autoPostSlot) && !autoPosted,

@@ -96,6 +96,14 @@
     .cd.soon b { color: var(--warn, #d08700); }
     .cd.done b { color: var(--ok); }
 
+    .plats { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 11px; }
+    .plat {
+      font-size: 12px; font-weight: 600; padding: 4px 9px; border-radius: 999px;
+      border: 1px solid var(--border); color: var(--muted); white-space: nowrap;
+    }
+    .plat.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+    .plat.wait { color: var(--warn, #d08700); border-color: color-mix(in srgb, var(--warn, #d08700) 40%, transparent); }
+
     .copyable {
       position: relative; border: 1px solid var(--border); border-radius: 13px;
       padding: 12px 13px; background: color-mix(in srgb, var(--bg) 45%, var(--surface));
@@ -358,6 +366,7 @@
 
       const body = el('div', 'card-body');
       if (item.theme) body.appendChild(el('div', 'kicker', esc(item.theme)));
+      body.appendChild(platformRow(item));
       body.appendChild(copyable({ label: 'Назва', icon: '📌', main: item.title }));
       body.appendChild(copyable({ label: 'Опис + хештеги', icon: '📝', main: item.description, isDesc: true }));
       const actions = el('div', 'actions');
@@ -406,6 +415,19 @@
 
     async function publish(item, card, btn) {
       if (!initData) { toast('Відкрий через Telegram, щоб публікувати'); return; }
+      // Рядок у статусі PUBLISHED автопублікація більше не бере. Якщо натиснути
+      // до того, як відпрацювали всі платформи, ті, що не встигли, не отримають
+      // ролик уже ніколи — саме так Instagram колись пропустив «Мрію».
+      const awaiting = item.awaiting || [];
+      if (awaiting.length) {
+        const names = awaiting.map((p) => PLATFORM_NAMES[p] || p).join(', ');
+        const ok = await askConfirm(
+          `Ще не вийшло: ${names}.\n\n`
+          + 'Після «Опубліковано» автопублікація більше не візьме цей ролик, '
+          + 'і ці платформи лишаться без нього. Усе одно позначити?',
+        );
+        if (!ok) return;
+      }
       btn.disabled = true; btn.textContent = 'Публікую…';
       try {
         const r = await fetch('/api/publish', {
@@ -440,6 +462,25 @@
         notify('success'); toast('Перегенеровую — нове відео прийде в Telegram');
         setTimeout(load, 1500);
       } catch (e) { btn.disabled = false; notify('error'); toast(e.message); }
+    }
+
+    // Де ролик уже вийшов, а де ще чекає свого вікна. Кожна платформа має
+    // власний розклад, тож «опубліковано» на одній не означає нічого про решту.
+    const PLATFORM_NAMES = {
+      youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook',
+    };
+    function platformRow(item) {
+      const row = el('div', 'plats');
+      for (const p of item.platforms || []) {
+        const state = p.done ? 'done' : (p.enabled ? 'wait' : 'manual');
+        const chip = el('span', `plat ${state}`);
+        chip.textContent = `${p.done ? '✅' : (p.enabled ? '⏳' : '✍️')} ${PLATFORM_NAMES[p.platform] || p.platform}`;
+        chip.title = p.done
+          ? `опубліковано${p.at ? ` · ${new Date(p.at).toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' })}` : ''}`
+          : (p.enabled ? 'чекає свого вікна' : 'публікується вручну');
+        row.appendChild(chip);
+      }
+      return row;
     }
 
     function publishedRow(it) {
