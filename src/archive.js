@@ -18,12 +18,26 @@ const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 
 // Магічні байти — щоб пересвідчитись, що файл справді картинка, а не
 // перейменований у .jpg сторонній файл.
-async function isRealImage(filePath) {
-  const buf = Buffer.from(await readFile(filePath)).subarray(0, 12);
+function isImageHeader(buf) {
   const jpg = buf[0] === 0xff && buf[1] === 0xd8;
   const png = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
   const webp = buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP';
   return jpg || png || webp;
+}
+
+// Пояснює, ЧОМУ файл не годиться, — щоб у Telegram прилітала дія, а не здогад.
+// Повертає null, якщо з файлом усе гаразд.
+//
+// Найчастіший випадок — порожній файл: генератор створив 7.jpg із правильним
+// іменем, але не дописав у нього жодного байта. Кількість фото тоді сходиться,
+// тож самоперевірка ШІ («фото = N») цього не бачить, а власник отримував
+// повідомлення про «сторонній файл» і шукав не там.
+export async function imageProblem(filePath) {
+  const data = Buffer.from(await readFile(filePath));
+  if (data.length === 0) return 'файл порожній (0 байт), зображення не намалювалося';
+  if (isImageHeader(data.subarray(0, 12))) return null;
+  const head = data.subarray(0, 4).toString('hex').toUpperCase();
+  return `не схоже на JPG, PNG чи WEBP (${data.length} байт, починається з ${head})`;
 }
 
 function run(command, args) {
@@ -118,11 +132,16 @@ export async function extractPhotoArchive(zipData) {
     throw new Error('В архіві дублікати номерів фото — має бути рівно по одному 1..N.');
   }
 
-  // Перевіряємо, що всі — справжні картинки.
+  // Перевіряємо, що всі — справжні картинки. Повідомляємо про ВСІ биті кадри
+  // одразу: інакше власник перемальовує сьомий, а на наступному запуску
+  // дізнається, що восьмий теж порожній.
+  const broken = [];
   for (const [index, filePath] of ordered.entries()) {
-    if (!(await isRealImage(filePath))) {
-      throw new Error(`Фото ${index + 1} — не дійсне зображення (можливо, перейменований сторонній файл).`);
-    }
+    const problem = await imageProblem(filePath);
+    if (problem) broken.push(`фото ${index + 1} — ${problem}`);
+  }
+  if (broken.length) {
+    throw new Error(`В архіві биті кадри: ${broken.join('; ')}. Перемалюй саме ці кадри й перезбери архів.`);
   }
 
   const scriptText = await readScriptText(outDir, entries);
