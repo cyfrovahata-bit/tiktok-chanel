@@ -195,6 +195,33 @@ export async function pollOnce() {
   }
 }
 
+// Попередження про биту збірку — ОДНЕ на архів, а не кожні пів години.
+//
+// Після MAX_ATTEMPTS лічильник спроб чекає RETRY_AFTER_MS і скидається, тож
+// рядок із назавжди битим ZIP заходив на нове коло, знову падав тричі й знову
+// слав те саме повідомлення — і так до заміни архіву. Причина падіння майже
+// завжди в самому архіві, тож поки посилання не змінилося, повторний текст
+// нічого не додає, лише витісняє з чату те, на що варто дивитись.
+//
+// Пам'ять — той самий notices.json на Drive (ключ «fail:<ID>» → посилання на
+// архів), тому перезапуск Railway не починає спам заново. Нове посилання в
+// колонці «Архів» дає і нову спробу, і, якщо вона теж впаде, нове попередження.
+async function warnOncePerArchive(item, message) {
+  const key = `fail:${item.id}`;
+  const archive = item.archive || '';
+  let seen = {};
+  try {
+    seen = await readNotices();
+    if (seen[key] === archive) return false;
+  } catch {
+    seen = {}; // Drive недоступний — краще попередити вдруге, ніж змовчати
+  }
+  await notify(message);
+  seen[key] = archive;
+  await writeNotices(seen).catch(() => {});
+  return true;
+}
+
 async function pollOnceInner() {
   const [items, videos] = await Promise.all([listDoneItems(), listVideos()]);
   pollState = { ...pollState, lastRunAt: new Date().toISOString(), lastDoneCount: items.length };
@@ -216,7 +243,8 @@ async function pollOnceInner() {
       pollState = { ...pollState, busyWith: null, lastError: `${item.id} (спроба ${tried}): ${error.message}` };
       console.error(`Помилка обробки ${item.id} (спроба ${tried}):`, error.message);
       if (tried >= MAX_ATTEMPTS) {
-        await notify(
+        await warnOncePerArchive(
+          item,
           `⚠️ Не вдалося зробити відео для «${item.title}» після ${MAX_ATTEMPTS} спроб:\n${error.message}`
           + '\n\nЗаміни архів у таблиці — і я одразу спробую знову.',
         );
