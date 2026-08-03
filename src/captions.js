@@ -96,8 +96,19 @@ function assTime(sec) {
 
 const GOLD = '&H0000D7FF&'; // золотий (ASS = &HAABBGGRR)
 const WHITE = '&H00FFFFFF&';
-const PREV_SIZE = 62;      // кегль попереднього (згасаючого) фрагмента
+const PREV_SIZE = 62;       // кегль попереднього (згасаючого) фрагмента
 const PREV_ALPHA = '&H90&'; // його прозорість
+const ACCENT_SIZE = 138;    // кегль акцентного фрагмента (базовий — у стилі Cap)
+const ACCENT_LETTERS = 8;   // від скількох літер самостійне слово вважаємо акцентом
+
+// Акцент — те, заради чого фрагмент існує: число або окреме довге слово, на
+// якому тримається фраза («ПСИХОЛОГІЯ», «НАЙВАЖЛИВІШЕ», «27 572»). Розмітки в
+// script.txt свідомо немає: зайві символи в рядку потрапили б і в озвучку.
+function isAccent(chunk) {
+  if (hasDigit(chunk)) return true;
+  const words = chunk.trim().split(/\s+/);
+  return words.length === 1 && words[0].replace(/[^\p{L}]/gu, '').length >= ACCENT_LETTERS;
+}
 
 function escapeText(t) { return t.replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}'); }
 
@@ -146,7 +157,8 @@ function slideEvents(line, startSec, endSec, windowSec) {
     const to = i === chunks.length - 1 ? endSec : Math.min(rawTo, endSec);
     if (to <= from) continue;
     const prev = i > 0 ? `{\\fs${PREV_SIZE}\\alpha${PREV_ALPHA}}${renderChunk(chunks[i - 1])}{\\r}\\N` : '';
-    const body = `{\\alpha&HFF&\\t(0,${FADE_IN_MS},\\alpha&H00&)}${renderChunk(chunks[i])}`;
+    const size = isAccent(chunks[i]) ? `\\fs${ACCENT_SIZE}` : '';
+    const body = `{${size}\\alpha&HFF&\\t(0,${FADE_IN_MS},\\alpha&H00&)}${renderChunk(chunks[i])}`;
     events.push({ from, to, text: `${prev}${body}` });
   }
   return events;
