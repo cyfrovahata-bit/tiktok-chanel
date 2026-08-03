@@ -3,7 +3,6 @@
 // [MIN_PHOTOS, MAX_PHOTOS] — кількість слайдів гнучка). Тут архів
 // розпаковується, а імена суворо звіряються — це БЕЗКОШТОВНИЙ захист від
 // того, що ШІ підсунув зайве/чуже фото (воно просто не назветься 1..N).
-// Змістову перевірку (безпечні зони, відповідність слайду) робить vision.js.
 import { execFile } from 'node:child_process';
 import { mkdtemp, readdir, writeFile, readFile } from 'node:fs/promises';
 import os from 'node:os';

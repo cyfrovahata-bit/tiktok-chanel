@@ -29,7 +29,7 @@ async function call(method, payload = {}) {
   return data.result;
 }
 
-// timeout=0 — миттєва відповідь (потрібно старому скрипту check.js, який живе
+// timeout=0 — миттєва відповідь (лишилося від старого конвеєра, який жив
 // лічені секунди). Довгоживучому серверу вигідніше довге опитування: Telegram
 // тримає з'єднання й віддає оновлення щойно вони з'являються.
 export function getUpdates(offset, timeout = 0) {
