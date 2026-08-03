@@ -164,9 +164,10 @@ function slideEvents(line, startSec, endSec, windowSec) {
   return events;
 }
 
-// Alignment 2 — низ по центру; MarginV 620 піднімає текст у нижню третину
-// (у зразку власника напис стоїть приблизно на 60–65 % висоти, а не вгорі).
-// Верх кадру лишається вільним: там UI TikTok.
+// Alignment 8 — верх по центру, MarginV 250. Текст лишається ВГОРІ, хоч у
+// зразку власника він стояв нижче центру: у наших кадрах головний об'єкт
+// малюється знизу або по центру (це вимога промту генерації фото — «верхні
+// 40 % кадру візуально спокійні»), тож напис унизу перекривав би сам сюжет.
 const HEADER = `[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -176,7 +177,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,Oswald,104,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,1,0,1,6,0,2,120,120,620,1
+Style: Cap,Oswald,104,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,1,0,1,6,0,8,120,120,250,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
