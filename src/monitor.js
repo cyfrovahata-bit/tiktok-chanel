@@ -162,10 +162,24 @@ export async function watchStages() {
   const [items, seen] = await Promise.all([readAllItems(), readNotices()]);
   let changed = false;
   let announced = 0;
+
+  // ChatGPT інколи створює два рядки з ОДНАКОВИМ ID (два паралельні запуски в
+  // ту саму хвилину: кожен прочитав таблицю до того, як інший записав рядок).
+  // Пам'ять оголошених статусів лежить за ID, тож такі рядки щопроходу
+  // перезаписували стан один одного: NEW → DONE → знову «NEW не оголошено» —
+  // і «Тема на сьогодні» летіла в Telegram кожні три хвилини без кінця.
+  // Для дублікатів ключем стає ID + номер рядка; для решти ключ незмінний,
+  // щоб деплой не перечитав усю таблицю як нову.
+  const perId = new Map();
+  for (const it of items) if (it.id) perId.set(it.id, (perId.get(it.id) ?? 0) + 1);
+  const keyOf = (item) => (perId.get(item.id) > 1 ? `${item.id}#${item.rowNumber}` : item.id);
+
   for (const item of items) {
-    if (!item.id || seen[item.id] === item.status) continue;
-    const first = seen[item.id] === undefined;
-    seen[item.id] = item.status;
+    if (!item.id) continue;
+    const key = keyOf(item);
+    if (seen[key] === item.status) continue;
+    const first = seen[key] === undefined;
+    seen[key] = item.status;
     changed = true;
     // Рядки, які вже існували до появи цього спостерігача, не оголошуємо:
     // інакше перший запуск вивалив би в чат усю історію таблиці.
@@ -173,6 +187,24 @@ export async function watchStages() {
     const text = stageMessage(item);
     if (text) { await notify(text); announced++; }
   }
+
+  // Про сам дубль повідомляємо один раз: далі рядки живуть окремо, але
+  // однакові ID зіпсують іменування MP4 на Drive (файл зветься за ID, і
+  // другий ролик перезапише перший), тож це треба виправити руками.
+  for (const [id, count] of perId) {
+    if (count < 2) continue;
+    const key = `dupe:${id}`;
+    if (seen[key] === String(count)) continue;
+    seen[key] = String(count);
+    changed = true;
+    await notify(
+      `⚠️ У таблиці ${count} рядки з однаковим ID «${id}».\n\n`
+      + 'Заміни ID в одному з них (напр. додай «-2»): за ID називається файл '
+      + 'відео на Drive, тож другий ролик перезапише перший.',
+    );
+    announced++;
+  }
+
   if (changed) await writeNotices(seen);
   watchState = { ...watchState, lastError: null, announced };
   return announced;
