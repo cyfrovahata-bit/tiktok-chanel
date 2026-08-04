@@ -3,8 +3,8 @@
 //
 // Поведінка (перероблено за зразком, який дав власник):
 //  • рядок слайда ріжеться на ФРАГМЕНТИ по 1–3 слова;
-//  • на екрані одночасно максимум два: попередній — дрібніший і приглушений,
-//    поточний — великий і яскравий;
+//  • на екрані одночасно ЛИШЕ ОДИН фрагмент — попередній повністю зникає;
+//  • зміна плавна: фрагмент проявляється й згасає, а не підставляється ривком;
 //  • фрагменти ЗМІНЮЮТЬ одне одного синхронно з мовленням, а не накопичуються.
 //
 // Навіщо. Раніше весь рядок висів у кадрі до кінця слайда, тож репліка мусила
@@ -20,7 +20,7 @@ import { slideOffsets, FADE_SECONDS, JCUT_SECONDS } from './montage.js';
 
 // Хвіст у кінці слайда, коли остання фраза вже на екрані (= SLIDE_PAD у tts.js).
 const PAD_APPROX = 0.5;
-const FADE_IN_MS = 90;          // поява фрагмента
+const FADE_MS = 130;            // стеля тривалості проявлення/згасання фрагмента
 const MAX_CHUNK_WORDS = 3;      // більше трьох слів на екран не пускаємо
 const LONG_WORD = 11;           // довге слово показуємо саме
 const SHORT_WORD = 5;           // з коротких можна зібрати трійку
@@ -96,8 +96,6 @@ function assTime(sec) {
 
 const GOLD = '&H0000D7FF&'; // золотий (ASS = &HAABBGGRR)
 const WHITE = '&H00FFFFFF&';
-const PREV_SIZE = 62;       // кегль попереднього (згасаючого) фрагмента
-const PREV_ALPHA = '&H90&'; // його прозорість
 const ACCENT_SIZE = 138;    // кегль акцентного фрагмента (базовий — у стилі Cap)
 const ACCENT_LETTERS = 8;   // від скількох літер самостійне слово вважаємо акцентом
 
@@ -135,8 +133,7 @@ function weight(chunk) {
   return Math.max(1, chunk.replace(/\s+/g, '').length);
 }
 
-// Події одного слайда: по одній на фрагмент. Кожна показує попередній
-// фрагмент (дрібно, приглушено) над поточним (великим і яскравим).
+// Події одного слайда: по одній на фрагмент, по одному фрагменту на екрані.
 function slideEvents(line, startSec, endSec, windowSec) {
   const words = String(line).trim().split(/\s+/).filter(Boolean);
   const chunks = chunkAtoms(atomize(words)).map(stripTrailingPunct).filter(Boolean);
@@ -156,10 +153,12 @@ function slideEvents(line, startSec, endSec, windowSec) {
     const rawTo = startSec + Math.max(0, (windowSec * cum) / totalWeight - shift);
     const to = i === chunks.length - 1 ? endSec : Math.min(rawTo, endSec);
     if (to <= from) continue;
-    const prev = i > 0 ? `{\\fs${PREV_SIZE}\\alpha${PREV_ALPHA}}${renderChunk(chunks[i - 1])}{\\r}\\N` : '';
+    // Плавна зміна: фрагмент проявляється й згасає (\fad), а не підставляється
+    // ривком. Тривалість фейду прив'язана до самого фрагмента — на короткому
+    // фіксовані 120 мс з'їли б половину показу й текст блимав би.
+    const fade = Math.max(60, Math.min(FADE_MS, Math.round((to - from) * 1000 * 0.22)));
     const size = isAccent(chunks[i]) ? `\\fs${ACCENT_SIZE}` : '';
-    const body = `{${size}\\alpha&HFF&\\t(0,${FADE_IN_MS},\\alpha&H00&)}${renderChunk(chunks[i])}`;
-    events.push({ from, to, text: `${prev}${body}` });
+    events.push({ from, to, text: `{\\fad(${fade},${fade})${size}}${renderChunk(chunks[i])}` });
   }
   return events;
 }
