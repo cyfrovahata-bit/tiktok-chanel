@@ -186,6 +186,16 @@
       background: color-mix(in srgb, var(--muted) 15%, transparent); color: var(--text);
     }
     .own-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+    /* Розклад публікацій: така сама згорнута смужка, як «Свій сюжет» */
+    .sched-row { display: flex; align-items: baseline; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+    .sched-row:last-child { border-bottom: 0; }
+    .sched-name { font-size: 13.5px; font-weight: 600; min-width: 82px; }
+    .sched-hours { font-size: 13px; color: var(--muted); flex: 1; }
+    .sched-hours b { font-weight: 700; color: var(--text); }
+    .sched-hours .done { color: #2ecc71; font-weight: 700; }
+    .sched-tag { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; }
+    .sched-note { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
   </style>
 </head>
 <body>
@@ -217,6 +227,9 @@
       <button class="btn primary" id="ownSend">Надіслати</button>
     </div>
   </div>
+
+  <button class="own-toggle" id="schedToggle">🗓 Розклад публікацій</button>
+  <div class="own-panel" id="schedPanel"><div class="sched-note">Завантажую…</div></div>
 
   <main id="app">
     <div class="skeleton"></div>
@@ -705,6 +718,42 @@
     $('#ownToggle').addEventListener('click', () => {
       haptic();
       $('#ownPanel').classList.toggle('open');
+    });
+
+    // Розклад публікацій. Свідомо згорнутий і підвантажується лише при
+    // відкритті: це довідка, а не робочий екран, і смикати Drive заради неї
+    // на кожному оновленні черги не варто.
+    async function loadSchedule() {
+      const box = $('#schedPanel');
+      try {
+        const data = await fetch('/api/schedule').then((r) => r.json());
+        if (data.error) throw new Error(data.error);
+        if (!data.platforms.length) {
+          box.innerHTML = '<div class="sched-note">Жодної платформи не ввімкнено.</div>';
+          return;
+        }
+        // Година зеленим — уже відпрацювала сьогодні, жирним — найближча.
+        box.innerHTML = data.platforms.map((p) => {
+          const hours = p.hours.map((h, i) => {
+            const label = String(h).padStart(2, '0') + ':00';
+            if (i < p.done) return `<span class="done">${label} ✓</span>`;
+            if (h === p.next) return `<b>${label}</b>`;
+            return label;
+          }).join(' · ');
+          const tag = p.manual ? '<span class="sched-tag">вручну</span>' : '';
+          return `<div class="sched-row"><span class="sched-name">${esc(p.name)}</span>`
+            + `<span class="sched-hours">${hours || '—'}</span>${tag}</div>`;
+        }).join('')
+          + '<p class="sched-note">Зеленим — уже опубліковано сьогодні, жирним — найближче вікно. '
+          + 'Кожне вікно живе дві години. Facebook публікується вручну: бот лише нагадує.</p>';
+      } catch (e) {
+        box.innerHTML = `<div class="sched-note">Не вдалося завантажити розклад: ${esc(e.message)}</div>`;
+      }
+    }
+    $('#schedToggle').addEventListener('click', () => {
+      haptic();
+      const open = $('#schedPanel').classList.toggle('open');
+      if (open) loadSchedule();
     });
     $('#ownPick').addEventListener('click', () => $('#ownPhotos').click());
     $('#ownPhotos').addEventListener('change', (e) => {

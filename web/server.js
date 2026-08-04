@@ -18,13 +18,14 @@ import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-promp
 import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoFolderId, deleteVideo, remuxVideoToSpec } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
 import { forgetNotice } from '../src/notices.js';
-import { nextDailyTimes } from '../src/kyiv.js';
+import { nextDailyTimes, kyivToday, kyivMinutes } from '../src/kyiv.js';
 import { photoSchedule } from '../src/photo-plan.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { createSubmission, addPhoto, submitOwn, deleteOwnFolder } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty } from '../src/autopublish.js';
+import { availablePlatforms } from '../src/publish.js';
 import { tiktokConfigured, consentUrl as tiktokConsentUrl, exchangeCode as tiktokExchangeCode, redirectUri as tiktokRedirectUri, accessToken as tiktokAccessToken, creatorInfo as tiktokCreatorInfo } from '../src/tiktok.js';
 import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
@@ -622,6 +623,55 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && pathname === '/api/comments') {
       try {
         return json(res, 200, await checkAll());
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
+    // Розклад публікацій по платформах + що з нього вже відпрацювало сьогодні.
+    // Мінідодаток показує це згорнутим блоком: власник хоче бачити картину дня,
+    // не гортаючи чергу.
+    //
+    // «Сьогодні опубліковано» рахуємо за appProperties самого MP4
+    // (<платформа>PublishedAt) — це єдине надійне джерело: таблиця про
+    // автопублікацію нічого не знає, там дата з'являється лише після ручного
+    // натискання «Опубліковано».
+    if (req.method === 'GET' && pathname === '/api/schedule') {
+      try {
+        const today = kyivToday();
+        const nowMinutes = kyivMinutes();
+        const files = await listVideoFiles().catch(() => new Map());
+        const doneToday = {};
+        for (const file of files.values()) {
+          const props = file.appProperties || {};
+          for (const [key, value] of Object.entries(props)) {
+            const match = /^(\w+)PublishedAt$/.exec(key);
+            if (!match || !value) continue;
+            // ISO-мітка в UTC; порівнюємо саме київську дату, інакше вечірні
+            // пости після 21:00 UTC рахувалися б завтрашніми.
+            if (kyivToday(new Date(value)) !== today) continue;
+            doneToday[match[1]] = (doneToday[match[1]] ?? 0) + 1;
+          }
+        }
+        // Facebook свідомо не в автопублікації (див. коментар в autopublish.js):
+        // бот лише нагадує, а публікує власник руками.
+        const manual = new Set(['facebook']);
+        const platforms = availablePlatforms()
+          .filter((p) => p.enabled || manual.has(p.id))
+          .map((p) => {
+            const hours = platformHours(p.id);
+            const passed = hours.filter((h) => h * 60 <= nowMinutes).length;
+            return {
+              id: p.id,
+              name: p.name,
+              manual: manual.has(p.id),
+              hours,
+              done: doneToday[p.id] ?? 0,
+              passed,
+              next: hours.find((h) => h * 60 > nowMinutes) ?? null,
+            };
+          });
+        return json(res, 200, { today, platforms });
       } catch (error) {
         return json(res, 200, { error: error.message });
       }
