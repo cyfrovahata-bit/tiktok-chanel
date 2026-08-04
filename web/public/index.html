@@ -734,9 +734,9 @@
         }
         // Година зеленим — уже відпрацювала сьогодні, жирним — найближча.
         box.innerHTML = data.platforms.map((p) => {
-          const hours = p.hours.map((h, i) => {
+          const hours = p.hours.map((h) => {
             const label = String(h).padStart(2, '0') + ':00';
-            if (i < p.done) return `<span class="done">${label} ✓</span>`;
+            if (p.done.includes(h)) return `<span class="done">${label} ✓</span>`;
             if (h === p.next) return `<b>${label}</b>`;
             return label;
           }).join(' · ');

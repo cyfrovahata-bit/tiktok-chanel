@@ -641,16 +641,20 @@ const server = http.createServer(async (req, res) => {
         const today = kyivToday();
         const nowMinutes = kyivMinutes();
         const files = await listVideoFiles().catch(() => new Map());
-        const doneToday = {};
+        // Година кожної сьогоднішньої публікації, по платформах. Рахувати
+        // КІЛЬКІСТЬ постів і гасити стільки ж перших вікон не можна: вікно
+        // легко пропускається (4 серпня Instagram вийшов об 11:00 і 16:00, а
+        // 19:00 лишилося порожнім), і тоді позначки з'їхали б.
+        const doneHours = {};
         for (const file of files.values()) {
-          const props = file.appProperties || {};
-          for (const [key, value] of Object.entries(props)) {
+          for (const [key, value] of Object.entries(file.appProperties || {})) {
             const match = /^(\w+)PublishedAt$/.exec(key);
             if (!match || !value) continue;
+            const at = new Date(value);
             // ISO-мітка в UTC; порівнюємо саме київську дату, інакше вечірні
             // пости після 21:00 UTC рахувалися б завтрашніми.
-            if (kyivToday(new Date(value)) !== today) continue;
-            doneToday[match[1]] = (doneToday[match[1]] ?? 0) + 1;
+            if (Number.isNaN(at.getTime()) || kyivToday(at) !== today) continue;
+            (doneHours[match[1]] ??= []).push(Math.floor(kyivMinutes(at) / 60));
           }
         }
         // Facebook свідомо не в автопублікації (див. коментар в autopublish.js):
@@ -660,14 +664,15 @@ const server = http.createServer(async (req, res) => {
           .filter((p) => p.enabled || manual.has(p.id))
           .map((p) => {
             const hours = platformHours(p.id);
-            const passed = hours.filter((h) => h * 60 <= nowMinutes).length;
+            const posted = doneHours[p.id] ?? [];
             return {
               id: p.id,
               name: p.name,
               manual: manual.has(p.id),
               hours,
-              done: doneToday[p.id] ?? 0,
-              passed,
+              // Слот живе дві години, тож пост о 16:01 і о 17:40 однаково
+              // належать вікну 16:00.
+              done: hours.filter((h) => posted.some((x) => x === h || x === h + 1)),
               next: hours.find((h) => h * 60 > nowMinutes) ?? null,
             };
           });
