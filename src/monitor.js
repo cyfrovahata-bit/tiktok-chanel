@@ -22,7 +22,7 @@
 import { mkdtemp, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { listDoneItems, readAllItems } from './sheets.js';
+import { listDoneItems, readAllItems, renameRowId } from './sheets.js';
 import { downloadArchive } from './drive.js';
 import { readNotices, writeNotices } from './notices.js';
 import { listVideos, uploadVideo, videoName, videoFolderId } from './videos.js';
@@ -154,6 +154,50 @@ function stageMessage(item) {
   return null;
 }
 
+// Розводить дублікати ID у таблиці. ChatGPT будує ID із часу створення
+// (AUTO-РРРРММДД-ГГХХ), тож два паралельні запуски в ту саму хвилину дають
+// однаковий — кожен прочитав таблицю до того, як інший записав рядок. За ID
+// зветься MP4 на Drive, тому другий ролик мовчки перезаписав би перший.
+//
+// ID лишає той рядок, у якого вже є (або от-от буде) відео — тобто DONE чи
+// PUBLISHED, а не просто верхній. За старим ID у нього вже може лежати MP4 і
+// пам'ять автопублікації в appProperties, і перейменування відв'язало б рядок
+// від власного ролика. Перейменовуємо натомість рядки без відео (NEW, ERROR),
+// дописуючи -2, -3. Якщо готове відео мають ОБИДВА рядки — не чіпаємо жоден,
+// лише попереджаємо: тут уже потрібне рішення власника.
+async function splitDuplicateIds(items) {
+  const rowsById = new Map();
+  for (const it of items) {
+    if (!it.id) continue;
+    if (!rowsById.has(it.id)) rowsById.set(it.id, []);
+    rowsById.get(it.id).push(it);
+  }
+  const taken = new Set(rowsById.keys());
+  const renamed = [];
+  const kept = [];
+  const hasVideo = (it) => it.status === 'DONE' || it.status === 'PUBLISHED';
+  for (const [id, rows] of rowsById) {
+    if (rows.length < 2) continue;
+    const keeper = rows.find(hasVideo) ?? rows[0];
+    for (const item of rows) {
+      if (item === keeper) continue;
+      if (hasVideo(item)) { kept.push({ id, item }); continue; }
+      let suffix = 2;
+      while (taken.has(`${id}-${suffix}`)) suffix++;
+      const newId = `${id}-${suffix}`;
+      try {
+        await renameRowId(item.rowNumber, newId);
+        taken.add(newId);
+        item.id = newId;
+        renamed.push({ from: id, to: newId, row: item.rowNumber, theme: item.theme });
+      } catch (error) {
+        console.error(`Не вдалося перейменувати рядок ${item.rowNumber}:`, error.message);
+      }
+    }
+  }
+  return { renamed, kept };
+}
+
 // Один прохід спостерігача: оголошує нові NEW і ERROR. Перехід у DONE
 // оголошує сам конвеєр монтажу («знайшов тему» → «відео згенеровано»),
 // тому тут DONE лише запам'ятовуємо, щоб не сказати про нього двічі.
@@ -162,6 +206,31 @@ export async function watchStages() {
   const [items, seen] = await Promise.all([readAllItems(), readNotices()]);
   let changed = false;
   let announced = 0;
+
+  // Спершу розводимо однакові ID — далі рядки вже унікальні, і решта проходу
+  // працює як завжди.
+  const { renamed, kept } = await splitDuplicateIds(items);
+  for (const r of renamed) {
+    await notify(
+      `🔀 У таблиці було два рядки з ID «${r.from}» — за ним зветься файл відео `
+      + `на Drive, тож другий ролик перезаписав би перший.\n\n`
+      + `Рядок ${r.row} перейменовано на «${r.to}».`
+      + (r.theme ? `\nТема: ${r.theme}` : ''),
+    );
+    announced++;
+  }
+  for (const k of kept) {
+    const key = `dupe:${k.id}#${k.item.rowNumber}`;
+    if (seen[key]) continue;
+    seen[key] = k.item.status;
+    changed = true;
+    await notify(
+      `⚠️ Рядок ${k.item.rowNumber} має той самий ID «${k.id}», що й рядок вище, `
+      + `але вже у статусі ${k.item.status} — сам я його не чіпаю, бо за старим ID `
+      + 'може лежати готове відео. Розведи ID вручну, якщо ролик іще потрібен.',
+    );
+    announced++;
+  }
 
   // ChatGPT інколи створює два рядки з ОДНАКОВИМ ID (два паралельні запуски в
   // ту саму хвилину: кожен прочитав таблицю до того, як інший записав рядок).
@@ -186,23 +255,6 @@ export async function watchStages() {
     if (first && item.status !== 'NEW') continue;
     const text = stageMessage(item);
     if (text) { await notify(text); announced++; }
-  }
-
-  // Про сам дубль повідомляємо один раз: далі рядки живуть окремо, але
-  // однакові ID зіпсують іменування MP4 на Drive (файл зветься за ID, і
-  // другий ролик перезапише перший), тож це треба виправити руками.
-  for (const [id, count] of perId) {
-    if (count < 2) continue;
-    const key = `dupe:${id}`;
-    if (seen[key] === String(count)) continue;
-    seen[key] = String(count);
-    changed = true;
-    await notify(
-      `⚠️ У таблиці ${count} рядки з однаковим ID «${id}».\n\n`
-      + 'Заміни ID в одному з них (напр. додай «-2»): за ID називається файл '
-      + 'відео на Drive, тож другий ролик перезапише перший.',
-    );
-    announced++;
   }
 
   if (changed) await writeNotices(seen);

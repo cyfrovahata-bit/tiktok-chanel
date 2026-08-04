@@ -131,6 +131,23 @@ export async function markPublished(id, when = new Date()) {
   return { rowNumber: item.rowNumber, date, duplicates };
 }
 
+// Переписує ID у колонці A конкретного рядка. Потрібно лише для розведення
+// дублікатів: ChatGPT будує ID із часу створення, і два паралельні запуски в
+// ту саму хвилину дають однаковий. Небезпечно це тим, що за ID зветься MP4 на
+// Drive — другий ролик перезаписав би перший.
+//
+// Свідомо приймає НОМЕР РЯДКА, а не старий ID: у тому й річ, що ID неунікальний
+// і find() по ньому взяв би не той рядок.
+export async function renameRowId(rowNumber, newId) {
+  await api().spreadsheets.values.update({
+    spreadsheetId: SHEET_ID,
+    range: `${TAB}!A${rowNumber}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[newId]] },
+  });
+  return { rowNumber, newId };
+}
+
 // Рядки, які ChatGPT уже підготував, але ще не малював (статус NEW). Саме їх
 // власник може виправити в мінідодатку до 15:00/20:00.
 export async function listNewItems() {
