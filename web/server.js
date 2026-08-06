@@ -30,7 +30,7 @@ import { tiktokConfigured, consentUrl as tiktokConsentUrl, exchangeCode as tikto
 import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, youtubeConsentUrl, exchangeCode, tokenScopes, youtubeTokenScopes, youtubeTokenSource } from '../src/google-auth.js';
-import { channelInfo } from '../src/youtube.js';
+import { channelInfo, channelVideoStats } from '../src/youtube.js';
 import { registerPlatform, startCommentWatcher, checkAll, pendingSummary, cleanupStale, rethinkSkipped } from '../src/comment-flow.js';
 import { youtubeAdapter } from '../src/yt-comments.js';
 import { facebookAdapter, instagramAdapter } from '../src/meta-comments.js';
@@ -968,6 +968,17 @@ const server = http.createServer(async (req, res) => {
     // Чи бачить наш токен канал YouTube і чи вистачає йому прав. Найчастіша
     // причина помилки — refresh-токен, виданий до додавання скоупу youtube:
     // права зашиті в токен, тож потрібна повторна згода через /oauth/start.
+    // Статистика всіх роликів каналу одним запитом — щоб порівнювати їх між
+    // собою, а не переглядати по одному в Studio.
+    if (req.method === 'GET' && pathname === '/api/youtube/stats') {
+      try {
+        const videos = await channelVideoStats();
+        return json(res, 200, { count: videos.length, videos });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
     if (req.method === 'GET' && pathname === '/api/youtube/check') {
       const out = {
         enabled: process.env.ENABLE_YOUTUBE === '1',

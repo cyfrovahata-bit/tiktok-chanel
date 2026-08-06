@@ -102,6 +102,57 @@ export async function publishYouTubeShort({ videoBuffer, title, description }, o
   };
 }
 
+// Публічна статистика власних роликів: перегляди, лайки, коментарі, довжина.
+// Вистачає скоупа youtube.readonly, який у токена вже є, тож повторна згода
+// не потрібна. Глибші метрики — утримання, покази, CTR, джерела трафіку —
+// живуть в окремому YouTube Analytics API і вимагають скоупа
+// yt-analytics.readonly; він доданий до YOUTUBE_SCOPES, але почне діяти лише
+// після повторного проходження /oauth/youtube/start (права зашиті в токен).
+//
+// Навіщо це тут. Порівнювати ролики між собою на око неможливо: 61 ролик,
+// різні теми, різні дати. Один запит дає таблицю, на якій видно, що саме
+// корелює з переглядами — тема, довжина, час публікації.
+export async function channelVideoStats(options = {}) {
+  const client = options.client || youtube();
+  const channels = await client.channels.list({ part: ['contentDetails'], mine: true });
+  const uploads = channels.data?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploads) return [];
+
+  const ids = [];
+  let pageToken;
+  do {
+    const page = await client.playlistItems.list({
+      part: ['contentDetails'], playlistId: uploads, maxResults: 50, pageToken,
+    });
+    for (const item of page.data?.items ?? []) {
+      if (item.contentDetails?.videoId) ids.push(item.contentDetails.videoId);
+    }
+    pageToken = page.data?.nextPageToken;
+  } while (pageToken && ids.length < 500);
+
+  const out = [];
+  // videos.list бере не більше 50 id за раз.
+  for (let i = 0; i < ids.length; i += 50) {
+    const page = await client.videos.list({
+      part: ['snippet', 'statistics', 'contentDetails'], id: ids.slice(i, i + 50),
+    });
+    for (const v of page.data?.items ?? []) {
+      out.push({
+        id: v.id,
+        title: v.snippet?.title ?? null,
+        publishedAt: v.snippet?.publishedAt ?? null,
+        duration: v.contentDetails?.duration ?? null,
+        privacy: v.status?.privacyStatus ?? null,
+        views: Number(v.statistics?.viewCount ?? 0),
+        likes: Number(v.statistics?.likeCount ?? 0),
+        comments: Number(v.statistics?.commentCount ?? 0),
+      });
+    }
+  }
+  out.sort((a, b) => String(b.publishedAt).localeCompare(String(a.publishedAt)));
+  return out;
+}
+
 // Діагностика: чий канал бачить наш токен. Без цього незрозуміло, куди саме
 // поллються ролики, якщо в акаунті кілька каналів.
 export async function channelInfo(options = {}) {

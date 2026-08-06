@@ -31,6 +31,11 @@ const YOUTUBE_SCOPES = [
   // force-ssl дає повне керування каналом, тож екран згоди виглядає страшніше,
   // ніж хотілося б, але без нього comments.insert не працює.
   'https://www.googleapis.com/auth/youtube.force-ssl',
+  // Аналітика: утримання, покази, CTR, джерела трафіку. Data API цього не
+  // віддає — там лише лічильники переглядів і лайків. Скоуп лише на читання.
+  // Права зашиті в токен, тож він почне діяти після повторної згоди
+  // через /oauth/youtube/start.
+  'https://www.googleapis.com/auth/yt-analytics.readonly',
 ];
 
 let cached = null;
