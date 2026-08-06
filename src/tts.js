@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { slideOffsets, FADE_SECONDS, JCUT_SECONDS } from './montage.js';
 import { numbersToWords } from './num2words-uk.js';
+import { sendMessage, ownerChatId } from './telegram.js';
 
 // Виклик передає РЕАЛЬНУ довжину відео (slideshowDuration під фактичну
 // кількість слайдів). Голос має закінчуватися за END_MARGIN секунд до кінця
@@ -133,6 +134,25 @@ function matchCase(replacement, original) {
   return replacement;
 }
 
+// Падіння основного рушія раніше жило лише в консолі Railway: відео виходило,
+// публікувалося за розкладом, усе було «зелене», а власник помічав підміну
+// голосу на слух через кілька роликів. Тепер про це приходить повідомлення —
+// не частіше разу на 6 годин, бо в межах одного відео рушій викликається на
+// кожне речення й інакше це був би спам.
+const FALLBACK_WARN_MS = 6 * 60 * 60 * 1000;
+let lastFallbackWarn = 0;
+
+async function warnFallback(failed, used, reason) {
+  if (Date.now() - lastFallbackWarn < FALLBACK_WARN_MS) return;
+  lastFallbackWarn = Date.now();
+  const chatId = ownerChatId();
+  if (!chatId) return;
+  await sendMessage(
+    chatId,
+    `⚠️ Озвучка: ${failed} не відповів, читає ${used} — голос у нових роликах буде інший.\n\n${reason}`,
+  ).catch(() => {});
+}
+
 // Прогін рушіїв із фолбеком (без підгонки часу).
 async function runEngines(text, outputPath, targetSeconds) {
   const primary = ENGINES[process.env.TTS_ENGINE] ? process.env.TTS_ENGINE : 'openai';
@@ -141,6 +161,7 @@ async function runEngines(text, outputPath, targetSeconds) {
   for (const name of order) {
     try {
       await ENGINES[name](text, outputPath, targetSeconds);
+      if (name !== primary) await warnFallback(primary, name, lastError?.message ?? '');
       return;
     } catch (error) {
       lastError = error;
@@ -352,6 +373,22 @@ async function fitToVideo(outputPath, targetSeconds = DEFAULT_TARGET_SECONDS) {
 // ([excited], [whispers]...) у режимі Creative (stability 0.0): максимум
 // живої гри голосом. Для старої Multilingual v2 — класичні налаштування
 // розповідної начитки.
+// Підказка про ФОРМУ ключа для логів — без самого ключа. ElevenLabs на
+// зіпсоване значення відповідає лише «має починатися з sk_», не кажучи, що там
+// насправді: лапка, пробіл чи ключ від іншого сервісу. Три перші символи
+// секретом не є, а разом із довжиною одразу показують, у чому річ.
+function keyShape(key) {
+  const s = String(key);
+  const problems = [];
+  if (/^\s/.test(s)) problems.push('пробіл на початку');
+  if (/\s$/.test(s)) problems.push('пробіл або перенос у кінці');
+  if (/^["']/.test(s)) problems.push('лапка на початку');
+  if (/["']$/.test(s)) problems.push('лапка в кінці');
+  if (s.startsWith('sk-')) problems.push('це схоже на ключ OpenAI (sk-), а не ElevenLabs (sk_)');
+  const note = problems.length ? `; ${problems.join('; ')}` : '';
+  return ` [ключ: ${s.length} символів, починається з "${s.slice(0, 3)}"${note}]`;
+}
+
 async function elevenLabsTts(text, outputPath, targetSeconds = DEFAULT_TARGET_SECONDS, retry) {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) throw new Error('Не задано ELEVENLABS_API_KEY');
@@ -376,7 +413,7 @@ async function elevenLabsTts(text, outputPath, targetSeconds = DEFAULT_TARGET_SE
     },
   );
   if (!response.ok) {
-    throw new Error(`ElevenLabs: HTTP ${response.status} ${await response.text()}`);
+    throw new Error(`ElevenLabs: HTTP ${response.status} ${await response.text()}${keyShape(key)}`);
   }
   await writeFile(outputPath, Buffer.from(await response.arrayBuffer()));
 
