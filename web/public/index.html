@@ -228,6 +228,20 @@
     </div>
   </div>
 
+  <button class="own-toggle" id="surnameToggle">🧬 Замовлене прізвище</button>
+  <div class="own-panel" id="surnamePanel">
+    <p class="own-hint">
+      Глядач замовив розбір свого прізвища — впиши його сюди. Рядок стане
+      першим у черзі: замовлення мають пріоритет над темами з ротації.
+      Рідкісне прізвище теж годиться, перевірку поширеності для замовлень
+      вимкнено.
+    </p>
+    <input class="notes" id="surnameInput" type="text" placeholder="Шкребтан" />
+    <div class="own-actions">
+      <button class="btn primary" id="surnameSend">Замовити ролик</button>
+    </div>
+  </div>
+
   <button class="own-toggle" id="schedToggle">🗓 Розклад публікацій</button>
   <div class="own-panel" id="schedPanel"><div class="sched-note">Завантажую…</div></div>
 
@@ -750,6 +764,35 @@
         box.innerHTML = `<div class="sched-note">Не вдалося завантажити розклад: ${esc(e.message)}</div>`;
       }
     }
+    $('#surnameToggle').addEventListener('click', () => {
+      $('#surnamePanel').classList.toggle('open');
+    });
+
+    $('#surnameSend').addEventListener('click', async () => {
+      const btn = $('#surnameSend');
+      const surname = $('#surnameInput').value.trim();
+      if (!surname) { toast('Впиши прізвище'); return; }
+      const old = btn.textContent;
+      btn.disabled = true;
+      try {
+        btn.textContent = 'Записую…';
+        const out = await fetch('/api/own/surname', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ initData, surname }),
+        }).then((r) => r.json());
+        if (out.error) throw new Error(out.error);
+        $('#surnameInput').value = '';
+        $('#surnamePanel').classList.remove('open');
+        toast(`Замовлено: ${out.surname}`);
+        load();
+      } catch (e) {
+        toast(e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = old;
+      }
+    });
+
     $('#schedToggle').addEventListener('click', () => {
       haptic();
       const open = $('#schedPanel').classList.toggle('open');

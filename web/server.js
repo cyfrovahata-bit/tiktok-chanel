@@ -22,7 +22,7 @@ import { nextDailyTimes, kyivToday, kyivMinutes } from '../src/kyiv.js';
 import { photoSchedule } from '../src/photo-plan.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
-import { createSubmission, addPhoto, submitOwn, deleteOwnFolder } from '../src/own.js';
+import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty } from '../src/autopublish.js';
 import { availablePlatforms } from '../src/publish.js';
@@ -838,6 +838,18 @@ const server = http.createServer(async (req, res) => {
             + 'розіб\'є текст на слайди й перевірить факти.\n'
             + '2. Перечитай і поправ тексти тут, у мінідодатку.\n'
             + '3. Аж потім запускай промт малювання фото.',
+          ).catch(() => {});
+          return json(res, 200, out);
+        }
+        if (step === 'surname') {
+          const out = await submitSurname({ surname: body.surname });
+          cache.at = 0;
+          await sendMessage(
+            ownerChatId(),
+            `🧬 Замовлення прийнято: ${out.surname}\n`
+            + `Рядок ${out.id} у таблиці зі статусом NEW.\n\n`
+            + 'Наступний запуск завдання ChatGPT візьме його першим — '
+            + 'замовлення мають пріоритет над темами з ротації.',
           ).catch(() => {});
           return json(res, 200, out);
         }
