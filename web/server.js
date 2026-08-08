@@ -15,7 +15,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady, listNewItems, updateRowPrompt, deleteQueueRow, appendRejectedTheme, listRejectedThemes } from '../src/sheets.js';
 import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-prompt.js';
-import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoFolderId, deleteVideo, remuxVideoToSpec } from '../src/videos.js';
+import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoProps, videoFolderId, deleteVideo, remuxVideoToSpec } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
 import { forgetNotice } from '../src/notices.js';
 import { nextDailyTimes, kyivToday, kyivMinutes } from '../src/kyiv.js';
@@ -150,7 +150,7 @@ function publishSchedule(c, now = new Date()) {
   const pending = c.done
     .filter((it) => c.videos.has(videoName(it.id)))
     .map((it) => {
-      const props = c.files.get(videoName(it.id))?.appProperties || {};
+      const props = videoProps(c.files, it.id);
       return { id: it.id, need: new Set(wanted.filter((p) => !props[`${p}PostId`])) };
     })
     .filter((row) => row.need.size);
@@ -202,7 +202,7 @@ function queueFrom(c, now = new Date()) {
     .filter((it) => c.videos.has(videoName(it.id)))
     .reverse()
     .map((it) => {
-      const props = c.files.get(videoName(it.id))?.appProperties || {};
+      const props = videoProps(c.files, it.id);
       const autoPosted = POST_ID_KEYS.some((key) => props[key]);
       // Стан кожної платформи окремо. Без цього картка показувала єдиний
       // прапорець «опубліковано», який вмикався від першої ж платформи — і

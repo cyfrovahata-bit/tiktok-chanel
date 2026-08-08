@@ -96,6 +96,17 @@ export async function uploadVideo(id, localPath) {
   return res.data.id;
 }
 
+// Мітки публікації для одного ролика: те, що лежить на самому MP4, ПЛЮС те,
+// що збереглося в marker-файлі. Після «Перегенерувати» весь стан переїжджає в
+// marker (див. deleteVideo нижче), а новий MP4 народжується чистим — і
+// мінідодаток, який дивився лише на MP4, показував опублікований ролик як
+// неопублікований. Мітки з MP4 мають пріоритет: вони свіжіші.
+export function videoProps(files, id) {
+  const marker = files.get(autoPostMarkerName(id))?.appProperties || {};
+  const video = files.get(videoName(id))?.appProperties || {};
+  return { ...marker, ...video };
+}
+
 // Видаляє відео <ID>.mp4 з папки (щоб монітор згенерував його наново новим
 // кодом). Повертає true, якщо було що видаляти.
 export async function deleteVideo(id) {
