@@ -134,7 +134,11 @@ export async function channelVideoStats(options = {}) {
   // videos.list бере не більше 50 id за раз.
   for (let i = 0; i < ids.length; i += 50) {
     const page = await client.videos.list({
-      part: ['snippet', 'statistics', 'contentDetails'], id: ids.slice(i, i + 50),
+      // status обов'язковий: проєкт без аудиту YouTube API робить залиті через
+      // videos.insert ролики ПРИВАТНИМИ, і ззовні це видно лише тут. Без цього
+      // поля «0 переглядів» неможливо відрізнити від «ніхто не побачив».
+      part: ['snippet', 'statistics', 'contentDetails', 'status'],
+      id: ids.slice(i, i + 50),
     });
     for (const v of page.data?.items ?? []) {
       out.push({
