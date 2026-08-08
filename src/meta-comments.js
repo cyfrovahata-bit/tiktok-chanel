@@ -108,6 +108,9 @@ export async function fetchInstagramComments(options = {}) {
         id: c.id,
         text: c.text,
         author: c.username || 'глядач',
+        // mediaId потрібен, щоб знайти рядок таблиці за appProperties відео й
+        // дати моделі контекст ролика. permalink для цього не годиться.
+        mediaId: media.id || '',
         permalink: media.permalink || '',
         publishedAt: c.timestamp || '',
       });

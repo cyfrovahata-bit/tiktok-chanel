@@ -8,6 +8,9 @@ import { drive } from './drive.js';
 import { promptFolderId } from './kyiv.js';
 import { sendMessage, ownerChatId, answerCallbackQuery, editMessageReplyMarkup } from './telegram.js';
 import { chatOnce } from './openai.js';
+import { listVideoFiles } from './videos.js';
+import { readAllItems } from './sheets.js';
+import { parseSlideLines } from './queue-prompt.js';
 
 const FILE_NAME = 'comments.json';
 const KEEP = 400;
@@ -88,20 +91,94 @@ export async function writeState(state) {
   return doc;
 }
 
+// --- Про що був ролик --------------------------------------------------------
+//
+// Раніше модель бачила лише текст коментаря — і відповідала «дякую за думку»
+// навіть тоді, коли глядач докладно доповнював конкретний ролик. Тепер до
+// чернетки додається те, ПРО ЩО був допис: назва, тема і дослівні рядки, які
+// прозвучали в озвучці.
+//
+// Зв'язок «коментар → рядок таблиці» будується через appProperties MP4-файлу:
+// туди після публікації лягає ID допису на кожній платформі, а ім'я файлу —
+// це ID рядка черги.
+const POST_ID_PROP = { yt: 'youtubePostId', fb: 'facebookPostId', ig: 'instagramPostId' };
+const COMMENT_POST_FIELD = { yt: 'videoId', fb: 'postId', ig: 'mediaId' };
+
+// Facebook віддає ID допису то як «сторінка_допис», то самим хвостом, залежно
+// від ендпоінта. Порівнюємо і цілком, і за хвостом — інакше половина збігів
+// губиться на порожньому місці.
+function samePostId(a, b) {
+  const norm = (v) => String(v || '').trim();
+  const tail = (v) => norm(v).split('_').pop();
+  if (!norm(a) || !norm(b)) return false;
+  return norm(a) === norm(b) || tail(a) === tail(b);
+}
+
+// Індекс будується один раз на прохід: Drive і таблицю смикати на кожен
+// коментар було б марно.
+export async function loadPostIndex(options = {}) {
+  const files = options.listFiles ? await options.listFiles() : await listVideoFiles();
+  const items = options.listItems ? await options.listItems() : await readAllItems();
+  const byId = new Map(items.map((it) => [it.id, it]));
+  const posts = [];
+  for (const [name, file] of files) {
+    const rowId = String(name).replace(/\.mp4$/i, '');
+    const item = byId.get(rowId);
+    if (!item) continue;
+    posts.push({ props: file.appProperties || {}, item });
+  }
+  return posts;
+}
+
+export function findPost(index, platformKey, comment) {
+  const prop = POST_ID_PROP[platformKey];
+  const field = COMMENT_POST_FIELD[platformKey];
+  if (!prop || !field || !index?.length) return null;
+  const wanted = comment?.[field];
+  if (!wanted) return null;
+  const hit = index.find((p) => samePostId(p.props[prop], wanted));
+  if (!hit) return null;
+  const { item } = hit;
+  return {
+    title: item.title || item.theme || '',
+    theme: item.theme || '',
+    script: parseSlideLines(item.extra || ''),
+  };
+}
+
 // --- Чернетка ----------------------------------------------------------------
 
-export function draftPrompt(comment, platformLabel = '') {
+export function draftPrompt(comment, platformLabel = '', post = null) {
+  const context = post && (post.title || post.script?.length)
+    ? [
+      'ПРО ЩО БУВ РОЛИК — прочитай спершу це, глядач коментує саме його:',
+      post.title ? `Назва: ${post.title}` : null,
+      post.theme && post.theme !== post.title ? `Тема: ${post.theme}` : null,
+      post.script?.length ? 'Дослівний текст озвучки:' : null,
+      ...(post.script || []).map((line, i) => `${i + 1}. ${line}`),
+      '',
+    ].filter(Boolean)
+    : [];
+
   return [
-    'Ти — автор українського каналу коротких пізнавальних роликів «Чи Ви Знали?».',
+    'Ти — автор українського каналу коротких пізнавальних роликів.',
     `Напиши коротку відповідь на коментар глядача${platformLabel ? ` в ${platformLabel}` : ''}.`,
     '',
+    ...context,
     'Правила:',
-    '- українською, до 200 символів, тепло й по-людськи, без канцеляриту;',
+    '- українською, тепло й по-людськи, без канцеляриту;',
+    '- до 200 символів; якщо коментар довгий і змістовний — до 400;',
     '- без хештегів, без емодзі більше одного, без звертання «шановний»;',
     '- не вигадуй фактів: якщо коментар питає те, чого ти не знаєш напевно, чесно скажи;',
     '- на похвалу, подяку, короткий відгук чи саме емодзі — коротко подякуй;',
-    '- якщо глядач ділиться власним досвідом — відгукнись на нього, не переказуй ролик;',
-    '- якщо глядач вказує на помилку — подякуй за уточнення без виправдань;',
+    '- НЕ ПЕРЕКАЗУЙ РОЛИК: глядач щойно його подивився. Контекст вище потрібен',
+    '  тобі, щоб зрозуміти, про що мова, а не щоб повторювати його глядачеві;',
+    '- якщо глядач доповнює або уточнює ролик — назви КОНКРЕТНО, з чим саме',
+    '  погоджуєшся чи що дізнався нового. Загальне «дякую за думку» без згадки',
+    '  суті виглядає як автовідповідь і шкодить каналу більше за мовчання;',
+    '- якщо глядач каже про те, чого в ролику не було, — визнай пропуск прямо',
+    '  й без виправдань, не вдавай, що це там було;',
+    '- якщо глядач ділиться власним досвідом — відгукнись саме на його досвід;',
     `- ${SKIP} повертай ЛИШЕ у трьох випадках: образа, відверта провокація, спам чи реклама.`,
     '  У всіх інших випадках відповідай — навіть якщо в коментарі немає запитання;',
     '- поверни ЛИШЕ текст відповіді, без лапок і пояснень.',
@@ -113,7 +190,7 @@ export function draftPrompt(comment, platformLabel = '') {
 
 export async function draftReply(comment, options = {}) {
   const ask = options.chat || chatOnce;
-  const answer = String(await ask(draftPrompt(comment, options.platformLabel))).trim();
+  const answer = String(await ask(draftPrompt(comment, options.platformLabel, options.post))).trim();
   if (!answer || answer.toUpperCase().startsWith(SKIP)) return null;
   return answer.replace(/^["'«»]+|["'«»]+$/g, '').slice(0, 900);
 }
@@ -156,12 +233,26 @@ export async function checkPlatform(adapter, options = {}) {
   const notify = options.notifyFn || sendMessage;
   const chatId = options.chatId || ownerChatId();
 
+  // Індекс роликів вантажимо лише коли є на що відповідати, і один раз на
+  // прохід. Якщо Drive чи таблиця недоступні — не валимо весь прохід:
+  // відповідь без контексту гірша, але краща за відсутність відповіді.
+  let index = options.postIndex ?? null;
+  if (!index) {
+    try {
+      index = await loadPostIndex(options);
+    } catch (error) {
+      console.error(`[comments:${adapter.key}] контекст роликів:`, error.message);
+      index = [];
+    }
+  }
+
   // Найстаріші першими, щоб відповіді йшли в порядку появи коментарів.
   for (const comment of fresh.reverse().slice(0, MAX_PER_RUN)) {
     const key = `${adapter.key}:${comment.id}`;
     let draft = null;
     try {
-      draft = await draftReply(comment, { ...options, platformLabel: adapter.label });
+      const post = findPost(index, adapter.key, comment);
+      draft = await draftReply(comment, { ...options, platformLabel: adapter.label, post });
     } catch (error) {
       console.error(`[comments:${adapter.key}] чернетка:`, error.message);
       continue; // спробуємо наступного разу
