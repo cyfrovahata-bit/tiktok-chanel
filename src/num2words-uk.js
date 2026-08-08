@@ -87,6 +87,17 @@ function ordinalParts(value) {
   return null; // надто велике — краще лишити кількісним, ніж вигадувати форму
 }
 
+// «треть» — єдина основа в таблицях, що закінчується на «ь», і вона м'яка:
+// «третього» й «третьому» збираються прямо, а от «третьий» — ні, там потрібне
+// «третій». Тому перед твердим голосним «ь» замінюється на пару до нього.
+const SOFT_PAIR = { и: 'і', а: 'я', е: 'є', у: 'ю' };
+
+function joinOrdinal(stem, ending) {
+  if (!stem.endsWith('ь')) return `${stem}${ending}`;
+  const pair = SOFT_PAIR[ending[0]];
+  return pair ? `${stem.slice(0, -1)}${pair}${ending.slice(1)}` : `${stem}${ending}`;
+}
+
 // ending: 'ого' (родовий: «1986 року») або 'ому' (місцевий: «у 1986 році»).
 export function ordinalUkrainian(num, ending = 'ого') {
   const value = Math.trunc(Math.abs(Number(num)));
@@ -94,7 +105,24 @@ export function ordinalUkrainian(num, ending = 'ого') {
   const parts = ordinalParts(value);
   if (!parts || !parts.stem) return numberToUkrainian(value);
   const head = parts.prefix ? `${numberToUkrainian(parts.prefix)} ` : '';
-  return `${head}${parts.stem}${ending}`;
+  return `${head}${joinOrdinal(parts.stem, ending)}`;
+}
+
+// Хвіст після дефіса → повне закінчення порядкового числівника.
+// Свідомо без «-ю»: «7-ю» може бути і «сьому», і «сьомою», а вгадувати відмінок
+// гірше, ніж лишити число кількісним.
+const HYPHEN_ENDINGS = {
+  го: 'ого', му: 'ому', ому: 'ому', й: 'ий', ий: 'ий', ім: 'ім',
+  ї: 'ої', ої: 'ої', х: 'их', их: 'их', ми: 'ими', ими: 'ими',
+  а: 'а', я: 'а', е: 'е', є: 'е',
+};
+
+// Українською хвіст часто несе ще й приголосну основи: «1-ша», «2-га», «3-тя»,
+// «7-ма», «4-те». Основу ordinalUkrainian будує сам, тож таку приголосну просто
+// відкидаємо й дивимося на решту. Не впізнали — лишаємо текст як є: краще
+// незмінене число, ніж вигаданий відмінок.
+function hyphenEnding(tail) {
+  return HYPHEN_ENDINGS[tail] || HYPHEN_ENDINGS[tail.slice(1)] || null;
 }
 
 const MONTHS_GEN = 'січня|лютого|березня|квітня|травня|червня|липня|серпня|вересня|жовтня|листопада|грудня';
@@ -121,6 +149,18 @@ export function numbersToWords(text) {
   out = out.replace(
     new RegExp(String.raw`(?<![\p{L}\d])(\d{1,2})\s+(${MONTHS_GEN})(?!\p{L})`, 'giu'),
     (_m, day, month) => `${ordinalUkrainian(day, 'ого')} ${month}`,
+  );
+
+  // «7-го», «3-му», «20-ті» — порядковий числівник із відмінковим хвостом.
+  // Без цього правила число йшло в загальну гілку як КІЛЬКІСНЕ, а хвіст
+  // лишався висіти: «7-го» → «сім-го», і голос читав «сімого» замість
+  // «сьомого». Правило має спрацювати РАНІШЕ за загальне.
+  out = out.replace(
+    new RegExp(String.raw`(?<![\p{L}\d])(\d+)\s*-\s*(\p{L}{1,4})(?!\p{L})`, 'gu'),
+    (whole, num, tail) => {
+      const ending = hyphenEnding(tail.toLowerCase());
+      return ending ? ordinalUkrainian(num, ending) : whole;
+    },
   );
 
   // Решта чисел — звичайним кількісним числівником. Підтримує пробіл-роздільник
