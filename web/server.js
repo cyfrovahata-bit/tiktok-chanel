@@ -566,8 +566,15 @@ const server = http.createServer(async (req, res) => {
         // 1) Перелік роликів із лічильниками реакцій.
         // shares на вузлі video_reels не існує — Graph відповідає помилкою на
         // ВЕСЬ запит, і список приходить порожній. Поширення беремо з метрик.
+        //
+        // reactions, а не likes: likes.summary рахує ЛИШЕ «подобається», тоді
+        // як під дописом стоять ще «супер», «ого», «сумно» тощо. Через це
+        // перший розбір занизив усі числа в кілька разів.
+        // filter(stream) у коментарях: без нього рахуються тільки кореневі
+        // коментарі, а відповіді в гілках губляться.
         const fields = 'id,created_time,permalink_url,description,'
-          + 'likes.summary(true).limit(0),comments.summary(true).limit(0)';
+          + 'reactions.summary(true).limit(0),likes.summary(true).limit(0),'
+          + 'comments.summary(true).filter(stream).limit(0)';
         const reels = [];
         let next = `${base}/${encodeURIComponent(pageId)}/video_reels?fields=${fields}&limit=50&${auth}`;
         const notes = [];
@@ -579,6 +586,7 @@ const server = http.createServer(async (req, res) => {
               id: v.id,
               created: v.created_time || null,
               permalink: v.permalink_url ? `https://www.facebook.com${v.permalink_url}` : null,
+              reactions: v.reactions?.summary?.total_count ?? null,
               likes: v.likes?.summary?.total_count ?? null,
               comments: v.comments?.summary?.total_count ?? null,
               text: String(v.description || '').replace(/\s+/g, ' ').trim(),
