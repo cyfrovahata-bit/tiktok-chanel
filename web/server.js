@@ -572,12 +572,30 @@ const server = http.createServer(async (req, res) => {
         // перший розбір занизив усі числа в кілька разів.
         // filter(stream) у коментарях: без нього рахуються тільки кореневі
         // коментарі, а відповіді в гілках губляться.
-        const fields = 'id,created_time,permalink_url,description,'
-          + 'reactions.summary(true).limit(0),likes.summary(true).limit(0),'
-          + 'comments.summary(true).filter(stream).limit(0)';
+        // Джерело беремо зі стрічки Сторінки, а не з video_reels: на вузлі
+        // ролика поля reactions немає взагалі (Graph відповідає помилкою на
+        // ВЕСЬ запит), а likes.summary рахує ЛИШЕ «подобається» — без «супер»,
+        // «ого» й «сумно». Саме через це перший розбір занизив числа в кілька
+        // разів. У дописі стрічки лічильник той самий, що бачить власник.
+        // filter(stream) у коментарях додає відповіді в гілках.
+        const SOURCES = [
+          { edge: 'feed', fields: 'id,created_time,permalink_url,message,'
+            + 'reactions.summary(true).limit(0),comments.summary(true).filter(stream).limit(0),shares' },
+          { edge: 'video_reels', fields: 'id,created_time,permalink_url,description,'
+            + 'likes.summary(true).limit(0),comments.summary(true).limit(0)' },
+        ];
         const reels = [];
-        let next = `${base}/${encodeURIComponent(pageId)}/video_reels?fields=${fields}&limit=50&${auth}`;
         const notes = [];
+        let next = null;
+        for (const s of SOURCES) {
+          const probe = `${base}/${encodeURIComponent(pageId)}/${s.edge}?fields=${s.fields}&limit=50&${auth}`;
+          const data = await (await fetch(probe)).json();
+          if (data.error) { notes.push(`${s.edge}: ${data.error.message}`); continue; }
+          next = probe;
+          break;
+        }
+        if (!next) return json(res, 200, { count: 0, notes, reels: [] });
+
         while (next && reels.length < limit) {
           const data = await (await fetch(next)).json();
           if (data.error) { notes.push(`list: ${data.error.message}`); break; }
@@ -585,11 +603,14 @@ const server = http.createServer(async (req, res) => {
             reels.push({
               id: v.id,
               created: v.created_time || null,
-              permalink: v.permalink_url ? `https://www.facebook.com${v.permalink_url}` : null,
-              reactions: v.reactions?.summary?.total_count ?? null,
-              likes: v.likes?.summary?.total_count ?? null,
+              permalink: v.permalink_url && v.permalink_url.startsWith('http')
+                ? v.permalink_url : `https://www.facebook.com${v.permalink_url || ''}`,
+              // reactions — усі реакції разом; likes лишається як запасний
+              // варіант для вузла video_reels, де reactions немає.
+              reactions: v.reactions?.summary?.total_count ?? v.likes?.summary?.total_count ?? null,
               comments: v.comments?.summary?.total_count ?? null,
-              text: String(v.description || '').replace(/\s+/g, ' ').trim(),
+              shares: v.shares?.count ?? null,
+              text: String(v.message || v.description || '').replace(/\s+/g, ' ').trim(),
             });
           }
           next = data.paging?.next || null;
