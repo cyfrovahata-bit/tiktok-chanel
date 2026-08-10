@@ -512,6 +512,82 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Метрики ВСІХ Reels Сторінки однією таблицею: перегляди, лайки,
+    // коментарі, поширення, середній час перегляду й перший рядок допису.
+    //
+    // Навіщо окремо від /api/meta/insights: той віддає один допис за запитом,
+    // а питання «які сюжети заходять» на одному дописі не вирішується. Тут
+    // видно всі ролики поруч, і перший рядок допису — це слайд 1 сценарію,
+    // тобто саме те, що вирішує долю ролика в стрічці.
+    //
+    // Graph відхиляє ВЕСЬ запит через одну недійсну метрику, тому набори
+    // метрик пробуються по черзі, а не змішуються.
+    if (req.method === 'GET' && pathname === '/api/meta/stats') {
+      const token = process.env.META_PAGE_ACCESS_TOKEN;
+      const pageId = process.env.META_PAGE_ID;
+      if (!token || !pageId) return json(res, 200, { error: 'META_PAGE_ACCESS_TOKEN / META_PAGE_ID не задано' });
+      const base = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v25.0'}`;
+      const auth = `access_token=${encodeURIComponent(token)}`;
+      const limit = Math.min(Number(url.searchParams.get('limit')) || 200, 400);
+
+      const METRIC_SETS = [
+        'blue_reels_play_count,post_video_avg_time_watched,post_video_view_time',
+        'total_video_views,total_video_impressions,total_video_view_total_time',
+        'total_video_views',
+      ];
+
+      try {
+        // 1) Перелік роликів із лічильниками реакцій.
+        const fields = 'id,created_time,permalink_url,description,'
+          + 'likes.summary(true).limit(0),comments.summary(true).limit(0),shares';
+        const reels = [];
+        let next = `${base}/${encodeURIComponent(pageId)}/video_reels?fields=${fields}&limit=50&${auth}`;
+        const notes = [];
+        while (next && reels.length < limit) {
+          const data = await (await fetch(next)).json();
+          if (data.error) { notes.push(`list: ${data.error.message}`); break; }
+          for (const v of data.data || []) {
+            reels.push({
+              id: v.id,
+              created: v.created_time || null,
+              permalink: v.permalink_url ? `https://www.facebook.com${v.permalink_url}` : null,
+              likes: v.likes?.summary?.total_count ?? null,
+              comments: v.comments?.summary?.total_count ?? null,
+              shares: v.shares?.count ?? 0,
+              text: String(v.description || '').replace(/\s+/g, ' ').trim(),
+            });
+          }
+          next = data.paging?.next || null;
+        }
+
+        // 2) Метрики переглядів — пачками, щоб не впертися в ліміт частоти.
+        const insights = async (id) => {
+          for (const metric of METRIC_SETS) {
+            const data = await (await fetch(`${base}/${encodeURIComponent(id)}/video_insights?metric=${metric}&${auth}`)).json();
+            if (data.error) continue;
+            const out = {};
+            for (const m of data.data || []) out[m.name] = m.values?.[0]?.value ?? m.value ?? null;
+            if (Object.keys(out).length) return out;
+          }
+          return {};
+        };
+        for (let i = 0; i < reels.length; i += 8) {
+          const chunk = reels.slice(i, i + 8);
+          const got = await Promise.all(chunk.map((r) => insights(r.id).catch(() => ({}))));
+          chunk.forEach((r, k) => {
+            const m = got[k];
+            r.views = m.blue_reels_play_count ?? m.total_video_views ?? null;
+            r.avgWatchMs = m.post_video_avg_time_watched ?? null;
+            r.watchTimeMs = m.post_video_view_time ?? m.total_video_view_total_time ?? null;
+          });
+        }
+
+        return json(res, 200, { count: reels.length, notes, reels });
+      } catch (error) {
+        return json(res, 200, { error: error.message });
+      }
+    }
+
     // Останні Reels Сторінки з їхнім станом. Відкрити facebook.com ззовні
     // не вийде — він віддає 400 будь-якому не-браузеру, — тож єдиний чесний
     // спосіб перевірити доступність допису це спитати Graph.
