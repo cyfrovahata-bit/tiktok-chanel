@@ -538,8 +538,10 @@ const server = http.createServer(async (req, res) => {
 
       try {
         // 1) Перелік роликів із лічильниками реакцій.
+        // shares на вузлі video_reels не існує — Graph відповідає помилкою на
+        // ВЕСЬ запит, і список приходить порожній. Поширення беремо з метрик.
         const fields = 'id,created_time,permalink_url,description,'
-          + 'likes.summary(true).limit(0),comments.summary(true).limit(0),shares';
+          + 'likes.summary(true).limit(0),comments.summary(true).limit(0)';
         const reels = [];
         let next = `${base}/${encodeURIComponent(pageId)}/video_reels?fields=${fields}&limit=50&${auth}`;
         const notes = [];
@@ -553,7 +555,6 @@ const server = http.createServer(async (req, res) => {
               permalink: v.permalink_url ? `https://www.facebook.com${v.permalink_url}` : null,
               likes: v.likes?.summary?.total_count ?? null,
               comments: v.comments?.summary?.total_count ?? null,
-              shares: v.shares?.count ?? 0,
               text: String(v.description || '').replace(/\s+/g, ' ').trim(),
             });
           }
