@@ -536,6 +536,32 @@ const server = http.createServer(async (req, res) => {
         'total_video_views',
       ];
 
+      // ?probe=<video id> — режим розвідки. Метрики Reels у Graph називаються
+      // не так, як у звичайних відео, а документація відстає від API. Тут
+      // кожен кандидат питається ОКРЕМИМ запитом, тож видно поіменно, який
+      // працює, а який ні — інакше одна погана назва валить увесь запит і
+      // причина лишається невидимою.
+      const probeId = url.searchParams.get('probe');
+      if (probeId) {
+        const candidates = [
+          'blue_reels_play_count', 'post_video_avg_time_watched', 'post_video_view_time',
+          'total_video_views', 'total_video_impressions', 'total_video_views_unique',
+          'total_video_view_total_time', 'total_video_10s_views', 'total_video_complete_views',
+          'total_video_reactions_by_type_total', 'blue_reels_total_plays',
+          'post_impressions', 'post_impressions_unique', 'post_video_views',
+        ];
+        const out = {};
+        for (const metric of candidates) {
+          for (const edge of ['video_insights', 'insights']) {
+            const data = await (await fetch(`${base}/${encodeURIComponent(probeId)}/${edge}?metric=${metric}&${auth}`)).json();
+            if (data.error) { out[`${edge}:${metric}`] = `ERR ${data.error.message}`; continue; }
+            const v = (data.data || []).map((m) => `${m.name}=${JSON.stringify(m.values?.[0]?.value ?? m.value ?? null)}`);
+            out[`${edge}:${metric}`] = v.length ? v.join(', ') : 'порожньо';
+          }
+        }
+        return json(res, 200, { probe: probeId, results: out });
+      }
+
       try {
         // 1) Перелік роликів із лічильниками реакцій.
         // shares на вузлі video_reels не існує — Graph відповідає помилкою на
