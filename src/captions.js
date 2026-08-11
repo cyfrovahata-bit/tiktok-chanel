@@ -158,7 +158,9 @@ function slideEvents(line, startSec, endSec, windowSec) {
     // фіксовані 120 мс з'їли б половину показу й текст блимав би.
     const fade = Math.max(60, Math.min(FADE_MS, Math.round((to - from) * 1000 * 0.22)));
     const size = isAccent(chunks[i]) ? `\\fs${ACCENT_SIZE}` : '';
-    events.push({ from, to, text: `{\\fad(${fade},${fade})${size}}${renderChunk(chunks[i])}` });
+    // chunk — сирий текст фрагмента, без ASS-розмітки. Потрібен для вибору
+    // обкладинки (coverTimestampMs): по ньому видно, де стоїть якір.
+    events.push({ from, to, chunk: chunks[i], text: `{\\fad(${fade},${fade})${size}}${renderChunk(chunks[i])}` });
   }
   return events;
 }
@@ -198,6 +200,36 @@ export function buildAss(lines, durations) {
     }
   }
   return HEADER + events.join('\n') + '\n';
+}
+
+// Обкладинка для сітки профілю. TikTok (а також Facebook та Instagram)
+// дозволяє вказати, з якої секунди ролика взяти обкладинку. За замовчуванням
+// береться ПЕРШИЙ кадр, а на ньому субтитра ще немає — тому в сітці профілю
+// всі ролики виглядають однаково: гарне фото без жодного слова, і глядачеві
+// нема за що зачепитися.
+//
+// Фіксована мітка на кшталт «друга секунда» проблему не розв'язує: фрагменти
+// лягають за фактичною озвучкою, тож туди однаково може випасти «— ЦЕ НЕ».
+// Але субтитри будуємо ми самі й знаємо час КОЖНОГО фрагмента, тож мітку
+// можна порахувати точно.
+//
+// Беремо середину фрагмента з ЯКОРЕМ — власною назвою об'єкта. За правилами
+// промту якір стоїть у перших 3–4 словах зачину, тобто в першому або другому
+// фрагменті; з них вибираємо довший, бо власна назва майже завжди довша за
+// службові слова. Саме середину, а не початок: на краях фрагмент ще
+// проявляється або вже згасає (\fad), і кадр вийшов би напівпрозорим.
+export function coverTimestampMs(lines, durations) {
+  if (!Array.isArray(lines) || !lines.length) return null;
+  if (!Array.isArray(durations) || !durations.length) return null;
+
+  const offsets = slideOffsets(durations);
+  const end = durations.length > 1 ? offsets[1] : offsets[0] + durations[0];
+  const windowSec = Math.max(0.8, durations[0] - FADE_SECONDS - PAD_APPROX);
+  const events = slideEvents(lines[0], offsets[0], end, windowSec);
+  if (!events.length) return null;
+
+  const best = events.slice(0, 2).reduce((a, b) => (b.chunk.length > a.chunk.length ? b : a));
+  return Math.max(0, Math.round(((best.from + best.to) / 2) * 1000));
 }
 
 // Експорт для тестів.

@@ -72,7 +72,9 @@ export async function publish(platform, payload) {
   if (platform === 'tiktok') {
     // TikTok приймає БАЙТИ, а не посилання, тож качаємо готовий ролик до себе.
     const buffer = await payload.videoBuffer();
-    const result = await publishTikTokVideo({ videoBuffer: buffer, title: caption });
+    const result = await publishTikTokVideo({
+      videoBuffer: buffer, title: caption, coverMs: payload.coverMs ?? null,
+    });
     return {
       platform,
       status: 'published',

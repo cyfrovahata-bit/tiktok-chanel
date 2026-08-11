@@ -101,14 +101,16 @@ async function processItem(item) {
   }
 
   // Назву/опис беремо з таблиці — тут потрібне лише відео (без OpenAI-текстів).
-  const { videoPath } = await assembleVideo({
+  const { videoPath, coverMs } = await assembleVideo({
     photoPaths,
     theme: item.theme,
     script: scriptText,
     withTexts: false,
   });
 
-  await uploadVideo(item.id, videoPath);
+  // coverMs — з якої мілісекунди брати обкладинку в сітці профілю. Кладемо
+  // на сам файл: під час публікації рядка таблиці вже немає під рукою.
+  await uploadVideo(item.id, videoPath, coverMs ? { coverMs: String(coverMs) } : null);
   attempts.delete(item.id); // успіх — забуваємо лічильник
 
   await notify(

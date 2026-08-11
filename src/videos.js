@@ -85,10 +85,14 @@ export async function setVideoAppProperties(fileId, patch) {
 }
 
 // Вивантажує локальне відео у папку як <ID>.mp4. Повертає fileId.
-export async function uploadVideo(id, localPath) {
+export async function uploadVideo(id, localPath, appProperties = null) {
   if (!FOLDER_ID) throw new Error('Не задано VIDEO_FOLDER_ID — нема куди вивантажувати відео');
   const res = await drive().files.create({
-    requestBody: { name: videoName(id), parents: [FOLDER_ID] },
+    requestBody: {
+      name: videoName(id),
+      parents: [FOLDER_ID],
+      ...(appProperties ? { appProperties } : {}),
+    },
     media: { mimeType: 'video/mp4', body: createReadStream(localPath) },
     fields: 'id',
     supportsAllDrives: true,

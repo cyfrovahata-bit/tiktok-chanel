@@ -361,6 +361,8 @@ async function runGroup({
       if (!bufferOnce) bufferOnce = fetchVideoBuffer(file.id);
       return bufferOnce;
     },
+    // Мітку обкладинки поклав монтаж (pipeline.js) на сам файл у Drive.
+    coverMs: Number(file.appProperties?.coverMs) || null,
   };
   const results = [];
   for (const platform of missing) {

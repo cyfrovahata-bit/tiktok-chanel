@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
 import { buildSlideshow, mixAudio, slideshowDuration } from './montage.js';
+import { coverTimestampMs } from './captions.js';
 import { synthesizeVoiceover } from './tts.js';
 import { generateNarration, generatePostTexts } from './openai.js';
 import { splitScriptLines } from './archive.js';
@@ -97,5 +98,9 @@ export async function assembleVideo({ photoPaths, theme, script = null, withVoic
     }
   }
 
-  return { videoPath, texts };
+  // Мітка обкладинки для сітки профілю — рахується тут, бо лише на цьому
+  // етапі є і рядки, і фактичні тривалості слайдів. Далі вона їде в
+  // appProperties ролика й доживає до публікації.
+  const coverMs = slideDurations ? coverTimestampMs(captionLines, slideDurations) : null;
+  return { videoPath, texts, coverMs };
 }

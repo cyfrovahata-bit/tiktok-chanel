@@ -177,7 +177,7 @@ async function waitForPublish(token, publishId, { maxPolls = 20, pollMs = 5000, 
 
 // Публікує один ролик. videoBuffer — готовий MP4.
 // Повертає { id, mode: 'direct'|'inbox', privacy }.
-export async function publishTikTokVideo({ videoBuffer, title }, options = {}) {
+export async function publishTikTokVideo({ videoBuffer, title, coverMs = null }, options = {}) {
   const tokens = options.tokens || await accessToken();
   const token = tokens.accessToken;
   const buffer = Buffer.isBuffer(videoBuffer) ? videoBuffer : Buffer.from(videoBuffer);
@@ -209,6 +209,13 @@ export async function publishTikTokVideo({ videoBuffer, title }, options = {}) {
         // можна лише явним TIKTOK_AI_LABEL=0: краще позначити зайвий раз,
         // ніж отримати санкції за недекларований ШІ-контент.
         is_aigc: process.env.TIKTOK_AI_LABEL !== '0',
+        // Обкладинка в сітці профілю. Без цього поля TikTok бере ПЕРШИЙ кадр,
+        // а на ньому субтитра ще немає — і всі ролики в сітці виглядають як
+        // однакові гарні фото без жодного слова. Мітку рахує captions.js:
+        // це середина фрагмента з назвою об'єкта.
+        ...(Number.isFinite(coverMs) && coverMs > 0
+          ? { video_cover_timestamp_ms: Math.round(coverMs) }
+          : {}),
       },
       source_info,
     };
