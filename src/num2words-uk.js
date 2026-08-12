@@ -142,11 +142,97 @@ const TSEP = '[\\u0020\\u00A0\\u202F\\u2009]';
 const YEAR = String.raw`\d{1,2}${TSEP}\d{3}|\d{3,4}`;
 const digits = (s) => s.replace(new RegExp(TSEP, 'g'), '');
 
+// Римські числа. Для каналу про історію це не екзотика: «XIX століття»
+// трапляється мало не в кожному сценарії, а рушій читав таке по літерах або
+// як чуже слово. Перекладаємо в арабські ДО решти правил — далі спрацьовують
+// уже наявні правила століть.
+//
+// Дві осторóги. По-перше, перекладаємо ТІЛЬКИ поруч зі словом «століття»,
+// «сторіччя» чи «ст.»: окрема латинська «I» деінде в тексті може бути не
+// числом. По-друге, у класі є й кириличні двійники — «ХІХ» із кириличними Х
+// та І виглядає так само, як латинське «XIX», і трапляється в текстах не
+// рідше.
+const ROMAN = {
+  i: 1, v: 5, x: 10, l: 50, c: 100,
+  і: 1, х: 10, с: 100,
+};
+function romanToInt(s) {
+  const v = [...s.toLowerCase()].map((c) => ROMAN[c]);
+  if (v.some((n) => !n)) return null;
+  let total = 0;
+  for (let i = 0; i < v.length; i++) total += v[i] < v[i + 1] ? -v[i] : v[i];
+  // Століття далі за XXI не буває; більше — майже напевно не римське число.
+  return total > 0 && total <= 21 ? total : null;
+}
+const ROMAN_CHARS = 'IVXLCivxlcХхІіСс';
+
+function romanCenturies(text) {
+  const cent = String.raw`століт\p{L}*|сторіч\p{L}*`;
+  let out = text;
+  // «у XVI ст.» — місцевий відмінок, тож розгортаємо в «столітті».
+  out = out.replace(
+    new RegExp(String.raw`(?<!\p{L})([ув])\s+([${ROMAN_CHARS}]{1,7})\s+ст\.`, 'giu'),
+    (whole, prep, roman) => {
+      const n = romanToInt(roman);
+      return n ? `${prep} ${n} столітті` : whole;
+    },
+  );
+  out = out.replace(
+    new RegExp(String.raw`(?<![\p{L}\d])([${ROMAN_CHARS}]{1,7})\s+ст\.`, 'giu'),
+    (whole, roman) => {
+      const n = romanToInt(roman);
+      return n ? `${n} століття` : whole;
+    },
+  );
+  out = out.replace(
+    new RegExp(String.raw`(?<![\p{L}\d])([${ROMAN_CHARS}]{1,7})\s+(${cent})`, 'giu'),
+    (whole, roman, word) => {
+      const n = romanToInt(roman);
+      return n ? `${n} ${word}` : whole;
+    },
+  );
+  return out;
+}
+
+// «Ціла» і «десята» — іменники ЖІНОЧОГО роду, тож ціла частина теж жіноча:
+// не «один цілих п'ять десятих», а «одна ціла п'ять десятих»; 2 → «дві».
+// Форма самого слова залежить від останньої цифри так само, як «година»:
+// 1 — ціла, 2–4 — цілих, решта — цілих (крім підступного другого десятка).
+function feminineUnit(n, one, few) {
+  const last = n % 10;
+  const teen = n % 100 >= 11 && n % 100 <= 14;
+  if (!teen && last === 1) return one;
+  return few;
+}
+
+function decimalToWords(whole, frac) {
+  const w = Number(whole);
+  const f = Number(frac);
+  // \b у JS орієнтується на латиницю й з кирилицею не працює — та сама пастка,
+  // що вже ловила нас у словнику наголосів. Прив'язки до кінця рядка досить.
+  const toFeminine = (t) => t.replace(/один$/, 'одна').replace(/два$/, 'дві');
+  const head = toFeminine(numberToUkrainian(w));
+  const tailWord = frac.length === 1
+    ? feminineUnit(f, 'десята', 'десятих')
+    : feminineUnit(f, 'сота', 'сотих');
+  const tail = toFeminine(numberToUkrainian(f));
+  return `${head} ${feminineUnit(w, 'ціла', 'цілих')} ${tail} ${tailWord}`;
+}
+
 // Замінює числа в тексті на слова (для голосу). Підтримує пробіл-роздільник
 // тисяч («15 000», включно з нерозривним пробілом). Числа, зліплені з
 // літерами («3D», «COVID19»), НЕ чіпає.
 export function numbersToWords(text) {
-  let out = String(text);
+  let out = romanCenturies(String(text));
+
+  // Десяткові дроби: «19,3 тисячі гектарів» рушій читав як
+  // «дев'ятнадцять,три» — кома лишалася символом і збивала інтонацію.
+  // Правило має спрацювати РАНІШЕ за загальне, інакше ціла й дробова частини
+  // розійдуться на два окремі числа.
+  out = out.replace(
+    /(?<![\p{L}\d])(\d+),(\d{1,2})(?![\p{L}\d])/gu,
+    (_m, whole, frac) => `${decimalToWords(whole, frac)}`,
+  );
 
   // «у 1986 році» / «в 2000 році» — місцевий відмінок.
   out = out.replace(
