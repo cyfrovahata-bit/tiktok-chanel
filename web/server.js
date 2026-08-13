@@ -261,8 +261,17 @@ async function serveVideo(req, res, id, asAttachment = false) {
     const headers = videoResponseHeaders(id, r.headers, asAttachment);
     res.writeHead(range && r.headers['content-range'] ? 206 : 200, headers);
     r.stream.pipe(res);
-    r.stream.on('error', () => res.destroyed || res.end());
+    // Обрив на середині — це НЕ нормальне завершення. Раніше тут стояв
+    // res.end(), і клієнт отримував менше байтів, ніж обіцяв content-length,
+    // вважаючи файл цілим. Тепер рвемо з'єднання: так завантажувач бачить
+    // збій і може повторити. Помилку пишемо в лог — без цього обриви з боку
+    // Drive були невидимі й доводилося гадати.
+    r.stream.on('error', (error) => {
+      console.error(`Відео ${id}: стрім Drive обірвався — ${error.message}`);
+      if (!res.destroyed) res.destroy();
+    });
   } catch (error) {
+    console.error(`Відео ${id}: Drive не віддав файл — ${error.message}`);
     if (!res.headersSent) json(res, 502, { error: `Drive: ${error.message}` });
   }
 }
