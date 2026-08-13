@@ -290,6 +290,20 @@
       return box;
     }
 
+    // Telegram тримає лише ОДИН системний діалог за раз. Якщо попередній
+    // закрився не через кнопку — користувач змахнув його, згорнув застосунок,
+    // застосунок перезапустили, — внутрішній прапорець лишається піднятим, а
+    // зворотний виклик так і не приходить. Наступний downloadFile тоді або
+    // падає з WebAppPopupOpened, або мовчки не робить нічого. Саме так і
+    // виглядає «завантажується через раз».
+    //
+    // Тому тримаємо власний прапорець: поки діалог висить, друге натискання
+    // не мовчить, а відкриває звичайне посилання — користувач у будь-якому
+    // разі отримує файл. Прапорець сам скидається через хвилину, щоб
+    // загублена відповідь не заблокувала кнопку назавжди.
+    let downloadPending = false;
+    const DOWNLOAD_STUCK_MS = 60 * 1000;
+
     // Bot API 8.0+ має нативне завантаження файлів у Mini App. На старіших
     // версіях Telegram відкриваємо attachment-посилання у зовнішньому браузері.
     function downloadVideo(item) {
@@ -298,29 +312,43 @@
       const url = new URL(relativeUrl, window.location.href).href;
       haptic('light');
 
+      const openInBrowser = () => {
+        if (tg?.openLink) {
+          tg.openLink(url);
+          toast('Відкриваю завантаження…');
+          return;
+        }
+        const link = document.createElement('a');
+        link.href = url; link.download = fileName; link.rel = 'noopener';
+        document.body.appendChild(link); link.click(); link.remove();
+        toast('Завантаження розпочато');
+      };
+
       const nativeDownloadSupported = tg?.downloadFile
         && (!tg.isVersionAtLeast || tg.isVersionAtLeast('8.0'));
-      if (nativeDownloadSupported) {
-        try {
-          tg.downloadFile({ url, file_name: fileName }, (accepted) => {
-            toast(accepted ? 'Завантаження розпочато' : 'Завантаження скасовано');
-          });
-          return;
-        } catch (error) {
-          console.warn('Telegram downloadFile не спрацював, відкриваю браузер:', error);
-        }
-      }
+      // Немає нативного завантаження або попередній діалог ще висить —
+      // одразу посилання, без мовчазної відмови.
+      if (!nativeDownloadSupported || downloadPending) return openInBrowser();
 
-      if (tg?.openLink) {
-        tg.openLink(url);
-        toast('Відкриваю завантаження…');
-        return;
-      }
+      downloadPending = true;
+      let answered = false;
+      const release = () => {
+        if (answered) return false;
+        answered = true;
+        downloadPending = false;
+        clearTimeout(stuck);
+        return true;
+      };
+      const stuck = setTimeout(release, DOWNLOAD_STUCK_MS);
 
-      const link = document.createElement('a');
-      link.href = url; link.download = fileName; link.rel = 'noopener';
-      document.body.appendChild(link); link.click(); link.remove();
-      toast('Завантаження розпочато');
+      try {
+        tg.downloadFile({ url, file_name: fileName }, (accepted) => {
+          if (release()) toast(accepted ? 'Завантаження розпочато' : 'Завантаження скасовано');
+        });
+      } catch (error) {
+        console.warn('Telegram downloadFile не спрацював, відкриваю браузер:', error);
+        if (release()) openInBrowser();
+      }
     }
 
     // Які картки розгорнуті (за id) — зберігається між оновленнями списку.
