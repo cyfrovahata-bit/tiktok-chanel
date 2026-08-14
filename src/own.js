@@ -10,7 +10,7 @@
 // тут найлегше отримати «намалював своє й проігнорував мої фото».
 import { Readable } from 'node:stream';
 import { drive } from './drive.js';
-import { appendQueueRow } from './sheets.js';
+import { appendQueueRow, readAllItems } from './sheets.js';
 import { promptFolderId, kyivToday, kyivMinutes } from './kyiv.js';
 
 // Куди складати матеріали власника. За замовчуванням — та сама папка, де
@@ -31,9 +31,27 @@ export function ownRowId(now = new Date()) {
 }
 
 // Створює папку під один сюжет. Окрема папка на кожен — щоб ChatGPT бачив
+// Два сюжети, надіслані в одну хвилину, отримували однаковий ID: у ньому лише
+// години й хвилини. Далі все, що шукає рядок за ID, знаходило перший — правки
+// й видалення летіли не в той рядок, а відео обох сюжетів претендувало на одне
+// й те саме імʼя файлу. Тому перед створенням звіряємося з таблицею і, якщо ID
+// зайнятий, додаємо суфікс -2, -3 (так само, як це роблять рядки AUTO-).
+export async function uniqueOwnId(now = new Date(), taken = []) {
+  const base = ownRowId(now);
+  const busy = new Set(taken);
+  if (!busy.has(base)) return base;
+  for (let n = 2; n < 100; n++) {
+    if (!busy.has(`${base}-${n}`)) return `${base}-${n}`;
+  }
+  throw new Error(`Не вдалося підібрати вільний ID для ${base}`);
+}
+
 // рівно ті фото, які стосуються цієї теми, і не мішав із попередніми.
 export async function createSubmission(now = new Date()) {
-  const id = ownRowId(now);
+  // Порожній список ID (наприклад, таблиця недоступна) не має блокувати
+  // надсилання: тоді працюємо як раніше, за чистим часом.
+  const taken = await readAllItems().then((rows) => rows.map((r) => r.id)).catch(() => []);
+  const id = await uniqueOwnId(now, taken);
   const res = await drive().files.create({
     requestBody: {
       name: `${id} — матеріали власника`,
@@ -275,7 +293,10 @@ export function buildSurnamePrompt({ rowId, surname }) {
 
 export async function submitSurname({ surname, now = new Date() }) {
   const clean = normalizeSurname(surname);
-  const id = ownRowId(now);
+  // Замовлення йдуть підряд, тож збіг хвилини тут навіть імовірніший, ніж у
+  // сюжетах: ID так само має бути унікальним.
+  const taken = await readAllItems().then((rows) => rows.map((r) => r.id)).catch(() => []);
+  const id = await uniqueOwnId(now, taken);
   await appendQueueRow({
     id,
     category: 'Замовлення / прізвище',
