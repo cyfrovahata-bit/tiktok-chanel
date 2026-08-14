@@ -13,7 +13,7 @@ import { readFile, mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady, listNewItems, updateRowPrompt, deleteQueueRow, appendRejectedTheme, listRejectedThemes } from '../src/sheets.js';
+import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady, listNewItems, listErrorItems, updateRowPrompt, deleteQueueRow, appendRejectedTheme, listRejectedThemes } from '../src/sheets.js';
 import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-prompt.js';
 import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoProps, videoFolderId, deleteVideo, remuxVideoToSpec } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
@@ -22,7 +22,7 @@ import { nextDailyTimes, kyivToday, kyivMinutes } from '../src/kyiv.js';
 import { photoSchedule } from '../src/photo-plan.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
-import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder } from '../src/own.js';
+import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty } from '../src/autopublish.js';
 import { availablePlatforms } from '../src/publish.js';
@@ -107,20 +107,21 @@ function isOwner(user) {
 
 // --- Дані для мінідодатка (короткий кеш, щоб не смикати Google щоразу) ------
 const CACHE_MS = 20 * 1000;
-let cache = { at: 0, done: [], published: [], videos: new Map(), pending: [] };
+let cache = { at: 0, done: [], published: [], videos: new Map(), pending: [], problems: [] };
 
 async function refreshCache() {
   if (Date.now() - cache.at < CACHE_MS) return cache;
   // Беремо файли разом з appProperties: без них не порахувати, кому який слот
   // публікації дістанеться — мітки автопублікації живуть саме там.
-  const [done, published, files, pending] = await Promise.all([
+  const [done, published, files, pending, problems] = await Promise.all([
     listDoneItems().catch(() => []),
     listPublishedItems().catch(() => []),
     listVideoFiles().catch(() => new Map()),
     listNewItems().catch(() => []),
+    listErrorItems().catch(() => []),
   ]);
   const videos = new Map([...files].map(([name, file]) => [name, file.id]));
-  cache = { at: Date.now(), done, published, files, videos, pending };
+  cache = { at: Date.now(), done, published, files, videos, pending, problems };
   return cache;
 }
 
@@ -314,6 +315,20 @@ const server = http.createServer(async (req, res) => {
           photoAt: photoAt.get(it.id) || null,
         })),
         queue: queueFrom(c, now),
+        // Рядки, які ChatGPT зупинив на перевірці фактів. Без них сюжет
+        // зникав із застосунку мовчки — статус ERROR не показувався ніде.
+        // Віддаємо ще й вихідний текст, щоб надіслати сюжет заново можна було
+        // без пошуків у таблиці.
+        problems: c.problems.map((it) => {
+          const slides = parseSlideLines(it.extra);
+          return {
+            id: it.id,
+            theme: it.theme || parseTheme(it.extra),
+            note: it.note,
+            created: it.created,
+            story: extractOwnStory(it.extra) || slides.join('\n'),
+          };
+        }),
         published: c.published.map((it) => ({
           id: it.id, title: it.title || it.theme, theme: it.theme, pubDate: it.pubDate,
         })),

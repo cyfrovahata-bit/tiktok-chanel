@@ -69,6 +69,11 @@
     }
     .dot { width: 11px; height: 11px; flex: 0 0 11px; border-radius: 50%; position: relative; }
     .dot.pending { background: #f5b60a; box-shadow: 0 0 0 4px color-mix(in srgb, #f5b60a 22%, transparent); }
+    /* Рядок, який ChatGPT зупинив на перевірці фактів: червоний і без пульсації —
+       він нікуди не рухається сам, чекає рішення власника. */
+    .dot.problem { background: #e5484d; box-shadow: 0 0 0 4px color-mix(in srgb, #e5484d 22%, transparent); }
+    .why { background: color-mix(in srgb, #e5484d 10%, transparent); border-left: 3px solid #e5484d;
+      border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; font-size: 14px; line-height: 1.45; }
     .dot.pending::after {
       content: ''; position: absolute; inset: 0; border-radius: 50%;
       background: #f5b60a; animation: pulse 1.8s ease-out infinite;
@@ -548,6 +553,71 @@
       return row;
     }
 
+    // --- Сюжет, зупинений перевіркою фактів (рядок ERROR) -------------------
+    // ChatGPT знайшов у матеріалі помилку й не став писати сценарій. Сам він
+    // до цього рядка більше не повернеться, тож картка існує заради двох
+    // речей: показати причину з колонки «Примітка» і повернути власнику його
+    // ж текст — у чаті з ботом той текст не зберігається.
+    function problemCard(item) {
+      const box = el('div', 'card');
+      const head = el('div', 'card-head');
+      head.appendChild(el('span', 'dot problem'));
+      head.appendChild(el('div', 'head-title', esc(item.theme || item.id)));
+      head.appendChild(el('span', 'chev', '▶'));
+      box.appendChild(head);
+
+      const wrap = el('div', 'card-body-wrap');
+      const body = el('div', 'card-body');
+      body.appendChild(el('div', 'kicker',
+        `${esc(item.id)} · перевірка фактів зупинила сюжет`
+        + `${item.created ? ` · ${esc(item.created)}` : ''}`));
+      body.appendChild(el('div', 'why', item.note
+        ? esc(item.note)
+        : 'Причину не записано в «Примітку» — доведеться глянути рядок у таблиці.'));
+
+      const actions = el('div', 'actions');
+      const again = el('button', 'btn primary', '✍️ Надіслати заново');
+      again.addEventListener('click', (e) => {
+        e.stopPropagation();
+        haptic();
+        // Текст лягає у форму «Свій сюжет» — власник править саме те місце,
+        // на яке вказала примітка, і надсилає новим рядком.
+        if (item.story) $('#ownStory').value = item.story;
+        $('#ownPanel').classList.add('open');
+        $('#ownStory').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        $('#ownStory').focus();
+        toast(item.story ? 'Текст у формі — поправ і надсилай' : 'Вихідний текст не зберігся');
+      });
+      actions.appendChild(again);
+
+      const drop = el('button', 'btn secondary', '✖️ Відхилити');
+      drop.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!await askConfirm(`Прибрати «${item.theme || item.id}» з таблиці?`)) return;
+        drop.disabled = true;
+        try {
+          const r = await fetch('/api/pending/reject', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ initData, id: item.id, reason: 'помилка на перевірці фактів' }),
+          }).then((x) => x.json());
+          if (r.error) throw new Error(r.error);
+          notify('success'); toast('Прибрано'); load();
+        } catch (err) { notify('error'); toast(err.message); drop.disabled = false; }
+      });
+      actions.appendChild(drop);
+      body.appendChild(actions);
+
+      wrap.appendChild(body);
+      box.appendChild(wrap);
+      head.addEventListener('click', () => {
+        const open = box.classList.toggle('open');
+        if (open) expanded.add(item.id); else expanded.delete(item.id);
+      });
+      // Розгорнута одразу: причину треба побачити без зайвого дотику.
+      box.classList.add('open');
+      return box;
+    }
+
     // --- Тема на перевірку (рядок NEW у таблиці) ----------------------------
     // ChatGPT уже написав сюжет, але ще не малює. Тут його можна поправити —
     // зміни лягають назад у промт, за яким малюватимуться кадри.
@@ -700,6 +770,15 @@
       // Власні сюжети показуємо навіть без слайдів: їх щойно має скласти
       // ChatGPT із розповіді власника, а до того рядок просто зникав із
       // застосунку — наче надсилання не спрацювало.
+      // Зупинені перевіркою — найвище: доки власник не втрутиться, вони
+      // просто лежать у таблиці, і ніхто про них не нагадає.
+      const problems = state.problems || [];
+      if (problems.length) {
+        app.appendChild(el('h2', 'section',
+          problems.length > 1 ? '⚠️ Потребують уваги' : '⚠️ Потребує уваги'));
+        problems.forEach((p) => app.appendChild(problemCard(p)));
+      }
+
       const pending = (state.pending || [])
         .filter((p) => (p.slides && p.slides.length) || String(p.id).startsWith('OWN-'));
       if (pending.length) {

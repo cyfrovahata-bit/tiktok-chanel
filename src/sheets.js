@@ -154,6 +154,13 @@ export async function listNewItems() {
   return (await readAllItems()).filter((it) => it.status === 'NEW' && it.id);
 }
 
+// Рядки, які ChatGPT зупинив на перевірці фактів (статус ERROR). Причину він
+// пише в «Примітку» (L). Доти ці рядки не показувалися ніде: з мінідодатка
+// сюжет просто зникав, і виглядало це як збій надсилання.
+export async function listErrorItems() {
+  return (await readAllItems()).filter((it) => it.status === 'ERROR' && it.id);
+}
+
 // Переписує тему й промт наявного рядка. Статус, архів, назву й опис не
 // чіпаємо — це поле відповідальності ChatGPT.
 export async function updateRowPrompt(id, { theme, prompt }) {
