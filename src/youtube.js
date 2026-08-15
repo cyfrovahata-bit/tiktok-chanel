@@ -147,6 +147,14 @@ export async function channelVideoStats(options = {}) {
         publishedAt: v.snippet?.publishedAt ?? null,
         duration: v.contentDetails?.duration ?? null,
         privacy: v.status?.privacyStatus ?? null,
+        // Ще два поля, без яких «0 переглядів» неможливо пояснити:
+        // uploadStatus — чи ролик узагалі оброблено (не «uploaded»/«failed»);
+        // madeForKids — позначка «для дітей». Її можна ввімкнути на рівні
+        // КАНАЛУ, і тоді вона перекриває selfDeclaredMadeForKids із нашого
+        // запиту, а такий контент не потрапляє в стрічку Shorts і лишається
+        // без коментарів.
+        uploadStatus: v.status?.uploadStatus ?? null,
+        madeForKids: v.status?.madeForKids ?? null,
         views: Number(v.statistics?.viewCount ?? 0),
         likes: Number(v.statistics?.likeCount ?? 0),
         comments: Number(v.statistics?.commentCount ?? 0),
