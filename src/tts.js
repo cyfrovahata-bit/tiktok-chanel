@@ -83,6 +83,50 @@ const REGION = ['а', 'и', 'і', 'у', 'ою'];
 // Словничок наголосів: слова, де TTS системно помиляється. Наголошена
 // голосна позначається комбінованим акутом (U+0301) — моделі його поважають.
 // Помітили нове слово з кривим наголосом — додайте пару сюди.
+// Скорочення, які диктор читає неправильно: «260 м²» він вимовляє як «м»,
+// «XI століття» — як набір літер. Розгортаємо їх у слова ще до синтезу.
+// Сценарій має писати їх словами й сам, але правило в промті страхує лише
+// майбутні ролики — а це працює й для тих, що вже лежать в архівах.
+const UNIT_EXPANSIONS = [
+  [/(\d)\s*км²/gi, '$1 квадратних кілометрів'],
+  [/(\d)\s*м²/gi, '$1 квадратних метрів'],
+  [/(\d)\s*км(?![а-яіїєґ])/gi, '$1 кілометрів'],
+  [/(\d)\s*°\s*C/gi, '$1 градусів Цельсія'],
+  [/(\d)\s*%/g, '$1 відсотків'],
+];
+
+// Римські цифри вживаються в сценаріях лише в одному значенні — століття.
+const ROMAN = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 };
+const CENTURY_WORDS = [
+  '', 'першого', 'другого', 'третього', 'четвертого', 'п\'ятого', 'шостого',
+  'сьомого', 'восьмого', 'дев\'ятого', 'десятого', 'одинадцятого', 'дванадцятого',
+  'тринадцятого', 'чотирнадцятого', 'п\'ятнадцятого', 'шістнадцятого',
+  'сімнадцятого', 'вісімнадцятого', 'дев\'ятнадцятого', 'двадцятого',
+  'двадцять першого',
+];
+
+function romanToInt(s) {
+  let total = 0;
+  const up = s.toUpperCase();
+  for (let i = 0; i < up.length; i++) {
+    const cur = ROMAN[up[i]];
+    const next = ROMAN[up[i + 1]];
+    total += next > cur ? -cur : cur;
+  }
+  return total;
+}
+
+function expandUnits(text) {
+  let out = text;
+  for (const [re, to] of UNIT_EXPANSIONS) out = out.replace(re, to);
+  // «XI СТОЛІТТЯ» → «одинадцятого століття». Без слова «століття» не чіпаємо:
+  // самотнє «I» чи «X» у тексті майже завжди не цифра.
+  return out.replace(/\b([IVXLCDM]{1,6})\s+(століт\p{L}+)/giu, (m, roman, word) => {
+    const n = romanToInt(roman);
+    return n > 0 && n < CENTURY_WORDS.length ? `${CENTURY_WORDS[n]} ${word.toLowerCase()}` : m;
+  });
+}
+
 const PRONUNCIATION_FIXES = [
   ['колібрі', 'колі́брі'],
   // ElevenLabs v3 (Creative) інколи «ковтає» чи перекручує це слово
@@ -257,7 +301,7 @@ function stressTeens(text) {
 
 function fixPronunciation(text) {
   // Спершу числа → слова (щоб ElevenLabs не читав цифри чужою мовою).
-  let result = stressTeens(numbersToWords(text));
+  let result = stressTeens(numbersToWords(expandUnits(text)));
   // Довші фрази — першими: інакше коротше правило встигне спрацювати
   // всередині слова, яке мало б зловити довше правило цілком.
   const sorted = [...PRONUNCIATION_FIXES].sort((a, b) => b[0].length - a[0].length);
@@ -270,7 +314,7 @@ function fixPronunciation(text) {
 
 // Відкрито тільки заради тестів: словник наголосів мовчазний — помилку в ньому
 // видно лише в готовому ролику, через годину після генерації.
-export { fixPronunciation, toSpeechCase };
+export { fixPronunciation, toSpeechCase, expandUnits };
 
 function matchCase(replacement, original) {
   if (original === original.toUpperCase()) return replacement.toUpperCase();
