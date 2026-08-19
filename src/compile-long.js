@@ -106,6 +106,10 @@ async function reuse(item, { dropCta, workDir, index, onProgress }) {
 
   const normalized = path.join(workDir, `part-${String(index).padStart(2, '0')}.mp4`);
   await remuxToReelsSpec(source, normalized);
+  // Проміжні файли прибираємо одразу: на п'ятнадцяти епізодах це сотні
+  // мегабайтів у теці контейнера, і збірка впиралася б у диск.
+  await rm(raw, { force: true }).catch(() => {});
+  if (source !== raw) await rm(source, { force: true }).catch(() => {});
   return normalized;
 }
 
