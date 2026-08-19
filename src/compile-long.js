@@ -8,10 +8,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, writeFile, rm, stat, readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
+import { createWriteStream } from 'node:fs';
+import { pipeline as streamPipeline } from 'node:stream/promises';
 import { downloadArchive } from './drive.js';
 import { extractPhotoArchive, splitScriptLines } from './archive.js';
 import { assembleVideo } from './pipeline.js';
 import { remuxToReelsSpec } from './montage.js';
+import { listVideoFiles, videoName, streamVideo } from './videos.js';
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -19,6 +22,91 @@ function run(command, args) {
       if (error) { error.stderr = stderr; reject(error); } else resolve(stdout);
     });
   });
+}
+
+// ffmpeg пише silencedetect у stderr і завершується ненульовим кодом лише
+// при справжній помилці, тож stderr забираємо окремо.
+function runCaptureStderr(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stderr) reject(error); else resolve(stderr || '');
+    });
+  });
+}
+
+async function durationSeconds(filePath) {
+  const out = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration',
+    '-of', 'default=noprint_wrappers=1:nokey=1', filePath]);
+  return Number(String(out).trim());
+}
+
+// Де закінчується передостанній слайд. Заклик — завжди ОСТАННЯ репліка,
+// тож шукаємо останню паузу перед нею й ріжемо посередині цієї паузи.
+// Хвостову тишу (яка тягнеться до кінця файлу) ігноруємо — інакше різали б
+// у самому кінці й нічого не відрізали.
+// Розбирає вивід silencedetect у список пауз. Чиста функція — щоб її можна
+// було перевірити тестами без запуску ffmpeg.
+export function parseSilenceGaps(log) {
+  const gaps = [];
+  let start = null;
+  for (const line of String(log).split('\n')) {
+    const s = line.match(/silence_start:\s*(-?[\d.]+)/);
+    if (s) { start = Number(s[1]); continue; }
+    const e = line.match(/silence_end:\s*([\d.]+)/);
+    if (e && start != null) { gaps.push({ start, end: Number(e[1]) }); start = null; }
+  }
+  return gaps;
+}
+
+// Де закінчується передостанній слайд. Заклик — завжди ОСТАННЯ репліка, тож
+// беремо останню паузу перед нею й ріжемо посередині. Хвостову тишу (яка
+// тягнеться до кінця файлу) ігноруємо: інакше різали б у самому кінці й
+// нічого не відрізали.
+export function pickCtaCut(gaps, total, tailGuardSeconds = 1.2) {
+  const inner = gaps.filter((g) => g.end < total - tailGuardSeconds);
+  if (!inner.length) return { cut: null, total, gap: null };
+  const last = inner[inner.length - 1];
+  return {
+    cut: (last.start + last.end) / 2,
+    total,
+    gap: Number((last.end - last.start).toFixed(2)),
+  };
+}
+
+export async function ctaCutPoint(videoPath, { tailGuardSeconds = 1.2 } = {}) {
+  const total = await durationSeconds(videoPath);
+  const log = await runCaptureStderr('ffmpeg',
+    ['-i', videoPath, '-af', 'silencedetect=noise=-30dB:d=0.35', '-f', 'null', '-']);
+  return pickCtaCut(parseSilenceGaps(log), total, tailGuardSeconds);
+}
+
+// Повторне використання: беремо ГОТОВЕ відео з Drive і ріжемо заклик по
+// знайденій паузі. Озвучка не синтезується наново — нуль символів ElevenLabs.
+async function reuse(item, { dropCta, workDir, index, onProgress }) {
+  const files = await listVideoFiles();
+  const file = files.get(videoName(item.id));
+  if (!file) throw new Error(`${item.id}: готового відео немає в папці Drive.`);
+
+  const raw = path.join(workDir, `raw-${index}.mp4`);
+  const r = await streamVideo(file.id);
+  await streamPipeline(r.stream, createWriteStream(raw));
+
+  let source = raw;
+  if (dropCta) {
+    const { cut, total, gap } = await ctaCutPoint(raw);
+    if (cut == null) {
+      throw new Error(`${item.id}: не знайшов паузи перед закликом — цей епізод треба перезібрати.`);
+    }
+    onProgress(`   ріжу на ${cut.toFixed(1)} с із ${total.toFixed(1)} (пауза ${gap} с)`);
+    const trimmed = path.join(workDir, `trim-${index}.mp4`);
+    await run('ffmpeg', ['-y', '-i', raw, '-t', cut.toFixed(3),
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', trimmed]);
+    source = trimmed;
+  }
+
+  const normalized = path.join(workDir, `part-${String(index).padStart(2, '0')}.mp4`);
+  await remuxToReelsSpec(source, normalized);
+  return normalized;
 }
 
 // Перезбирає один епізод. dropCta — викинути останній слайд із закликом.
@@ -71,13 +159,15 @@ export async function toWide(inPath, outPath) {
 
 // Головна функція. items — рядки таблиці в потрібному порядку.
 // onProgress(text) — необов'язковий колбек для живого журналу.
-export async function compileLong(items, { wide = false, keepCta = false, onProgress = () => {} } = {}) {
+export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, onProgress = () => {} } = {}) {
   if (!Array.isArray(items) || items.length < 2) {
     throw new Error('Для добірки треба щонайменше два епізоди.');
   }
-  const missing = items.filter((it) => !it.archive);
-  if (missing.length) {
-    throw new Error(`Порожній архів у рядках: ${missing.map((it) => it.id).join(', ')}`);
+  if (!reuseVideo) {
+    const missing = items.filter((it) => !it.archive);
+    if (missing.length) {
+      throw new Error(`Порожній архів у рядках: ${missing.map((it) => it.id).join(', ')}`);
+    }
   }
 
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'longcut-'));
@@ -86,7 +176,8 @@ export async function compileLong(items, { wide = false, keepCta = false, onProg
     const isLast = i === items.length - 1;
     const dropCta = !keepCta && !isLast;
     onProgress(`${i + 1}/${items.length} — ${item.title || item.id}${dropCta ? '' : ' (із закликом)'}`);
-    parts.push(await rebuild(item, { dropCta, workDir, index: i + 1 }));
+    const opts = { dropCta, workDir, index: i + 1, onProgress };
+    parts.push(reuseVideo ? await reuse(item, opts) : await rebuild(item, opts));
   }
 
   onProgress('склеюю частини');

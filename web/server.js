@@ -506,7 +506,10 @@ const server = http.createServer(async (req, res) => {
       const job = { state: 'running', log: [], startedAt: Date.now(), path: null, size: 0, episodes: 0, error: null, wide: !!body.wide };
       compileJob = job;
       // Навмисно НЕ чекаємо: збірка триває хвилини, а HTTP-запит стільки не живе.
-      compileLong(items, { wide: !!body.wide, onProgress: (text) => job.log.push(text) })
+      // За замовчуванням беремо ГОТОВІ відео з Drive і ріжемо заклик по паузі:
+      // так добірка не коштує жодного символу ElevenLabs. rebuild=true вмикає
+      // повну перезбірку з архівів (потрібна, якщо пауза не знаходиться).
+      compileLong(items, { wide: !!body.wide, reuseVideo: !body.rebuild, onProgress: (text) => job.log.push(text) })
         .then((r) => Object.assign(job, { state: 'done', path: r.path, size: r.size, episodes: r.episodes }))
         .catch((error) => Object.assign(job, { state: 'failed', error: error.message }));
       return json(res, 200, { ok: true, episodes: items.length });

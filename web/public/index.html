@@ -263,6 +263,7 @@
       Заклик лишиться рівно один, у кінці добірки.</p>
     <div class="cut-list" id="cutList"></div>
     <label class="cut-wide"><input type="checkbox" id="cutWide" /> формат 16:9 для YouTube</label>
+    <label class="cut-wide"><input type="checkbox" id="cutRebuild" /> перезібрати з новою озвучкою (платно)</label>
     <div class="own-actions">
       <button class="btn primary" id="cutStart">Зібрати добірку</button>
     </div>
@@ -865,8 +866,10 @@
         log.textContent = `Не вийшло: ${status.error}`;
       } else if (status.state === 'done') {
         const mb = (status.size / 1024 / 1024).toFixed(1);
-        log.innerHTML = `Готово: ${status.episodes} епізодів, ${mb} МБ`
-          + ` · <a href="/api/compile/file" download>завантажити</a>`;
+        // Просте <a download> у вебв'ю Telegram не працює — потрібен той самий
+        // шлях, що й для роликів: нативне завантаження або зовнішній браузер.
+        log.innerHTML = `Готово: ${status.episodes} епізодів, ${mb} МБ · `
+          + `<button class="btn secondary" id="cutGet">завантажити</button>`;
       }
     }
 
@@ -878,6 +881,11 @@
         $('#cutStart').disabled = status.state === 'running';
       } catch (e) { /* мережа моргнула — наступний тік добере */ }
     }
+
+    $('#cutLog').addEventListener('click', (event) => {
+      if (event.target.id !== 'cutGet') return;
+      downloadVideo({ id: 'compilation', fileName: 'compilation.mp4', downloadUrl: '/api/compile/file' });
+    });
 
     $('#cutToggle').addEventListener('click', () => {
       const panel = $('#cutPanel');
@@ -893,7 +901,7 @@
       try {
         const r = await fetch('/api/compile/start', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ initData, ids, wide: $('#cutWide').checked }),
+          body: JSON.stringify({ initData, ids, wide: $('#cutWide').checked, rebuild: $('#cutRebuild').checked }),
         }).then((x) => x.json());
         if (r.error) { toast(r.error); btn.disabled = false; return; }
         toast(`Збираю ${r.episodes} епізодів`);

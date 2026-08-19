@@ -4,6 +4,7 @@
 //   node scripts/compile-long.js --ids AUTO-20260816-1203,AUTO-20260817-0910
 //   node scripts/compile-long.js --limit 10 --wide      (16:9 для YouTube)
 //   node scripts/compile-long.js --limit 3 --keep-cta   (не різати хвости)
+//   node scripts/compile-long.js --limit 3 --rebuild    (перезібрати з озвучкою наново)
 //
 // Результат лишається локальним файлом: на Drive нічого не заливається,
 // щоб пробну збірку можна було спершу подивитися.
@@ -42,6 +43,7 @@ async function main() {
   const result = await compileLong(items, {
     wide: flag('wide'),
     keepCta: flag('keep-cta'),
+    reuseVideo: !flag('rebuild'),
     onProgress: (text) => console.log(`  ${text}`),
   });
 
