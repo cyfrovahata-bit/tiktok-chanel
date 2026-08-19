@@ -143,6 +143,8 @@
     .cut-list { max-height: 260px; overflow-y: auto; margin-bottom: 10px; }
     .cut-log { font-size: 13px; color: var(--muted); white-space: pre-wrap; margin-top: 10px; }
     .cut-wide { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 10px; }
+    .cut-opts-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+      margin: 14px 0 8px; padding-top: 12px; border-top: 1px solid var(--line); }
     .published-item {
       display: flex; align-items: center; gap: 11px;
       padding: 11px 13px; background: var(--surface);
@@ -262,6 +264,7 @@
     <p class="own-hint">Познач епізоди — кожен перезбереться без останнього слайда із закликом.
       Заклик лишиться рівно один, у кінці добірки.</p>
     <div class="cut-list" id="cutList"></div>
+    <div class="cut-opts-title">Налаштування</div>
     <label class="cut-wide"><input type="checkbox" id="cutWide" /> формат 16:9 для YouTube</label>
     <label class="cut-wide"><input type="checkbox" id="cutRebuild" /> перезібрати з новою озвучкою (платно)</label>
     <div class="own-actions">
@@ -871,7 +874,7 @@
         // Кнопка тягне з контейнера (швидко, але живе до передеплою),
         // посилання на Drive лишається назавжди.
         log.innerHTML = `Готово: ${status.episodes} епізодів, ${mb} МБ · `
-          + `<button class="btn secondary" id="cutGet">завантажити</button>`
+          + `<button class="btn secondary" id="cutGet" data-url="${status.fileUrl}" data-name="${status.fileName}">завантажити</button>`
           + (status.driveUrl ? ` · <a href="${status.driveUrl}" target="_blank" rel="noopener">на Drive</a>` : '');
       }
     }
@@ -887,7 +890,12 @@
 
     $('#cutLog').addEventListener('click', (event) => {
       if (event.target.id !== 'cutGet') return;
-      downloadVideo({ id: 'compilation', fileName: 'compilation.mp4', downloadUrl: '/api/compile/file' });
+      const btn = event.target;
+      downloadVideo({
+        id: 'compilation',
+        fileName: btn.dataset.name || 'compilation.mp4',
+        downloadUrl: btn.dataset.url || '/api/compile/file',
+      });
     });
 
     $('#cutToggle').addEventListener('click', () => {

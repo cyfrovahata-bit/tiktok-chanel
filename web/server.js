@@ -503,7 +503,12 @@ const server = http.createServer(async (req, res) => {
         items.push(item);
       }
 
-      const job = { state: 'running', log: [], startedAt: Date.now(), path: null, size: 0, episodes: 0, error: null, wide: !!body.wide };
+      const startedAt = Date.now();
+      // Ідентифікатор збірки їде і в URL, і в ім'я файлу: інакше завантажувач
+      // бачить ту саму адресу «/api/compile/file» і віддає з кешу ПЕРШУ
+      // добірку, скільки б нових ти не зібрав.
+      const jobId = String(startedAt);
+      const job = { id: jobId, state: 'running', log: [], startedAt, path: null, size: 0, episodes: 0, error: null, wide: !!body.wide };
       compileJob = job;
       // Навмисно НЕ чекаємо: збірка триває хвилини, а HTTP-запит стільки не живе.
       // За замовчуванням беремо ГОТОВІ відео з Drive і ріжемо заклик по паузі:
@@ -532,19 +537,28 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && pathname === '/api/compile/status') {
       if (!compileJob) return json(res, 200, { state: 'idle' });
-      const { state, log, error, size, episodes, wide, startedAt, driveUrl } = compileJob;
+      const { id, state, log, error, size, episodes, wide, startedAt, driveUrl } = compileJob;
       return json(res, 200, {
         state, log, error, size, episodes, wide, driveUrl,
+        fileUrl: `/api/compile/file/${id}.mp4`,
+        fileName: `compilation-${id}.mp4`,
         seconds: Math.round((Date.now() - startedAt) / 1000),
       });
     }
 
-    if (req.method === 'GET' && pathname === '/api/compile/file') {
+    if (req.method === 'GET' && pathname.startsWith('/api/compile/file')) {
       if (compileJob?.state !== 'done') return json(res, 404, { error: 'готового файлу немає' });
+      // У шляху стоїть ідентифікатор збірки. Якщо просять стару — кажемо про це
+      // прямо, а не підсовуємо мовчки іншу.
+      const asked = pathname.slice('/api/compile/file'.length).replace(/^\//, '').replace(/\.mp4$/, '');
+      if (asked && asked !== compileJob.id) {
+        return json(res, 404, { error: 'ця збірка вже застаріла — онови сторінку' });
+      }
       res.writeHead(200, {
         'content-type': 'video/mp4',
         'content-length': String(compileJob.size),
-        'content-disposition': 'attachment; filename="compilation.mp4"',
+        'content-disposition': `attachment; filename="compilation-${compileJob.id}.mp4"`,
+        'cache-control': 'no-store, must-revalidate',
       });
       const stream = createReadStream(compileJob.path);
       stream.pipe(res);
