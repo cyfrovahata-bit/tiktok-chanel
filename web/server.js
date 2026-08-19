@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady, listNewItems, listErrorItems, updateRowPrompt, deleteQueueRow, appendRejectedTheme, listRejectedThemes } from '../src/sheets.js';
 import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-prompt.js';
-import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoProps, videoFolderId, deleteVideo, remuxVideoToSpec } from '../src/videos.js';
+import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoProps, videoFolderId, deleteVideo, remuxVideoToSpec, uploadVideo } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
 import { forgetNotice } from '../src/notices.js';
 import { nextDailyTimes, kyivToday, kyivMinutes } from '../src/kyiv.js';
@@ -510,16 +510,31 @@ const server = http.createServer(async (req, res) => {
       // так добірка не коштує жодного символу ElevenLabs. rebuild=true вмикає
       // повну перезбірку з архівів (потрібна, якщо пауза не знаходиться).
       compileLong(items, { wide: !!body.wide, reuseVideo: !body.rebuild, onProgress: (text) => job.log.push(text) })
-        .then((r) => Object.assign(job, { state: 'done', path: r.path, size: r.size, episodes: r.episodes }))
+        .then(async (r) => {
+          Object.assign(job, { path: r.path, size: r.size, episodes: r.episodes });
+          // Кладемо готову добірку на Drive ОДРАЗУ. Тимчасова тека й пам'ять
+          // процесу не переживають передеплою, і власник лишався з мовчазною
+          // кнопкою. Автопублікація такий файл не візьме: вона шукає рівно
+          // videoName(id) рядків таблиці, а тут ім'я compilation-…
+          try {
+            job.log.push('кладу на Drive');
+            const name = `compilation-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}`;
+            const fileId = await uploadVideo(name, r.path);
+            Object.assign(job, { driveId: fileId, driveUrl: `https://drive.google.com/file/d/${fileId}/view` });
+          } catch (error) {
+            job.log.push(`на Drive не поклав: ${error.message}`);
+          }
+          job.state = 'done';
+        })
         .catch((error) => Object.assign(job, { state: 'failed', error: error.message }));
       return json(res, 200, { ok: true, episodes: items.length });
     }
 
     if (req.method === 'GET' && pathname === '/api/compile/status') {
       if (!compileJob) return json(res, 200, { state: 'idle' });
-      const { state, log, error, size, episodes, wide, startedAt } = compileJob;
+      const { state, log, error, size, episodes, wide, startedAt, driveUrl } = compileJob;
       return json(res, 200, {
-        state, log, error, size, episodes, wide,
+        state, log, error, size, episodes, wide, driveUrl,
         seconds: Math.round((Date.now() - startedAt) / 1000),
       });
     }

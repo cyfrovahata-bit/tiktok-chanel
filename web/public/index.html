@@ -868,8 +868,11 @@
         const mb = (status.size / 1024 / 1024).toFixed(1);
         // Просте <a download> у вебв'ю Telegram не працює — потрібен той самий
         // шлях, що й для роликів: нативне завантаження або зовнішній браузер.
+        // Кнопка тягне з контейнера (швидко, але живе до передеплою),
+        // посилання на Drive лишається назавжди.
         log.innerHTML = `Готово: ${status.episodes} епізодів, ${mb} МБ · `
-          + `<button class="btn secondary" id="cutGet">завантажити</button>`;
+          + `<button class="btn secondary" id="cutGet">завантажити</button>`
+          + (status.driveUrl ? ` · <a href="${status.driveUrl}" target="_blank" rel="noopener">на Drive</a>` : '');
       }
     }
 
