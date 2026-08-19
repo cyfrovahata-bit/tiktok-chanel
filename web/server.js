@@ -10,6 +10,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { readFile, mkdtemp } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -22,6 +23,7 @@ import { nextDailyTimes, kyivToday, kyivMinutes } from '../src/kyiv.js';
 import { photoSchedule } from '../src/photo-plan.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
+import { compileLong } from '../src/compile-long.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty } from '../src/autopublish.js';
@@ -38,6 +40,13 @@ import { startTelegramLoop } from '../src/telegram-loop.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
+
+// Довга добірка з готових епізодів. Тримаємо РІВНО ОДНЕ завдання за раз:
+// збірка перекодовує відео й синтезує озвучку наново, тож два паралельні
+// запуски просто з'їдять контейнер. Стан живе в пам'яті — після перезапуску
+// сервісу готовий файл зникає разом із тимчасовою текою, і це нормально:
+// добірку качають одразу, а не через тиждень.
+let compileJob = null;
 
 function json(res, code, body) {
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' });
@@ -469,6 +478,63 @@ const server = http.createServer(async (req, res) => {
       } catch (error) {
         return json(res, 400, { error: error.message });
       }
+    }
+
+    // --- Довга добірка ------------------------------------------------
+    // Збирає кілька готових епізодів в один довгий ролик: кожен
+    // перезбирається з архіву БЕЗ останнього слайда (заклик підписатися),
+    // і лише в останньому епізоді заклик лишається. Робота довга, тому
+    // запуск і опитування стану рознесені: старт віддає відповідь одразу.
+    if (req.method === 'POST' && pathname === '/api/compile/start') {
+      const body = JSON.parse(await readBody(req));
+      const check = verifyInitData(body.initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Збирати добірку може лише власник каналу' });
+      if (compileJob?.state === 'running') return json(res, 409, { error: 'Збірка вже триває' });
+
+      const ids = Array.isArray(body.ids) ? body.ids : [];
+      if (ids.length < 2) return json(res, 400, { error: 'Познач щонайменше два епізоди' });
+      const all = await readAllItems();
+      const items = [];
+      for (const id of ids) {
+        const item = all.find((it) => it.id === id);
+        if (!item) return json(res, 400, { error: `Рядок ${id} не знайдено` });
+        if (!item.archive) return json(res, 400, { error: `У рядку ${id} порожня колонка «Архів»` });
+        items.push(item);
+      }
+
+      const job = { state: 'running', log: [], startedAt: Date.now(), path: null, size: 0, episodes: 0, error: null, wide: !!body.wide };
+      compileJob = job;
+      // Навмисно НЕ чекаємо: збірка триває хвилини, а HTTP-запит стільки не живе.
+      compileLong(items, { wide: !!body.wide, onProgress: (text) => job.log.push(text) })
+        .then((r) => Object.assign(job, { state: 'done', path: r.path, size: r.size, episodes: r.episodes }))
+        .catch((error) => Object.assign(job, { state: 'failed', error: error.message }));
+      return json(res, 200, { ok: true, episodes: items.length });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/compile/status') {
+      if (!compileJob) return json(res, 200, { state: 'idle' });
+      const { state, log, error, size, episodes, wide, startedAt } = compileJob;
+      return json(res, 200, {
+        state, log, error, size, episodes, wide,
+        seconds: Math.round((Date.now() - startedAt) / 1000),
+      });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/compile/file') {
+      if (compileJob?.state !== 'done') return json(res, 404, { error: 'готового файлу немає' });
+      res.writeHead(200, {
+        'content-type': 'video/mp4',
+        'content-length': String(compileJob.size),
+        'content-disposition': 'attachment; filename="compilation.mp4"',
+      });
+      const stream = createReadStream(compileJob.path);
+      stream.pipe(res);
+      stream.on('error', (error) => {
+        console.error(`Добірка: не вдалося віддати файл — ${error.message}`);
+        if (!res.destroyed) res.destroy();
+      });
+      return;
     }
 
     // Охоплення допису. Вирішальний сигнал, коли Graph показує «Публічно», а

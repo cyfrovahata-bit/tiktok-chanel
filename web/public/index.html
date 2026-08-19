@@ -136,6 +136,13 @@
     .btn.done { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
     .btn[disabled] { opacity: .55; pointer-events: none; }
 
+    .cut-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+    .cut-row:last-child { border-bottom: 0; }
+    .cut-row input { width: 18px; height: 18px; flex: 0 0 18px; }
+    .cut-row span { font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cut-list { max-height: 260px; overflow-y: auto; margin-bottom: 10px; }
+    .cut-log { font-size: 13px; color: var(--muted); white-space: pre-wrap; margin-top: 10px; }
+    .cut-wide { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 10px; }
     .published-item {
       display: flex; align-items: center; gap: 11px;
       padding: 11px 13px; background: var(--surface);
@@ -249,6 +256,18 @@
 
   <button class="own-toggle" id="schedToggle">🗓 Розклад публікацій</button>
   <div class="own-panel" id="schedPanel"><div class="sched-note">Завантажую…</div></div>
+
+  <button class="own-toggle" id="cutToggle">🎬 Довга добірка</button>
+  <div class="own-panel" id="cutPanel">
+    <p class="own-hint">Познач епізоди — кожен перезбереться без останнього слайда із закликом.
+      Заклик лишиться рівно один, у кінці добірки.</p>
+    <div class="cut-list" id="cutList"></div>
+    <label class="cut-wide"><input type="checkbox" id="cutWide" /> формат 16:9 для YouTube</label>
+    <div class="own-actions">
+      <button class="btn primary" id="cutStart">Зібрати добірку</button>
+    </div>
+    <div class="cut-log" id="cutLog"></div>
+  </div>
 
   <main id="app">
     <div class="skeleton"></div>
@@ -808,12 +827,82 @@
     async function load() {
       try {
         const state = await fetch('/api/state').then((r) => r.json());
+        lastState = state;
         render(state);
         tickCountdowns();
       } catch (e) {
         $('#app').innerHTML = `<div class="empty"><div class="big">⚠️</div>Не вдалося завантажити.<br>${esc(e.message)}</div>`;
       }
     }
+
+    // --- Довга добірка ------------------------------------------------------
+    // Збірка триває хвилини, тому кнопка лише СТАРТУЄ роботу, а далі
+    // застосунок опитує стан. Перезавантаження сторінки прогрес не губить:
+    // завдання живе на сервері, а не тут.
+    let lastState = null;
+    let cutTimer = null;
+
+    function cutRenderList() {
+      const box = $('#cutList'); box.innerHTML = '';
+      const items = (lastState?.published || []).filter((it) => it.id);
+      if (!items.length) { box.innerHTML = '<div class="sched-note">Опублікованих епізодів ще немає.</div>'; return; }
+      items.slice(0, 40).forEach((it) => {
+        const row = el('div', 'cut-row');
+        const box2 = document.createElement('input');
+        box2.type = 'checkbox'; box2.value = it.id;
+        row.appendChild(box2);
+        row.appendChild(el('span', '', esc(it.title || it.theme || it.id)));
+        box.appendChild(row);
+      });
+    }
+
+    function cutShow(status) {
+      const log = $('#cutLog');
+      if (!status || status.state === 'idle') { log.textContent = ''; return; }
+      if (status.state === 'running') {
+        log.textContent = `Збираю… ${status.seconds} с\n` + (status.log || []).join('\n');
+      } else if (status.state === 'failed') {
+        log.textContent = `Не вийшло: ${status.error}`;
+      } else if (status.state === 'done') {
+        const mb = (status.size / 1024 / 1024).toFixed(1);
+        log.innerHTML = `Готово: ${status.episodes} епізодів, ${mb} МБ`
+          + ` · <a href="/api/compile/file" download>завантажити</a>`;
+      }
+    }
+
+    async function cutPoll() {
+      try {
+        const status = await fetch('/api/compile/status').then((r) => r.json());
+        cutShow(status);
+        if (status.state !== 'running' && cutTimer) { clearInterval(cutTimer); cutTimer = null; }
+        $('#cutStart').disabled = status.state === 'running';
+      } catch (e) { /* мережа моргнула — наступний тік добере */ }
+    }
+
+    $('#cutToggle').addEventListener('click', () => {
+      const panel = $('#cutPanel');
+      panel.classList.toggle('open');
+      if (panel.classList.contains('open')) { cutRenderList(); cutPoll(); }
+    });
+
+    $('#cutStart').addEventListener('click', async () => {
+      if (!initData) { toast('Відкрий через Telegram'); return; }
+      const ids = [...document.querySelectorAll('#cutList input:checked')].map((i) => i.value);
+      if (ids.length < 2) { toast('Познач щонайменше два епізоди'); return; }
+      const btn = $('#cutStart'); btn.disabled = true;
+      try {
+        const r = await fetch('/api/compile/start', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ initData, ids, wide: $('#cutWide').checked }),
+        }).then((x) => x.json());
+        if (r.error) { toast(r.error); btn.disabled = false; return; }
+        toast(`Збираю ${r.episodes} епізодів`);
+        if (!cutTimer) cutTimer = setInterval(cutPoll, 3000);
+        cutPoll();
+      } catch (e) {
+        toast(e.message); btn.disabled = false;
+      }
+    });
 
     // --- Свій сюжет ---------------------------------------------------------
     // Фото шлемо по одному окремими запитами: десяток знімків із телефона в
