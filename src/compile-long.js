@@ -82,7 +82,6 @@ export async function ctaCutPoint(videoPath, { tailGuardSeconds = 1.2 } = {}) {
 
 export const FADE_IN = 0.25;
 export const FADE_OUT = 0.4;
-export const SEPARATOR_SECONDS = 0.6;
 
 // Обрізає (якщо треба) і гасить краї: без затемнення епізоди злипаються в
 // одну кашу й глядач не розуміє, де закінчилася історія.
@@ -101,20 +100,58 @@ async function prepare(inPath, outPath, { cut = null } = {}) {
   return outPath;
 }
 
-// Роздільник між сюжетами: чорний кадр із коротким «шухом». Звук робимо
-// самі з брунатного шуму — ніякого стороннього файлу, ніякої ліцензії.
-// Півсекунди тиші глядач читає як паузу, а зі звуком — як «почалося інше».
-async function makeSeparator(workDir, index) {
-  const raw = path.join(workDir, `sep-raw-${index}.mp4`);
+// Роздільник між сюжетами. Три шари, зібрані самим ffmpeg — жодного
+// стороннього файлу й жодної ліцензії:
+//   • наростання (тон, що йде вгору) — готує вухо;
+//   • удар низьким тоном — ставимо в САМИЙ КІНЕЦЬ, щоб він збігся з появою
+//     наступного сюжету, а не бахнув посеред чорного кадру;
+//   • повітряний хвіст із шуму — щоб удар не звучав голо.
+export const SEPARATOR_SECONDS = 0.55;
+const HIT_AT = 0.4; // секунда, на якій б'є удар
+
+async function separatorArgs(outPath) {
   const d = SEPARATOR_SECONDS;
-  await run('ffmpeg', [
+  return [
     '-y',
     '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${d}`,
-    '-f', 'lavfi', '-i', `anoisesrc=d=${d}:c=brown:a=0.6`,
-    '-af', `highpass=f=250,lowpass=f=3500,afade=t=in:d=0.12,afade=t=out:st=${(d - 0.28).toFixed(2)}:d=0.28,volume=-6dB`,
+    '-f', 'lavfi', '-i', `aevalsrc=exprs=sin(2*PI*t*(250+1700*t)):d=0.45:s=48000`,
+    '-f', 'lavfi', '-i', 'sine=frequency=70:duration=0.22:sample_rate=48000',
+    '-f', 'lavfi', '-i', `anoisesrc=d=${d}:c=brown:a=0.6:r=48000`,
+    '-filter_complex',
+    '[1:a]afade=t=in:d=0.22,afade=t=out:st=0.36:d=0.09,volume=-9dB[riser];'
+    + `[2:a]afade=t=out:st=0.03:d=0.19,volume=-1dB,adelay=${Math.round(HIT_AT * 1000)}|${Math.round(HIT_AT * 1000)}[hit];`
+    + '[3:a]highpass=f=180,lowpass=f=5000,afade=t=in:d=0.15,afade=t=out:st=0.4:d=0.15,volume=-15dB[air];'
+    + '[riser][hit][air]amix=inputs=3:duration=longest:normalize=0,'
+    + 'alimiter=limit=0.95,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]',
+    '-map', '0:v', '-map', '[a]', '-shortest',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
+    outPath,
+  ];
+}
+
+// Запасний варіант — той самий простий шум. Потрібен на випадок, якщо
+// складений фільтр не зайде на конкретній збірці ffmpeg: краще скромний
+// перехід, ніж провалена добірка.
+function simpleSeparatorArgs(outPath) {
+  const d = SEPARATOR_SECONDS;
+  return [
+    '-y',
+    '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${d}`,
+    '-f', 'lavfi', '-i', `anoisesrc=d=${d}:c=brown:a=0.8`,
+    '-af', `highpass=f=250,lowpass=f=3500,afade=t=in:d=0.1,afade=t=out:st=${(d - 0.25).toFixed(2)}:d=0.25`,
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest',
-    raw,
-  ]);
+    outPath,
+  ];
+}
+
+async function makeSeparator(workDir, index, onProgress = () => {}) {
+  const raw = path.join(workDir, `sep-raw-${index}.mp4`);
+  try {
+    await run('ffmpeg', await separatorArgs(raw));
+  } catch (error) {
+    onProgress(`   складений перехід не зібрався (${String(error.message).split('\n')[0]}), беру простий`);
+    await run('ffmpeg', simpleSeparatorArgs(raw));
+  }
   const out = path.join(workDir, `sep-${index}.mp4`);
   await remuxToReelsSpec(raw, out);
   await rm(raw, { force: true }).catch(() => {});
@@ -243,7 +280,7 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
   if (separators && parts.length > 1) {
     onProgress('роблю роздільники між сюжетами');
     const seps = [];
-    for (let i = 0; i < parts.length - 1; i++) seps.push(await makeSeparator(workDir, i + 1));
+    for (let i = 0; i < parts.length - 1; i++) seps.push(await makeSeparator(workDir, i + 1, onProgress));
     sequence = interleave(parts, seps);
   }
 
