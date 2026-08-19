@@ -41,3 +41,22 @@ test('коли жодної придатної паузи немає — чес�
   assert.deepEqual(pickCtaCut([{ start: 10, end: 11 }], 11.5), { cut: null, total: 11.5, gap: null });
   assert.deepEqual(pickCtaCut([], 60), { cut: null, total: 60, gap: null });
 });
+
+import { interleave } from '../src/compile-long.js';
+
+test('роздільники стають МІЖ епізодами, не з краю', () => {
+  const parts = ['a.mp4', 'b.mp4', 'c.mp4'];
+  const seps = ['s1.mp4', 's2.mp4'];
+  assert.deepEqual(interleave(parts, seps),
+    ['a.mp4', 's1.mp4', 'b.mp4', 's2.mp4', 'c.mp4']);
+});
+
+test('на одному епізоді роздільників немає', () => {
+  assert.deepEqual(interleave(['a.mp4'], []), ['a.mp4']);
+});
+
+test('порядок епізодів зберігається', () => {
+  const parts = ['1', '2', '3', '4'];
+  const out = interleave(parts, ['x', 'y', 'z']);
+  assert.deepEqual(out.filter((p) => parts.includes(p)), parts);
+});

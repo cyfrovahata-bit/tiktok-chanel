@@ -80,6 +80,58 @@ export async function ctaCutPoint(videoPath, { tailGuardSeconds = 1.2 } = {}) {
   return pickCtaCut(parseSilenceGaps(log), total, tailGuardSeconds);
 }
 
+export const FADE_IN = 0.25;
+export const FADE_OUT = 0.4;
+export const SEPARATOR_SECONDS = 0.6;
+
+// Обрізає (якщо треба) і гасить краї: без затемнення епізоди злипаються в
+// одну кашу й глядач не розуміє, де закінчилася історія.
+async function prepare(inPath, outPath, { cut = null } = {}) {
+  const dur = cut ?? await durationSeconds(inPath);
+  const outAt = Math.max(0, dur - FADE_OUT).toFixed(3);
+  const args = ['-y', '-i', inPath];
+  if (cut != null) args.push('-t', cut.toFixed(3));
+  args.push(
+    '-vf', `fade=t=in:st=0:d=${FADE_IN},fade=t=out:st=${outAt}:d=${FADE_OUT}`,
+    '-af', `afade=t=in:st=0:d=${FADE_IN},afade=t=out:st=${outAt}:d=${FADE_OUT}`,
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
+    outPath,
+  );
+  await run('ffmpeg', args);
+  return outPath;
+}
+
+// Роздільник між сюжетами: чорний кадр із коротким «шухом». Звук робимо
+// самі з брунатного шуму — ніякого стороннього файлу, ніякої ліцензії.
+// Півсекунди тиші глядач читає як паузу, а зі звуком — як «почалося інше».
+async function makeSeparator(workDir, index) {
+  const raw = path.join(workDir, `sep-raw-${index}.mp4`);
+  const d = SEPARATOR_SECONDS;
+  await run('ffmpeg', [
+    '-y',
+    '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${d}`,
+    '-f', 'lavfi', '-i', `anoisesrc=d=${d}:c=brown:a=0.6`,
+    '-af', `highpass=f=250,lowpass=f=3500,afade=t=in:d=0.12,afade=t=out:st=${(d - 0.28).toFixed(2)}:d=0.28,volume=-6dB`,
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest',
+    raw,
+  ]);
+  const out = path.join(workDir, `sep-${index}.mp4`);
+  await remuxToReelsSpec(raw, out);
+  await rm(raw, { force: true }).catch(() => {});
+  return out;
+}
+
+// Розставляє роздільники МІЖ частинами: не перед першою і не після останньої.
+// Чиста функція — щоб порядок можна було перевірити тестом.
+export function interleave(parts, separators) {
+  const out = [];
+  parts.forEach((part, i) => {
+    if (i > 0) out.push(separators[i - 1]);
+    out.push(part);
+  });
+  return out;
+}
+
 // Повторне використання: беремо ГОТОВЕ відео з Drive і ріжемо заклик по
 // знайденій паузі. Озвучка не синтезується наново — нуль символів ElevenLabs.
 async function reuse(item, { dropCta, workDir, index, onProgress }) {
@@ -91,19 +143,19 @@ async function reuse(item, { dropCta, workDir, index, onProgress }) {
   const r = await streamVideo(file.id);
   await streamPipeline(r.stream, createWriteStream(raw));
 
-  let source = raw;
+  let cut = null;
   if (dropCta) {
-    const { cut, total, gap } = await ctaCutPoint(raw);
-    if (cut == null) {
+    const found = await ctaCutPoint(raw);
+    if (found.cut == null) {
       throw new Error(`${item.id}: не знайшов паузи перед закликом — цей епізод треба перезібрати.`);
     }
-    onProgress(`   ріжу на ${cut.toFixed(1)} с із ${total.toFixed(1)} (пауза ${gap} с)`);
-    const trimmed = path.join(workDir, `trim-${index}.mp4`);
-    await run('ffmpeg', ['-y', '-i', raw, '-t', cut.toFixed(3),
-      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', trimmed]);
-    source = trimmed;
+    cut = found.cut;
+    onProgress(`   ріжу на ${cut.toFixed(1)} с із ${found.total.toFixed(1)} (пауза ${found.gap} с)`);
   }
 
+  const faded = path.join(workDir, `faded-${index}.mp4`);
+  await prepare(raw, faded, { cut });
+  const source = faded;
   const normalized = path.join(workDir, `part-${String(index).padStart(2, '0')}.mp4`);
   await remuxToReelsSpec(source, normalized);
   // Проміжні файли прибираємо одразу: на п'ятнадцяти епізодах це сотні
@@ -140,9 +192,12 @@ async function rebuild(item, { dropCta, workDir, index }) {
   });
 
   // Однакові кодек, fps і звук у всіх частин: без цього concat дає розсинхрон.
+  const faded = path.join(workDir, `faded-${index}.mp4`);
+  await prepare(videoPath, faded);
   const normalized = path.join(workDir, `part-${String(index).padStart(2, '0')}.mp4`);
-  await remuxToReelsSpec(videoPath, normalized);
+  await remuxToReelsSpec(faded, normalized);
   await rm(videoPath, { force: true }).catch(() => {});
+  await rm(faded, { force: true }).catch(() => {});
   return normalized;
 }
 
@@ -163,7 +218,7 @@ export async function toWide(inPath, outPath) {
 
 // Головна функція. items — рядки таблиці в потрібному порядку.
 // onProgress(text) — необов'язковий колбек для живого журналу.
-export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, onProgress = () => {} } = {}) {
+export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, separators = true, onProgress = () => {} } = {}) {
   if (!Array.isArray(items) || items.length < 2) {
     throw new Error('Для добірки треба щонайменше два епізоди.');
   }
@@ -184,9 +239,17 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     parts.push(reuseVideo ? await reuse(item, opts) : await rebuild(item, opts));
   }
 
+  let sequence = parts;
+  if (separators && parts.length > 1) {
+    onProgress('роблю роздільники між сюжетами');
+    const seps = [];
+    for (let i = 0; i < parts.length - 1; i++) seps.push(await makeSeparator(workDir, i + 1));
+    sequence = interleave(parts, seps);
+  }
+
   onProgress('склеюю частини');
   const listPath = path.join(workDir, 'parts.txt');
-  await writeFile(listPath, parts.map((p) => `file '${p}'`).join('\n'), 'utf8');
+  await writeFile(listPath, sequence.map((p) => `file '${p}'`).join('\n'), 'utf8');
   const joined = path.join(workDir, 'compilation.mp4');
   await run('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy',
     '-movflags', '+faststart', joined]);
