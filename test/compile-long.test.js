@@ -83,3 +83,18 @@ test('розділи враховують і тривалості, і розді
 test('без роздільників зсуву немає', () => {
   assert.deepEqual(buildChapters(['А', 'Б'], [60, 60], 0), ['0:00 А', '1:00 Б']);
 });
+
+import { introAss } from '../src/compile-long.js';
+
+test('розділи зсуваються на тривалість вступу', () => {
+  const lines = buildChapters(['А', 'Б'], [60, 60], 0, 4);
+  assert.deepEqual(lines, ['0:04 А', '1:04 Б']);
+});
+
+test('заставка малюється бандленим Oswald і містить обидва рядки', () => {
+  const ass = introAss('15 ІСТОРІЙ', 'ПРО УКРАЇНУ', 4.2);
+  assert.match(ass, /Style: Big,Oswald,/);
+  assert.match(ass, /15 ІСТОРІЙ/);
+  assert.match(ass, /ПРО УКРАЇНУ/);
+  assert.match(ass, /0:00:04\.20/); // напис висить рівно стільки, скільки заставка
+});

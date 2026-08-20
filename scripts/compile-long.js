@@ -6,6 +6,7 @@
 //   node scripts/compile-long.js --limit 3 --keep-cta   (не різати хвости)
 //   node scripts/compile-long.js --limit 3 --rebuild    (перезібрати з озвучкою наново)
 //   node scripts/compile-long.js --limit 3 --no-separators  (без роздільників)
+//   node scripts/compile-long.js --limit 3 --no-intro       (без вступної заставки)
 //
 // Результат лишається локальним файлом: на Drive нічого не заливається,
 // щоб пробну збірку можна було спершу подивитися.
@@ -46,6 +47,7 @@ async function main() {
     keepCta: flag('keep-cta'),
     reuseVideo: !flag('rebuild'),
     separators: !flag('no-separators'),
+    intro: !flag('no-intro'),
     onProgress: (text) => console.log(`  ${text}`),
   });
 

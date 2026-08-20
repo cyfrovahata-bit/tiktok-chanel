@@ -13,8 +13,10 @@ import { pipeline as streamPipeline } from 'node:stream/promises';
 import { downloadArchive } from './drive.js';
 import { extractPhotoArchive, splitScriptLines } from './archive.js';
 import { assembleVideo } from './pipeline.js';
-import { remuxToReelsSpec } from './montage.js';
+import { remuxToReelsSpec, mixAudio } from './montage.js';
 import { listVideoFiles, videoName, streamVideo } from './videos.js';
+import { synthesizeVoiceover } from './tts.js';
+import { fileURLToPath } from 'node:url';
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -158,6 +160,75 @@ async function makeSeparator(workDir, index, onProgress = () => {}) {
   return out;
 }
 
+const FONTS_DIR = fileURLToPath(new URL('../assets/fonts', import.meta.url));
+export const INTRO_TAIL = 0.7; // скільки заставка висить після останнього слова
+
+function assTime(seconds) {
+  const t = Math.max(0, seconds);
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = (t % 60).toFixed(2).padStart(5, '0');
+  return `${h}:${String(m).padStart(2, '0')}:${s}`;
+}
+
+// Заставка малюється тими самими субтитрами, що й підписи в роликах:
+// бандлений Oswald віддає кирилицю без сюрпризів, на відміну від малювання
+// тексту генератором зображень.
+export function introAss(big, small, seconds) {
+  return [
+    '[Script Info]', 'ScriptType: v4.00+', 'PlayResX: 1080', 'PlayResY: 1920', 'WrapStyle: 0', '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour,'
+    + ' Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline,'
+    + ' Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    'Style: Big,Oswald,150,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,2,0,1,6,0,5,80,80,0,1',
+    'Style: Small,Oswald,74,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,2,0,1,4,0,5,80,80,0,1',
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    `Dialogue: 0,0:00:00.00,${assTime(seconds)},Big,,0,0,0,,{\\pos(540,900)}${big}`,
+    `Dialogue: 0,0:00:00.00,${assTime(seconds)},Small,,0,0,0,,{\\pos(540,1040)}${small}`,
+    '',
+  ].join('\n');
+}
+
+// Вступна заставка: глядач має за перші секунди зрозуміти, що попереду
+// довге відео з кількох історій, інакше він іде, не дочекавшись другої.
+async function makeIntro(workDir, { count, big, small, spoken }, onProgress = () => {}) {
+  let voicePath = null;
+  let voiceSeconds = 3.2;
+  try {
+    const out = path.join(workDir, 'intro-voice.mp3');
+    const result = await synthesizeVoiceover(spoken, out, 4, 1, [spoken]);
+    voicePath = result.voicePath;
+    voiceSeconds = await durationSeconds(voicePath);
+  } catch (error) {
+    onProgress(`   вступ без голосу: ${String(error.message).split('\n')[0]}`);
+  }
+  const seconds = Number((voiceSeconds + INTRO_TAIL).toFixed(2));
+
+  const assPath = path.join(workDir, 'intro.ass');
+  await writeFile(assPath, introAss(big, small, seconds), 'utf8');
+
+  const silent = path.join(workDir, 'intro-silent.mp4');
+  await run('ffmpeg', ['-y', '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${seconds}`,
+    '-vf', `subtitles=${assPath}:fontsdir=${FONTS_DIR},fade=t=out:st=${(seconds - 0.4).toFixed(2)}:d=0.4`,
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', silent]);
+
+  const withSound = path.join(workDir, 'intro-voiced.mp4');
+  if (voicePath) {
+    await mixAudio(silent, voicePath, withSound);
+  } else {
+    await run('ffmpeg', ['-y', '-i', silent, '-f', 'lavfi', '-i',
+      `anullsrc=r=48000:cl=stereo:d=${seconds}`, '-shortest', '-c:v', 'copy', '-c:a', 'aac', withSound]);
+  }
+
+  const out = path.join(workDir, 'intro.mp4');
+  await remuxToReelsSpec(withSound, out);
+  onProgress(`вступ: ${count} історій, ${seconds} с`);
+  return out;
+}
+
 // Таймкод для опису YouTube: 0:00, 1:23, 1:02:33.
 export function timecode(seconds) {
   const total = Math.max(0, Math.floor(seconds));
@@ -170,11 +241,11 @@ export function timecode(seconds) {
 // Розділи для опису: перший обов'язково з нуля, інакше YouTube їх не визнає.
 // Тривалості беремо фактичні, бо епізоди різної довжини, а між ними ще й
 // роздільники.
-export function buildChapters(titles, durations, separatorSeconds) {
+export function buildChapters(titles, durations, separatorSeconds, startAt = 0) {
   const lines = [];
-  let at = 0;
+  let at = startAt;
   titles.forEach((title, i) => {
-    lines.push(`${timecode(i === 0 ? 0 : at)} ${title}`);
+    lines.push(`${timecode(at)} ${title}`);
     at += durations[i] + separatorSeconds;
   });
   return lines;
@@ -277,7 +348,7 @@ export async function toWide(inPath, outPath) {
 
 // Головна функція. items — рядки таблиці в потрібному порядку.
 // onProgress(text) — необов'язковий колбек для живого журналу.
-export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, separators = true, onProgress = () => {} } = {}) {
+export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, separators = true, intro = true, onProgress = () => {} } = {}) {
   if (!Array.isArray(items) || items.length < 2) {
     throw new Error('Для добірки треба щонайменше два епізоди.');
   }
@@ -301,6 +372,21 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     durations.push(await durationSeconds(part));
   }
 
+  // Вступ. Без нього глядач не знає, що попереду довге відео, і йде після
+  // першої ж історії, вирішивши, що це звичайний ролик.
+  let introPath = null;
+  let introSeconds = 0;
+  if (intro) {
+    onProgress('роблю вступ');
+    introPath = await makeIntro(workDir, {
+      count: items.length,
+      big: `${items.length} ІСТОРІЙ`,
+      small: 'ПРО УКРАЇНУ',
+      spoken: `У цьому відео ${items.length} коротких історій про Україну. Почнімо.`,
+    }, onProgress);
+    introSeconds = await durationSeconds(introPath);
+  }
+
   let sequence = parts;
   if (separators && parts.length > 1) {
     onProgress('роблю роздільники між сюжетами');
@@ -308,6 +394,7 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     for (let i = 0; i < parts.length - 1; i++) seps.push(await makeSeparator(workDir, i + 1, onProgress));
     sequence = interleave(parts, seps);
   }
+  if (introPath) sequence = [introPath, ...sequence];
 
   onProgress('склеюю частини');
   const listPath = path.join(workDir, 'parts.txt');
@@ -322,11 +409,14 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     final = await toWide(joined, path.join(workDir, 'compilation-16x9.mp4'));
   }
   const size = (await stat(final)).size;
-  const chapters = buildChapters(
+  const episodeChapters = buildChapters(
     items.map((it) => it.title || it.theme || it.id),
     durations,
     separators && parts.length > 1 ? SEPARATOR_SECONDS : 0,
+    introSeconds,
   );
+  // Перший розділ мусить починатися з нуля, інакше YouTube їх не визнає.
+  const chapters = introPath ? ['0:00 Вступ', ...episodeChapters] : episodeChapters;
   onProgress('готово');
   return { path: final, size, episodes: parts.length, chapters, workDir };
 }
