@@ -516,7 +516,7 @@ const server = http.createServer(async (req, res) => {
       // повну перезбірку з архівів (потрібна, якщо пауза не знаходиться).
       compileLong(items, { wide: !!body.wide, reuseVideo: !body.rebuild, onProgress: (text) => job.log.push(text) })
         .then(async (r) => {
-          Object.assign(job, { path: r.path, size: r.size, episodes: r.episodes });
+          Object.assign(job, { path: r.path, size: r.size, episodes: r.episodes, chapters: r.chapters });
           // Кладемо готову добірку на Drive ОДРАЗУ. Тимчасова тека й пам'ять
           // процесу не переживають передеплою, і власник лишався з мовчазною
           // кнопкою. Автопублікація такий файл не візьме: вона шукає рівно
@@ -537,9 +537,9 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && pathname === '/api/compile/status') {
       if (!compileJob) return json(res, 200, { state: 'idle' });
-      const { id, state, log, error, size, episodes, wide, startedAt, driveUrl } = compileJob;
+      const { id, state, log, error, size, episodes, wide, startedAt, driveUrl, chapters } = compileJob;
       return json(res, 200, {
-        state, log, error, size, episodes, wide, driveUrl,
+        state, log, error, size, episodes, wide, driveUrl, chapters,
         fileUrl: `/api/compile/file/${id}.mp4`,
         fileName: `compilation-${id}.mp4`,
         seconds: Math.round((Date.now() - startedAt) / 1000),

@@ -158,6 +158,28 @@ async function makeSeparator(workDir, index, onProgress = () => {}) {
   return out;
 }
 
+// Таймкод для опису YouTube: 0:00, 1:23, 1:02:33.
+export function timecode(seconds) {
+  const total = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
+// Розділи для опису: перший обов'язково з нуля, інакше YouTube їх не визнає.
+// Тривалості беремо фактичні, бо епізоди різної довжини, а між ними ще й
+// роздільники.
+export function buildChapters(titles, durations, separatorSeconds) {
+  const lines = [];
+  let at = 0;
+  titles.forEach((title, i) => {
+    lines.push(`${timecode(i === 0 ? 0 : at)} ${title}`);
+    at += durations[i] + separatorSeconds;
+  });
+  return lines;
+}
+
 // Розставляє роздільники МІЖ частинами: не перед першою і не після останньої.
 // Чиста функція — щоб порядок можна було перевірити тестом.
 export function interleave(parts, separators) {
@@ -268,12 +290,15 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
 
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'longcut-'));
   const parts = [];
+  const durations = [];
   for (const [i, item] of items.entries()) {
     const isLast = i === items.length - 1;
     const dropCta = !keepCta && !isLast;
     onProgress(`${i + 1}/${items.length} — ${item.title || item.id}${dropCta ? '' : ' (із закликом)'}`);
     const opts = { dropCta, workDir, index: i + 1, onProgress };
-    parts.push(reuseVideo ? await reuse(item, opts) : await rebuild(item, opts));
+    const part = reuseVideo ? await reuse(item, opts) : await rebuild(item, opts);
+    parts.push(part);
+    durations.push(await durationSeconds(part));
   }
 
   let sequence = parts;
@@ -297,6 +322,11 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     final = await toWide(joined, path.join(workDir, 'compilation-16x9.mp4'));
   }
   const size = (await stat(final)).size;
+  const chapters = buildChapters(
+    items.map((it) => it.title || it.theme || it.id),
+    durations,
+    separators && parts.length > 1 ? SEPARATOR_SECONDS : 0,
+  );
   onProgress('готово');
-  return { path: final, size, episodes: parts.length, workDir };
+  return { path: final, size, episodes: parts.length, chapters, workDir };
 }

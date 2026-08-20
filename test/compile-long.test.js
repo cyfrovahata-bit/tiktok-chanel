@@ -60,3 +60,26 @@ test('порядок епізодів зберігається', () => {
   const out = interleave(parts, ['x', 'y', 'z']);
   assert.deepEqual(out.filter((p) => parts.includes(p)), parts);
 });
+
+import { timecode, buildChapters } from '../src/compile-long.js';
+
+test('таймкод форматується як в описі YouTube', () => {
+  assert.equal(timecode(0), '0:00');
+  assert.equal(timecode(9), '0:09');
+  assert.equal(timecode(83), '1:23');
+  assert.equal(timecode(3753), '1:02:33');
+});
+
+test('перший розділ завжди з нуля', () => {
+  const lines = buildChapters(['А', 'Б'], [50.4, 47.1], 0.55);
+  assert.match(lines[0], /^0:00 А$/);
+});
+
+test('розділи враховують і тривалості, і роздільники', () => {
+  const lines = buildChapters(['А', 'Б', 'В'], [60, 60, 60], 1);
+  assert.deepEqual(lines, ['0:00 А', '1:01 Б', '2:02 В']);
+});
+
+test('без роздільників зсуву немає', () => {
+  assert.deepEqual(buildChapters(['А', 'Б'], [60, 60], 0), ['0:00 А', '1:00 Б']);
+});

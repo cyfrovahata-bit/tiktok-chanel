@@ -875,7 +875,11 @@
         // посилання на Drive лишається назавжди.
         log.innerHTML = `Готово: ${status.episodes} епізодів, ${mb} МБ · `
           + `<button class="btn secondary" id="cutGet" data-url="${status.fileUrl}" data-name="${status.fileName}">завантажити</button>`
-          + (status.driveUrl ? ` · <a href="${status.driveUrl}" target="_blank" rel="noopener">на Drive</a>` : '');
+          + (status.driveUrl ? ` · <a href="${status.driveUrl}" target="_blank" rel="noopener">на Drive</a>` : '')
+          + (status.chapters?.length
+            ? `<div class="cut-opts-title">Таймкоди для опису</div>`
+              + `<textarea class="notes" id="cutChapters" rows="6" readonly>${esc(status.chapters.join('\n'))}</textarea>`
+            : '');
       }
     }
 
