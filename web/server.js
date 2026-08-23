@@ -315,14 +315,24 @@ const server = http.createServer(async (req, res) => {
       const photoAt = photoSchedule(c.pending, photoHours(), now);
       json(res, 200, {
         // Теми, які ChatGPT уже написав, але ще не малював: їх можна правити.
-        pending: c.pending.map((it) => ({
-          id: it.id,
-          theme: it.theme || parseTheme(it.extra),
-          slides: parseSlideLines(it.extra),
-          note: it.note,
-          created: it.created,
-          photoAt: photoAt.get(it.id) || null,
-        })),
+        // Порядок карток = порядок черги на малювання, а не порядок рядків у
+        // таблиці. Інакше рядок, який щойно посунули вперед, лишається
+        // візуально третім, і власник вважає, що зміна не спрацювала.
+        pending: c.pending
+          .map((it) => ({
+            id: it.id,
+            theme: it.theme || parseTheme(it.extra),
+            slides: parseSlideLines(it.extra),
+            note: it.note,
+            created: it.created,
+            photoAt: photoAt.get(it.id) || null,
+          }))
+          .sort((a, b) => {
+            if (a.photoAt && b.photoAt) return a.photoAt.localeCompare(b.photoAt);
+            if (!a.photoAt && b.photoAt) return 1;   // без часу — у кінець
+            if (a.photoAt && !b.photoAt) return -1;
+            return 0;
+          }),
         queue: queueFrom(c, now),
         // Рядки, які ChatGPT зупинив на перевірці фактів. Без них сюжет
         // зникав із застосунку мовчки — статус ERROR не показувався ніде.
