@@ -51,3 +51,23 @@ test('дата зі створення розбирається, сміття �
   assert.equal(parseCreated('вчора'), null);
   assert.equal(parseCreated(''), null);
 });
+
+test('дата без провідних нулів теж розбирається', () => {
+  // Google Sheets віддає введену вручну дату у власному форматі, зазвичай без
+  // нулів. Раніше такий рядок ставав null і падав у кінець черги.
+  assert.equal(parseCreated('1.8.2026 0:01:00'), Date.parse('2026-08-01T00:01:00Z'));
+  assert.equal(parseCreated('1.8.2026'), Date.parse('2026-08-01T00:00:00Z'));
+});
+
+test('ISO-запис від Sheets теж приймається', () => {
+  assert.equal(parseCreated('2026-08-01 0:01'), Date.parse('2026-08-01T00:01:00Z'));
+  assert.equal(parseCreated('2026-08-01T00:01:00'), Date.parse('2026-08-01T00:01:00Z'));
+});
+
+test('рядок із такою датою стає ПЕРШИМ, а не останнім', () => {
+  const at = photoSchedule([
+    { id: 'СТАРИЙ_ФОРМАТ', created: '22.08.2026 08:00:00' },
+    { id: 'ПІДНЯТИЙ', created: '1.8.2026 0:01:00' },
+  ], HOURS, NOW);
+  assert.ok(new Date(at.get('ПІДНЯТИЙ')) < new Date(at.get('СТАРИЙ_ФОРМАТ')));
+});
