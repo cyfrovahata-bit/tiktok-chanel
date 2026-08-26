@@ -367,6 +367,28 @@ export function buildChaptersWithLeads(titles, durations, leads, startAt = 0) {
   return lines;
 }
 
+// Порядок епізодів у добірці — такий, як рядки лежать у таблиці: від
+// найстарішого до найсвіжішого. Позначають їх у мінідодатку зверху вниз, а
+// там новіші зверху — і добірка відкривалася б роликом, який глядач бачив
+// позавчора. Тепер свіжий іде останнім: доки глядач до нього дійде, встигне
+// подивитися все інше.
+//
+// Порядок беремо саме з таблиці, а не з того, як епізоди позначили: галочки
+// можна ставити врозсип, і покладатися на них не варто. Дублі ID (таке в
+// таблиці трапляється) беремо перші — рівно ті рядки, що й пошук за ID.
+export function orderEpisodes(all, ids) {
+  const wanted = new Set((ids || []).map(String));
+  const firstRow = new Map();
+  for (const item of all) {
+    const id = String(item.id);
+    if (wanted.has(id) && !firstRow.has(id)) firstRow.set(id, item);
+  }
+  return {
+    items: all.filter((it) => firstRow.get(String(it.id)) === it),
+    missing: [...wanted].filter((id) => !firstRow.has(id)),
+  };
+}
+
 // Розставляє роздільники МІЖ частинами: не перед першою і не після останньої.
 // Чиста функція — щоб порядок можна було перевірити тестом.
 export function interleave(parts, separators) {

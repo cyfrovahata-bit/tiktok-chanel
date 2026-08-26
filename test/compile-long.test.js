@@ -124,3 +124,37 @@ test('без верхнього рядка заставка лишається �
   const ass = introAss('15 ФАКТІВ', 'ПРО УКРАЇНУ', 4.2);
   assert.equal(ass.match(/^Dialogue:/gm).length, 2);
 });
+
+import { orderEpisodes } from '../src/compile-long.js';
+
+const ROWS = [
+  { id: 'A', title: 'найстаріший' },
+  { id: 'B', title: 'середній' },
+  { id: 'C', title: 'свіжий' },
+];
+
+test('порядок беремо з таблиці: свіжий епізод іде ОСТАННІМ', () => {
+  // Мінідодаток показує новіші зверху, тож приходять вони саме так.
+  const { items } = orderEpisodes(ROWS, ['C', 'B', 'A']);
+  assert.deepEqual(items.map((it) => it.id), ['A', 'B', 'C']);
+});
+
+test('непозначені рядки в добірку не потрапляють', () => {
+  const { items, missing } = orderEpisodes(ROWS, ['C', 'A']);
+  assert.deepEqual(items.map((it) => it.id), ['A', 'C']);
+  assert.deepEqual(missing, []);
+});
+
+test('невідомий ID повертається окремо, а не мовчки зникає', () => {
+  const { items, missing } = orderEpisodes(ROWS, ['A', 'ЩОСЬ']);
+  assert.deepEqual(items.map((it) => it.id), ['A']);
+  assert.deepEqual(missing, ['ЩОСЬ']);
+});
+
+test('дубль ID у таблиці не подвоює епізод у добірці', () => {
+  // Однакові ID в таблиці трапляються; беремо перший рядок — той самий, що
+  // знайшов би пошук за ID, і рівно один раз.
+  const withDupe = [...ROWS, { id: 'B', title: 'дубль' }];
+  const { items } = orderEpisodes(withDupe, ['B', 'C']);
+  assert.deepEqual(items.map((it) => it.title), ['середній', 'свіжий']);
+});

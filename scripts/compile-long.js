@@ -12,7 +12,7 @@
 // Результат лишається локальним файлом: на Drive нічого не заливається,
 // щоб пробну збірку можна було спершу подивитися.
 import { readAllItems } from '../src/sheets.js';
-import { compileLong } from '../src/compile-long.js';
+import { compileLong, orderEpisodes } from '../src/compile-long.js';
 
 function arg(name, fallback = null) {
   const i = process.argv.indexOf(`--${name}`);
@@ -26,11 +26,11 @@ async function pickItems() {
   const usable = items.filter((it) => it.archive && it.title);
   const ids = arg('ids');
   if (ids) {
-    return ids.split(',').map((s) => s.trim()).filter(Boolean).map((id) => {
-      const item = usable.find((it) => it.id === id);
-      if (!item) throw new Error(`Рядка ${id} немає або в ньому порожній архів чи назва.`);
-      return item;
-    });
+    // Порядок — за таблицею (найстаріший перший), хоч би в якому порядку їх
+    // перелічили в --ids: свіжий епізод має йти останнім.
+    const { items: picked, missing } = orderEpisodes(usable, ids.split(',').map((s) => s.trim()).filter(Boolean));
+    if (missing.length) throw new Error(`Рядка ${missing[0]} немає або в ньому порожній архів чи назва.`);
+    return picked;
   }
   const limit = Number(arg('limit', '3'));
   const published = usable.filter((it) => it.status === 'PUBLISHED');

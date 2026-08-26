@@ -23,7 +23,7 @@ import { nextDailyTimes, kyivToday, kyivMinutes } from '../src/kyiv.js';
 import { photoSchedule } from '../src/photo-plan.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
-import { compileLong } from '../src/compile-long.js';
+import { compileLong, orderEpisodes } from '../src/compile-long.js';
 import { savePreview, previewInfo, removePreview, fetchPreview } from '../src/preview.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
@@ -534,14 +534,13 @@ const server = http.createServer(async (req, res) => {
 
       const ids = Array.isArray(body.ids) ? body.ids : [];
       if (ids.length < 2) return json(res, 400, { error: 'Познач щонайменше два епізоди' });
+      // Порядок — за таблицею (найстаріший перший), а не за тим, у якому
+      // порядку епізоди позначили: свіжий ролик має йти останнім.
       const all = await readAllItems();
-      const items = [];
-      for (const id of ids) {
-        const item = all.find((it) => it.id === id);
-        if (!item) return json(res, 400, { error: `Рядок ${id} не знайдено` });
-        if (!item.archive) return json(res, 400, { error: `У рядку ${id} порожня колонка «Архів»` });
-        items.push(item);
-      }
+      const { items, missing } = orderEpisodes(all, ids);
+      if (missing.length) return json(res, 400, { error: `Рядок ${missing[0]} не знайдено` });
+      const empty = items.find((it) => !it.archive);
+      if (empty) return json(res, 400, { error: `У рядку ${empty.id} порожня колонка «Архів»` });
 
       const startedAt = Date.now();
       // Ідентифікатор збірки їде і в URL, і в ім'я файлу: інакше завантажувач
