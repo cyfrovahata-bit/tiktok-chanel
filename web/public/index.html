@@ -140,6 +140,10 @@
     .cut-row:last-child { border-bottom: 0; }
     .cut-row input { width: 18px; height: 18px; flex: 0 0 18px; }
     .cut-row span { font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Уже брали в добірку. Саме приглушений колір, а не disabled: позначити
+       ще раз можна — сильний сюжет іноді варто повторити. */
+    .cut-row.used span { color: var(--muted); }
+    .cut-used { flex: 0 0 auto; font-size: 11px; color: var(--muted); opacity: .8; }
     .cut-list { max-height: 260px; overflow-y: auto; margin-bottom: 10px; }
     .cut-log { font-size: 13px; color: var(--muted); white-space: pre-wrap; margin-top: 10px; }
     .cut-wide { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 10px; }
@@ -263,7 +267,8 @@
   <div class="own-panel" id="cutPanel">
     <p class="own-hint">Познач епізоди — кожен перезбереться без останнього слайда із закликом.
       Заклик лишиться рівно один, у кінці добірки. Порядок у відео — від найстарішого
-      до найсвіжішого (у списку навпаки), щоб недавній ролик не йшов першим.</p>
+      до найсвіжішого (у списку навпаки), щоб недавній ролик не йшов першим.
+      Сірим — ті, що вже були в добірці; позначити їх ще раз можна.</p>
     <div class="cut-list" id="cutList"></div>
     <div class="cut-opts-title">Прев'ю</div>
     <p class="own-hint" id="cutPreviewState">Перевіряю…</p>
@@ -861,11 +866,17 @@
       const items = (lastState?.published || []).filter((it) => it.id);
       if (!items.length) { box.innerHTML = '<div class="sched-note">Опублікованих епізодів ще немає.</div>'; return; }
       items.slice(0, 40).forEach((it) => {
-        const row = el('div', 'cut-row');
+        const row = el('div', `cut-row${it.compiled ? ' used' : ''}`);
         const box2 = document.createElement('input');
         box2.type = 'checkbox'; box2.value = it.id;
         row.appendChild(box2);
         row.appendChild(el('span', '', esc(it.title || it.theme || it.id)));
+        // Дата поруч, а не просто сірий колір: інакше не зрозуміло, чи це було
+        // минулого тижня, чи пів року тому.
+        if (it.compiled) {
+          const when = it.compiled.slice(5).split('-').reverse().join('.');
+          row.appendChild(el('span', 'cut-used', `у добірці ${when}`));
+        }
         box.appendChild(row);
       });
     }

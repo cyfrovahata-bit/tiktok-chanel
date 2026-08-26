@@ -111,6 +111,31 @@ export function videoProps(files, id) {
   return { ...marker, ...video };
 }
 
+// Мітка «цей епізод уже входив у довгу добірку». Живе на самому MP4, поруч із
+// мітками публікації: додаток лишається без стану, а мінідодаток по цій мітці
+// гасить рядок у списку — саме гасить, а не забороняє. Повторно взяти епізод
+// у нову добірку можна: іноді сильний сюжет варто повторити, просто це має
+// бути свідомий вибір, а не випадковість.
+//
+// Залежності приймаємо параметрами — щоб перевірити порядок викликів тестом,
+// не ходячи на Drive.
+export async function markCompiled(ids, {
+  when = new Date(),
+  listFiles = listVideoFiles,
+  setProperties = setVideoAppProperties,
+} = {}) {
+  const files = await listFiles();
+  const date = when.toISOString().slice(0, 10);
+  const marked = [];
+  for (const id of ids) {
+    const file = files.get(videoName(id));
+    if (!file) continue; // немає готового MP4 — нема на чому лишати мітку
+    await setProperties(file.id, { compiledAt: date });
+    marked.push(id);
+  }
+  return marked;
+}
+
 // Видаляє відео <ID>.mp4 з папки (щоб монітор згенерував його наново новим
 // кодом). Повертає true, якщо було що видаляти.
 export async function deleteVideo(id) {

@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady, listNewItems, listErrorItems, updateRowPrompt, deleteQueueRow, appendRejectedTheme, listRejectedThemes } from '../src/sheets.js';
 import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-prompt.js';
-import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoProps, videoFolderId, deleteVideo, remuxVideoToSpec, uploadVideo } from '../src/videos.js';
+import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoProps, videoFolderId, deleteVideo, remuxVideoToSpec, uploadVideo, markCompiled } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
 import { forgetNotice } from '../src/notices.js';
 import { nextDailyTimes, kyivToday, kyivMinutes } from '../src/kyiv.js';
@@ -351,6 +351,8 @@ const server = http.createServer(async (req, res) => {
         }),
         published: c.published.map((it) => ({
           id: it.id, title: it.title || it.theme, theme: it.theme, pubDate: it.pubDate,
+          // Дата, коли епізод уже брали в довгу добірку (мітка на самому MP4).
+          compiled: videoProps(c.files, it.id).compiledAt || null,
         })),
         googleReady: googleConfigured(),
         videoFolderSet: Boolean(videoFolderId()),
@@ -583,6 +585,16 @@ const server = http.createServer(async (req, res) => {
             Object.assign(job, { driveId: fileId, driveUrl: `https://drive.google.com/file/d/${fileId}/view` });
           } catch (error) {
             job.log.push(`на Drive не поклав: ${error.message}`);
+          }
+          // Позначаємо використані епізоди — щоб наступного разу було видно,
+          // що вони вже йшли в добірку. Не критично: збірка вже готова, і
+          // невдала мітка не має її псувати.
+          try {
+            const marked = await markCompiled(items.map((it) => it.id));
+            job.log.push(`позначив використані епізоди: ${marked.length}`);
+            cache.at = 0;
+          } catch (error) {
+            job.log.push(`мітки не поставив: ${error.message}`);
           }
           job.state = 'done';
         })
