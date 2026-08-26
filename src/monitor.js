@@ -165,9 +165,18 @@ function stageMessage(item) {
 // PUBLISHED, а не просто верхній. За старим ID у нього вже може лежати MP4 і
 // пам'ять автопублікації в appProperties, і перейменування відв'язало б рядок
 // від власного ролика. Перейменовуємо натомість рядки без відео (NEW, ERROR),
-// дописуючи -2, -3. Якщо готове відео мають ОБИДВА рядки — не чіпаємо жоден,
-// лише попереджаємо: тут уже потрібне рішення власника.
-async function splitDuplicateIds(items) {
+// дописуючи -2, -3.
+//
+// ОКРЕМИЙ ВИПАДОК: обидва рядки вже PUBLISHED. Тоді обережність зайва — жоден
+// не чекає на публікацію, пам'ять автопублікації свою справу зробила, і
+// перейменування нічого не ламає. Раніше код тут пасував і слав попередження
+// щоразу, роками. Лишаємо ID першому, решту розводимо.
+//
+// Попереджаємо тільки тоді, коли колізія зачіпає рядок у статусі DONE: там
+// ролик іще не опубліковано, і рішення справді має ухвалити власник.
+// Перейменування приймаємо параметром — так поведінку можна перевірити
+// тестами, не чіпаючи таблицю (той самий підхід, що в autopublish.js).
+export async function splitDuplicateIds(items, { rename = renameRowId } = {}) {
   const rowsById = new Map();
   for (const it of items) {
     if (!it.id) continue;
@@ -180,15 +189,16 @@ async function splitDuplicateIds(items) {
   const hasVideo = (it) => it.status === 'DONE' || it.status === 'PUBLISHED';
   for (const [id, rows] of rowsById) {
     if (rows.length < 2) continue;
+    const allPublished = rows.every((it) => it.status === 'PUBLISHED');
     const keeper = rows.find(hasVideo) ?? rows[0];
     for (const item of rows) {
       if (item === keeper) continue;
-      if (hasVideo(item)) { kept.push({ id, item }); continue; }
+      if (hasVideo(item) && !allPublished) { kept.push({ id, item }); continue; }
       let suffix = 2;
       while (taken.has(`${id}-${suffix}`)) suffix++;
       const newId = `${id}-${suffix}`;
       try {
-        await renameRowId(item.rowNumber, newId);
+        await rename(item.rowNumber, newId);
         taken.add(newId);
         item.id = newId;
         renamed.push({ from: id, to: newId, row: item.rowNumber, theme: item.theme });
@@ -222,7 +232,9 @@ export async function watchStages() {
     announced++;
   }
   for (const k of kept) {
-    const key = `dupe:${k.id}#${k.item.rowNumber}`;
+    // Ключ навмисно НЕ містить номера рядка: він зсувається щоразу, коли
+    // рядок вище видаляють, і те саме попередження прилітало наново.
+    const key = `dupe:${k.id}#${k.item.created || k.item.theme || ''}`;
     if (seen[key]) continue;
     seen[key] = k.item.status;
     changed = true;
