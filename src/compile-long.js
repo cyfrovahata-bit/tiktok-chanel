@@ -165,8 +165,15 @@ async function makeSeparator(workDir, index, onProgress = () => {}) {
 
 const FONTS_DIR = fileURLToPath(new URL('../assets/fonts', import.meta.url));
 export const INTRO_TAIL = 0.7; // скільки заставка висить після останнього слова
-// Притемнення під написами вступу, коли під ними лежить картинка.
-const INTRO_SCRIM = 'drawbox=x=0:y=700:w=1080:h=480:color=black@0.45:t=fill';
+// Притемнення під написами вступу, коли під ними лежить картинка. Не одна
+// плашка, а кілька смуг зі спаданням прозорості до країв: рівний прямокутник
+// лишає на картинці чітку горизонтальну лінію, і вступ починає виглядати як
+// знімок екрана з накладеним банером.
+const INTRO_SCRIM = [
+  [616, 40, 0.08], [656, 40, 0.18], [696, 40, 0.30],
+  [736, 408, 0.45],
+  [1144, 40, 0.30], [1184, 40, 0.18], [1224, 40, 0.08],
+].map(([y, h, alpha]) => `drawbox=x=0:y=${y}:w=1080:h=${h}:color=black@${alpha}:t=fill`).join(',');
 
 function assTime(seconds) {
   const t = Math.max(0, seconds);
