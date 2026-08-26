@@ -15,7 +15,10 @@ import { extractPhotoArchive, splitScriptLines } from './archive.js';
 import { assembleVideo } from './pipeline.js';
 import { remuxToReelsSpec, mixAudio } from './montage.js';
 import { listVideoFiles, videoName, streamVideo } from './videos.js';
-import { voiceClip, introKey, introLine, introTitle, factKey, factLine, factTitle, factWordForm } from './voice-bank.js';
+import {
+  voiceClip, introKey, introLine, introTitle, factKey, factLine, factTitle, factWordForm,
+  INTRO_QUESTION, INTRO_TAGLINE,
+} from './voice-bank.js';
 import { fileURLToPath } from 'node:url';
 
 function run(command, args) {
@@ -162,6 +165,8 @@ async function makeSeparator(workDir, index, onProgress = () => {}) {
 
 const FONTS_DIR = fileURLToPath(new URL('../assets/fonts', import.meta.url));
 export const INTRO_TAIL = 0.7; // скільки заставка висить після останнього слова
+// Притемнення під написами вступу, коли під ними лежить картинка.
+const INTRO_SCRIM = 'drawbox=x=0:y=700:w=1080:h=480:color=black@0.45:t=fill';
 
 function assTime(seconds) {
   const t = Math.max(0, seconds);
@@ -174,7 +179,7 @@ function assTime(seconds) {
 // Заставка малюється тими самими субтитрами, що й підписи в роликах:
 // бандлений Oswald віддає кирилицю без сюрпризів, на відміну від малювання
 // тексту генератором зображень.
-export function introAss(big, small, seconds) {
+export function introAss(big, small, seconds, top = '') {
   return [
     '[Script Info]', 'ScriptType: v4.00+', 'PlayResX: 1080', 'PlayResY: 1920', 'WrapStyle: 0', '',
     '[V4+ Styles]',
@@ -186,6 +191,7 @@ export function introAss(big, small, seconds) {
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    ...(top ? [`Dialogue: 0,0:00:00.00,${assTime(seconds)},Small,,0,0,0,,{\\pos(540,780)}${top}`] : []),
     `Dialogue: 0,0:00:00.00,${assTime(seconds)},Big,,0,0,0,,{\\pos(540,900)}${big}`,
     `Dialogue: 0,0:00:00.00,${assTime(seconds)},Small,,0,0,0,,{\\pos(540,1040)}${small}`,
     '',
@@ -196,7 +202,7 @@ export function introAss(big, small, seconds) {
 // довге відео з кількох фактів, інакше він іде, не дочекавшись другого.
 // Голос беремо з банку: текст вступу залежить лише від кількості фактів, тож
 // на кожну кількість він синтезується раз за все життя каналу.
-async function makeIntro(workDir, { count, big, small, spoken }, onProgress = () => {}) {
+async function makeIntro(workDir, { count, big, small, top, spoken, previewPath = null }, onProgress = () => {}) {
   let voicePath = null;
   let voiceSeconds = 3.2;
   try {
@@ -208,12 +214,23 @@ async function makeIntro(workDir, { count, big, small, spoken }, onProgress = ()
   const seconds = Number((voiceSeconds + INTRO_TAIL).toFixed(2));
 
   const assPath = path.join(workDir, 'intro.ass');
-  await writeFile(assPath, introAss(big, small, seconds), 'utf8');
+  await writeFile(assPath, introAss(big, small, seconds, top), 'utf8');
 
   const silent = path.join(workDir, 'intro-silent.mp4');
-  await run('ffmpeg', ['-y', '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${seconds}`,
-    '-vf', `subtitles=${assPath}:fontsdir=${FONTS_DIR},fade=t=out:st=${(seconds - 0.4).toFixed(2)}:d=0.4`,
-    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', silent]);
+  const fade = `fade=t=out:st=${(seconds - 0.4).toFixed(2)}:d=0.4`;
+  if (previewPath) {
+    // Картинка може прийти будь-якого розміру й співвідношення, тож спершу
+    // накриваємо нею весь кадр і зрізаємо зайве по центру. Притемнена смуга
+    // під написами — щоб білий текст читався й на світлому небі.
+    await run('ffmpeg', ['-y', '-loop', '1', '-t', String(seconds), '-i', previewPath,
+      '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,'
+        + `${INTRO_SCRIM},subtitles=${assPath}:fontsdir=${FONTS_DIR},${fade}`,
+      '-r', '30', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', silent]);
+  } else {
+    await run('ffmpeg', ['-y', '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${seconds}`,
+      '-vf', `subtitles=${assPath}:fontsdir=${FONTS_DIR},${fade}`,
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', silent]);
+  }
 
   const withSound = path.join(workDir, 'intro-voiced.mp4');
   if (voicePath) {
@@ -447,7 +464,7 @@ export async function toWide(inPath, outPath) {
 
 // Головна функція. items — рядки таблиці в потрібному порядку.
 // onProgress(text) — необов'язковий колбек для живого журналу.
-export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, separators = true, intro = true, announce = true, onProgress = () => {} } = {}) {
+export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, separators = true, intro = true, announce = true, previewPath = null, onProgress = () => {} } = {}) {
   if (!Array.isArray(items) || items.length < 2) {
     throw new Error('Для добірки треба щонайменше два епізоди.');
   }
@@ -479,9 +496,11 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     onProgress('роблю вступ');
     introPath = await makeIntro(workDir, {
       count: items.length,
+      top: INTRO_QUESTION,
       big: introTitle(items.length),
-      small: 'ПРО УКРАЇНУ',
+      small: INTRO_TAGLINE,
       spoken: introLine(items.length),
+      previewPath,
     }, onProgress);
     introSeconds = await durationSeconds(introPath);
   }

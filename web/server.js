@@ -24,6 +24,7 @@ import { photoSchedule } from '../src/photo-plan.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { compileLong } from '../src/compile-long.js';
+import { savePreview, previewInfo, removePreview, fetchPreview } from '../src/preview.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty } from '../src/autopublish.js';
@@ -495,6 +496,35 @@ const server = http.createServer(async (req, res) => {
     // перезбирається з архіву БЕЗ останнього слайда (заклик підписатися),
     // і лише в останньому епізоді заклик лишається. Робота довга, тому
     // запуск і опитування стану рознесені: старт віддає відповідь одразу.
+    // Прев'ю добірки: картинка, яку власник намалював у ChatGPT. Лягає на Drive
+    // під сталим іменем, тож переживає передеплой і використовується щотижня,
+    // доки її не замінять. Тіло приймаємо як base64 у JSON — тим самим шляхом,
+    // що й фото власних сюжетів.
+    if (pathname === '/api/compile/preview') {
+      if (req.method === 'GET') {
+        try { return json(res, 200, await previewInfo()); }
+        catch (error) { return json(res, 200, { exists: false, error: error.message }); }
+      }
+      if (req.method === 'POST') {
+        // Довжину перевіряємо ДО читання тіла: інакше будь-хто, хто знає
+        // адресу, залив би в пам'ять процесу скільки завгодно ще до перевірки
+        // підпису.
+        const declared = Number(req.headers['content-length'] || 0);
+        if (declared > 20 * 1e6) return json(res, 413, { error: 'Завелике тіло запиту' });
+        const body = JSON.parse(await readBody(req));
+        const check = verifyInitData(body.initData);
+        if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+        if (!isOwner(check.user)) return json(res, 403, { error: 'Міняти прев\'ю може лише власник каналу' });
+        try {
+          if (body.remove) return json(res, 200, { removed: await removePreview(), exists: false });
+          const saved = await savePreview(body);
+          return json(res, 200, { ok: true, exists: true, ...saved });
+        } catch (error) {
+          return json(res, 400, { error: error.message });
+        }
+      }
+    }
+
     if (req.method === 'POST' && pathname === '/api/compile/start') {
       const body = JSON.parse(await readBody(req));
       const check = verifyInitData(body.initData);
@@ -527,10 +557,18 @@ const server = http.createServer(async (req, res) => {
       // announce вмикає вступ «У цьому відео 15 фактів про Україну» і картки
       // «Факт перший» перед кожним сюжетом. Голос для них береться з
       // голосового банку (assets/voice), тож він теж нічого не коштує.
+      // Прев'ю тягнемо з Drive заздалегідь: воно потрібне вже на першому кроці
+      // (вступ), а лізти в мережу з надр збірки — зайва точка відмови.
+      const previewPath = body.preview === false ? null : await fetchPreview(
+        path.join(os.tmpdir(), `compilation-preview-${jobId}.jpg`),
+      ).catch((error) => { job.log.push(`прев'ю не завантажилось: ${error.message}`); return null; });
+      if (previewPath) job.log.push('прев\'ю на місці — вступ буде на ньому');
+
       compileLong(items, {
         wide: !!body.wide,
         reuseVideo: !body.rebuild,
         announce: body.announce !== false,
+        previewPath,
         onProgress: (text) => job.log.push(text),
       })
         .then(async (r) => {

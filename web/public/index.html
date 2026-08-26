@@ -264,6 +264,14 @@
     <p class="own-hint">Познач епізоди — кожен перезбереться без останнього слайда із закликом.
       Заклик лишиться рівно один, у кінці добірки.</p>
     <div class="cut-list" id="cutList"></div>
+    <div class="cut-opts-title">Прев'ю</div>
+    <p class="own-hint" id="cutPreviewState">Перевіряю…</p>
+    <input type="file" id="cutPreviewFile" accept="image/*" hidden />
+    <div class="own-actions">
+      <button class="btn secondary" id="cutPreviewPick">🖼 Завантажити прев'ю</button>
+      <button class="btn secondary" id="cutPreviewClear">Прибрати</button>
+    </div>
+
     <div class="cut-opts-title">Налаштування</div>
     <label class="cut-wide"><input type="checkbox" id="cutWide" /> формат 16:9 для YouTube</label>
     <label class="cut-wide"><input type="checkbox" id="cutRebuild" /> перезібрати з новою озвучкою (платно)</label>
@@ -906,7 +914,7 @@
     $('#cutToggle').addEventListener('click', () => {
       const panel = $('#cutPanel');
       panel.classList.toggle('open');
-      if (panel.classList.contains('open')) { cutRenderList(); cutPoll(); }
+      if (panel.classList.contains('open')) { cutRenderList(); cutPoll(); cutPreviewState(); }
     });
 
     $('#cutStart').addEventListener('click', async () => {
@@ -926,6 +934,72 @@
       } catch (e) {
         toast(e.message); btn.disabled = false;
       }
+    });
+
+    // --- Прев'ю добірки -----------------------------------------------------
+    // Картинка лежить на Drive під сталим іменем, тож вивантажена раз вона
+    // працює й наступного тижня. Файл читаємо в base64 тим самим способом, що
+    // й фото власних сюжетів.
+    const previewToBase64 = (file) => new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(',')[1] || '');
+      r.onerror = () => reject(new Error('Не вдалося прочитати файл'));
+      r.readAsDataURL(file);
+    });
+
+    async function cutPreviewState() {
+      const box = $('#cutPreviewState');
+      try {
+        const info = await fetch('/api/compile/preview').then((x) => x.json());
+        if (!info.exists) {
+          box.textContent = 'Прев\'ю немає — вступ буде на чорному тлі.';
+          return;
+        }
+        const when = info.updatedAt ? new Date(info.updatedAt).toLocaleDateString('uk-UA') : '';
+        const size = info.bytes ? `${Math.round(info.bytes / 1024)} КБ` : '';
+        box.textContent = `Прев'ю на місці${when ? `, від ${when}` : ''}${size ? `, ${size}` : ''}.`;
+      } catch (e) {
+        box.textContent = 'Стан прев\'ю невідомий.';
+      }
+    }
+
+    $('#cutPreviewPick').addEventListener('click', () => $('#cutPreviewFile').click());
+
+    $('#cutPreviewFile').addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      if (!initData) { toast('Відкрий через Telegram'); return; }
+      const btn = $('#cutPreviewPick');
+      btn.disabled = true; btn.textContent = 'Вивантажую…';
+      try {
+        const r = await fetch('/api/compile/preview', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            initData, data: await previewToBase64(file), mimeType: file.type || 'image/jpeg',
+          }),
+        }).then((x) => x.json());
+        toast(r.error || 'Прев\'ю збережено');
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        btn.disabled = false; btn.textContent = '🖼 Завантажити прев\'ю';
+        cutPreviewState();
+      }
+    });
+
+    $('#cutPreviewClear').addEventListener('click', async () => {
+      if (!initData) { toast('Відкрий через Telegram'); return; }
+      try {
+        const r = await fetch('/api/compile/preview', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ initData, remove: true }),
+        }).then((x) => x.json());
+        toast(r.error || (r.removed ? 'Прев\'ю прибрано' : 'Прев\'ю й не було'));
+      } catch (err) {
+        toast(err.message);
+      }
+      cutPreviewState();
     });
 
     // --- Свій сюжет ---------------------------------------------------------

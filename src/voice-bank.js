@@ -18,6 +18,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { access, copyFile, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -53,7 +54,14 @@ export function factWordForm(count) {
   return 'фактів';
 }
 
-// Напис на вступній заставці: «15 ФАКТІВ».
+// Написи на вступній заставці. Питання зверху, число великим, уточнення внизу:
+//
+//        ЧИ ЗНАВ ТИ ТАКУ УКРАЇНУ?
+//              15 ФАКТІВ
+//        ЯКИХ ТИ, МОЖЛИВО, НЕ ЗНАВ
+export const INTRO_QUESTION = 'ЧИ ЗНАВ ТИ ТАКУ УКРАЇНУ?';
+export const INTRO_TAGLINE = 'ЯКИХ ТИ, МОЖЛИВО, НЕ ЗНАВ';
+
 export function introTitle(count) {
   return `${count} ${factWordForm(count).toUpperCase()}`;
 }
@@ -61,7 +69,7 @@ export function introTitle(count) {
 // Що диктор каже на вступі. Число лишаємо цифрами: перед синтезом tts.js сам
 // розгортає його в слово з правильним наголосом.
 export function introLine(count) {
-  return `У цьому відео ${count} ${factWordForm(count)} про Україну. Почнімо.`;
+  return `Чи знав ти таку Україну? ${count} ${factWordForm(count)}, яких ти, можливо, не знав.`;
 }
 
 // Оголошення перед сюжетом: «Факт перший», «Факт третій», «Факт п'ятнадцятий».
@@ -74,12 +82,22 @@ export function factTitle(number) {
   return `ФАКТ ${number}`;
 }
 
+// Ключ несе хвіст із хеша САМОГО ТЕКСТУ. Без нього виправлення репліки
+// («Почнімо» → «Чи знав ти таку Україну?») лишалося б непочутим: у теці вже
+// лежав би mp3 під тим самим ключем, і збірка далі підставляла б старий голос.
+// З хешем змінений текст автоматично стає новою реплікою.
+function textHash(text) {
+  return createHash('sha1').update(String(text), 'utf8').digest('hex').slice(0, 6);
+}
+
 export function introKey(count) {
-  return `intro-${Math.trunc(count)}`;
+  const n = Math.trunc(count);
+  return `intro-${n}-${textHash(introLine(n))}`;
 }
 
 export function factKey(number) {
-  return `fact-${String(Math.trunc(number)).padStart(2, '0')}`;
+  const n = Math.trunc(number);
+  return `fact-${String(n).padStart(2, '0')}-${textHash(factLine(n))}`;
 }
 
 // Повний список реплік банку — для разової генерації наперед.

@@ -20,9 +20,9 @@ test('11–14 беруть множину, попри одиницю на кін
   assert.equal(factWordForm(111), 'фактів');
 });
 
-test('вступ називає кількість і тему', () => {
-  assert.equal(introLine(15), 'У цьому відео 15 фактів про Україну. Почнімо.');
-  assert.equal(introLine(3), 'У цьому відео 3 факти про Україну. Почнімо.');
+test('вступ ставить питання й називає кількість', () => {
+  assert.equal(introLine(15), 'Чи знав ти таку Україну? 15 фактів, яких ти, можливо, не знав.');
+  assert.equal(introLine(3), 'Чи знав ти таку Україну? 3 факти, яких ти, можливо, не знав.');
   assert.equal(introTitle(15), '15 ФАКТІВ');
   assert.equal(introTitle(2), '2 ФАКТИ');
 });
@@ -44,21 +44,31 @@ test('напис на картці — коротке «ФАКТ N»', () => {
 });
 
 test('ключі стабільні: та сама репліка — той самий файл', () => {
-  assert.equal(introKey(15), 'intro-15');
-  assert.equal(factKey(3), 'fact-03');
-  assert.equal(factKey(12), 'fact-12');
-  assert.equal(driveName(factKey(3)), 'voice-fact-03.mp3');
-  assert.match(clipPath(factKey(3)), /assets\/voice\/fact-03\.mp3$/);
+  assert.equal(introKey(15), introKey(15));
+  assert.equal(factKey(3), factKey(3));
+  assert.match(introKey(15), /^intro-15-[0-9a-f]{6}$/);
+  assert.match(factKey(3), /^fact-03-[0-9a-f]{6}$/);
+  assert.notEqual(factKey(3), factKey(12));
+  assert.equal(driveName(factKey(3)), `voice-${factKey(3)}.mp3`);
+  assert.match(clipPath(factKey(3)), new RegExp(`assets/voice/${factKey(3)}\\.mp3$`));
+});
+
+test('змінений текст репліки дає ІНШИЙ ключ', () => {
+  // Саме заради цього в ключі хвіст із хеша: інакше після виправлення тексту
+  // збірка й далі підставляла б старий mp3, який лежить у теці.
+  const withOldWording = bankPlan({ maxFacts: 2, minFacts: 2 })[0].key;
+  assert.equal(withOldWording, introKey(2));
+  assert.notEqual(introKey(2).slice('intro-2-'.length), introKey(3).slice('intro-3-'.length));
 });
 
 test('план банку покриває і вступи, і всі оголошення', () => {
   const plan = bankPlan({ maxFacts: 5 });
   const keys = plan.map((p) => p.key);
   assert.deepEqual(keys, [
-    'intro-2', 'intro-3', 'intro-4', 'intro-5',
-    'fact-01', 'fact-02', 'fact-03', 'fact-04', 'fact-05',
+    introKey(2), introKey(3), introKey(4), introKey(5),
+    factKey(1), factKey(2), factKey(3), factKey(4), factKey(5),
   ]);
-  assert.equal(plan.find((p) => p.key === 'fact-03').text, 'Факт третій.');
+  assert.equal(plan.find((p) => p.key === factKey(3)).text, 'Факт третій.');
   // Ключі не повторюються — інакше одна репліка перетирала б іншу.
   assert.equal(new Set(keys).size, keys.length);
 });
