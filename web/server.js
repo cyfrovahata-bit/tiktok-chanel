@@ -524,7 +524,15 @@ const server = http.createServer(async (req, res) => {
       // За замовчуванням беремо ГОТОВІ відео з Drive і ріжемо заклик по паузі:
       // так добірка не коштує жодного символу ElevenLabs. rebuild=true вмикає
       // повну перезбірку з архівів (потрібна, якщо пауза не знаходиться).
-      compileLong(items, { wide: !!body.wide, reuseVideo: !body.rebuild, onProgress: (text) => job.log.push(text) })
+      // announce вмикає вступ «У цьому відео 15 фактів про Україну» і картки
+      // «Факт перший» перед кожним сюжетом. Голос для них береться з
+      // голосового банку (assets/voice), тож він теж нічого не коштує.
+      compileLong(items, {
+        wide: !!body.wide,
+        reuseVideo: !body.rebuild,
+        announce: body.announce !== false,
+        onProgress: (text) => job.log.push(text),
+      })
         .then(async (r) => {
           Object.assign(job, { path: r.path, size: r.size, episodes: r.episodes, chapters: r.chapters });
           // Кладемо готову добірку на Drive ОДРАЗУ. Тимчасова тека й пам'ять

@@ -267,6 +267,7 @@
     <div class="cut-opts-title">Налаштування</div>
     <label class="cut-wide"><input type="checkbox" id="cutWide" /> формат 16:9 для YouTube</label>
     <label class="cut-wide"><input type="checkbox" id="cutRebuild" /> перезібрати з новою озвучкою (платно)</label>
+    <label class="cut-wide"><input type="checkbox" id="cutAnnounce" checked /> оголошувати «Факт перший», «Факт другий»…</label>
     <div class="own-actions">
       <button class="btn primary" id="cutStart">Зібрати добірку</button>
     </div>
@@ -916,7 +917,7 @@
       try {
         const r = await fetch('/api/compile/start', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ initData, ids, wide: $('#cutWide').checked, rebuild: $('#cutRebuild').checked }),
+          body: JSON.stringify({ initData, ids, wide: $('#cutWide').checked, rebuild: $('#cutRebuild').checked, announce: $('#cutAnnounce').checked }),
         }).then((x) => x.json());
         if (r.error) { toast(r.error); btn.disabled = false; return; }
         toast(`Збираю ${r.episodes} епізодів`);

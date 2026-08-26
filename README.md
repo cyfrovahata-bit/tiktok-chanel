@@ -48,6 +48,26 @@ marker-файл, тому заміна відео теж не створить �
 - **«Перегенерувати»** — видаляє MP4 і запускає повторний монтаж;
 - **«Опубліковано»** — єдина дія, що ставить у таблиці `PUBLISHED` і дату.
 
+## Довга добірка
+
+Кілька готових епізодів склеюються в одне довге відео (Mini App → «Довга
+добірка», або `node scripts/compile-long.js --limit 15`). Добірка починається
+вступом — «У цьому відео 15 фактів про Україну. Почнімо.» — а перед кожним
+сюжетом іде картка «ФАКТ 3» з голосом «Факт третій». Ці репліки складають
+**голосовий банк** у `assets/voice`: кожна синтезується РАЗ і далі просто
+підставляється, тож збірка не витрачає символів ElevenLabs.
+
+Згенерувати банк наперед і закомітити (потрібен ключ TTS):
+
+```bash
+node scripts/build-voice-bank.js 20
+git add assets/voice
+```
+
+Чого в теці немає — збірка шукає в папці Drive (`voice-<ключ>.mp3`), а якщо
+немає й там, синтезує сама й одразу кладе на Drive. Подробиці:
+[assets/voice/README.md](assets/voice/README.md).
+
 ## Змінні Railway
 
 Основні чинні змінні Google/Telegram лишаються без змін. Для Meta потрібні:
@@ -62,6 +82,8 @@ marker-файл, тому заміна відео теж не створить �
 | `META_IG_USER_ID` | ID пов'язаного Instagram professional account |
 | `META_PAGE_ACCESS_TOKEN` | довготривалий Page access token |
 | `META_GRAPH_VERSION` | необов'язково; за замовчуванням `v25.0` |
+| `VOICE_FOLDER_ID` | необов'язково; папка Drive для голосового банку (типово та сама, що й для відео) |
+| `VOICE_BANK_DIR` | необов'язково; тека банку (типово `assets/voice`) |
 
 Не комітьте access token і не надсилайте його в чат. Додавайте його лише як
 Railway Variable. Повна одноразова інструкція: [docs/META_SETUP_UK.md](docs/META_SETUP_UK.md).
@@ -89,6 +111,8 @@ src/tiktok.js          TikTok Content Posting API
 src/comment-flow.js    відповіді на коментарі зі схваленням у Telegram
 src/publish.js         спільний маршрутизатор платформ
 src/videos.js          MP4 та appProperties на Drive
+src/compile-long.js    довга добірка: вступ, оголошення фактів, склейка
+src/voice-bank.js      разово синтезовані репліки вступу й «Факт перший»
 src/sheets.js          читання черги й ручне DONE → PUBLISHED
 test/                  тести Meta API, розкладу та захисту від дублів
 ```

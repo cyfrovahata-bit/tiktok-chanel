@@ -15,7 +15,7 @@ import { extractPhotoArchive, splitScriptLines } from './archive.js';
 import { assembleVideo } from './pipeline.js';
 import { remuxToReelsSpec, mixAudio } from './montage.js';
 import { listVideoFiles, videoName, streamVideo } from './videos.js';
-import { synthesizeVoiceover } from './tts.js';
+import { voiceClip, introKey, introLine, introTitle, factKey, factLine, factTitle, factWordForm } from './voice-bank.js';
 import { fileURLToPath } from 'node:url';
 
 function run(command, args) {
@@ -193,14 +193,14 @@ export function introAss(big, small, seconds) {
 }
 
 // Вступна заставка: глядач має за перші секунди зрозуміти, що попереду
-// довге відео з кількох історій, інакше він іде, не дочекавшись другої.
+// довге відео з кількох фактів, інакше він іде, не дочекавшись другого.
+// Голос беремо з банку: текст вступу залежить лише від кількості фактів, тож
+// на кожну кількість він синтезується раз за все життя каналу.
 async function makeIntro(workDir, { count, big, small, spoken }, onProgress = () => {}) {
   let voicePath = null;
   let voiceSeconds = 3.2;
   try {
-    const out = path.join(workDir, 'intro-voice.mp3');
-    const result = await synthesizeVoiceover(spoken, out, 4, 1, [spoken]);
-    voicePath = result.voicePath;
+    voicePath = await voiceClip(introKey(count), spoken, { onProgress });
     voiceSeconds = await durationSeconds(voicePath);
   } catch (error) {
     onProgress(`   вступ без голосу: ${String(error.message).split('\n')[0]}`);
@@ -225,7 +225,93 @@ async function makeIntro(workDir, { count, big, small, spoken }, onProgress = ()
 
   const out = path.join(workDir, 'intro.mp4');
   await remuxToReelsSpec(withSound, out);
-  onProgress(`вступ: ${count} історій, ${seconds} с`);
+  onProgress(`вступ: ${count} фактів, ${seconds} с`);
+  return out;
+}
+
+// --- Оголошення факту --------------------------------------------------------
+// Перед кожним сюжетом — картка «ФАКТ 3» і голос «Факт третій». Без неї довге
+// відео зливається в потік: глядач не чує, де закінчився один факт і почався
+// наступний, і не має за що зачепитися, коли повертається до відео.
+//
+// Оголошення заміняє собою простий роздільник: у ньому вже є той самий
+// перехідний звук, а два чорні кадри поспіль виглядали б як збій.
+export const ANNOUNCE_LEAD = 0.45;  // скільки звучить перехід до першого слова
+export const ANNOUNCE_TAIL = 0.55;  // скільки картка висить після слова
+
+function announceFilter(assPath, seconds, delayMs) {
+  return `[0:v]subtitles=${assPath}:fontsdir=${FONTS_DIR},`
+    + `fade=t=out:st=${(seconds - 0.35).toFixed(2)}:d=0.35[v];`
+    + `[1:a]adelay=${delayMs}|${delayMs}[voice];`
+    + '[2:a]afade=t=in:d=0.22,afade=t=out:st=0.36:d=0.09,volume=-9dB[riser];'
+    + `[3:a]afade=t=out:st=0.03:d=0.19,volume=-3dB,adelay=${Math.round(HIT_AT * 1000)}|${Math.round(HIT_AT * 1000)}[hit];`
+    + '[4:a]highpass=f=180,lowpass=f=5000,afade=t=in:d=0.15,afade=t=out:st=0.4:d=0.15,volume=-15dB[air];'
+    + '[voice][riser][hit][air]amix=inputs=4:duration=longest:normalize=0,'
+    + 'alimiter=limit=0.95,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]';
+}
+
+async function makeAnnounce(workDir, { number, total }, onProgress = () => {}) {
+  let voicePath = null;
+  let voiceSeconds = 1.1;
+  try {
+    voicePath = await voiceClip(factKey(number), factLine(number), { onProgress });
+    voiceSeconds = await durationSeconds(voicePath);
+  } catch (error) {
+    onProgress(`   оголошення ${number} без голосу: ${String(error.message).split('\n')[0]}`);
+  }
+  const seconds = Number((ANNOUNCE_LEAD + voiceSeconds + ANNOUNCE_TAIL).toFixed(2));
+
+  const assPath = path.join(workDir, `announce-${number}.ass`);
+  // Дрібний рядок — обов'язково зі словом: голе «З 15» під написом «ФАКТ 3»
+  // читається як «3 15», бо кирилична З і трійка в цьому шрифті майже однакові.
+  await writeFile(assPath, introAss(factTitle(number), `З ${total} ${factWordForm(total).toUpperCase()}`, seconds), 'utf8');
+
+  const raw = path.join(workDir, `announce-raw-${number}.mp4`);
+  // Німа картка потрібна лише запасним шляхам, тож і збирається лише там:
+  // на п'ятнадцяти фактах зайве кодування 1080×1920 — це зайві хвилини.
+  const card = path.join(workDir, `announce-card-${number}.mp4`);
+  const buildCard = () => run('ffmpeg', ['-y',
+    '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${seconds}`,
+    '-vf', `subtitles=${assPath}:fontsdir=${FONTS_DIR},fade=t=out:st=${(seconds - 0.35).toFixed(2)}:d=0.35`,
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', card]);
+
+  let built = false;
+  if (voicePath) {
+    try {
+      await run('ffmpeg', [
+        '-y',
+        '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${seconds}`,
+        '-i', voicePath,
+        '-f', 'lavfi', '-i', 'aevalsrc=exprs=sin(2*PI*t*(250+1700*t)):d=0.45:s=48000',
+        '-f', 'lavfi', '-i', 'sine=frequency=70:duration=0.22:sample_rate=48000',
+        '-f', 'lavfi', '-i', `anoisesrc=d=${seconds}:c=brown:a=0.6:r=48000`,
+        '-filter_complex', announceFilter(assPath, seconds, Math.round(ANNOUNCE_LEAD * 1000)),
+        '-map', '[v]', '-map', '[a]', '-t', String(seconds),
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', raw,
+      ]);
+      built = true;
+    } catch (error) {
+      // Складений фільтр міг не зайти на конкретній збірці ffmpeg. Тоді
+      // оголошення лишається з голосом, але без перехідного звуку — краще так,
+      // ніж провалена добірка.
+      onProgress(`   оголошення ${number} без переходу (${String(error.message).split('\n')[0]})`);
+      await buildCard();
+      await mixAudio(card, voicePath, raw);
+      built = true;
+    }
+  }
+  if (!built) {
+    // Без голосу лишається сама картка з написом і тишею.
+    await buildCard();
+    await run('ffmpeg', ['-y', '-i', card, '-f', 'lavfi', '-i',
+      `anullsrc=r=48000:cl=stereo:d=${seconds}`, '-shortest',
+      '-c:v', 'copy', '-c:a', 'aac', raw]);
+  }
+  await rm(card, { force: true }).catch(() => {});
+
+  const out = path.join(workDir, `announce-${String(number).padStart(2, '0')}.mp4`);
+  await remuxToReelsSpec(raw, out);
+  await rm(raw, { force: true }).catch(() => {});
   return out;
 }
 
@@ -247,6 +333,19 @@ export function buildChapters(titles, durations, separatorSeconds, startAt = 0) 
   titles.forEach((title, i) => {
     lines.push(`${timecode(at)} ${title}`);
     at += durations[i] + separatorSeconds;
+  });
+  return lines;
+}
+
+// Те саме, але коли перед кожним сюжетом іде оголошення «Факт N». Розділ
+// починається З ОГОЛОШЕННЯ, а не з самого сюжету: глядач, що тисне таймкод,
+// має почути «Факт третій», інакше він падає в середину історії.
+export function buildChaptersWithLeads(titles, durations, leads, startAt = 0) {
+  const lines = [];
+  let at = startAt;
+  titles.forEach((title, i) => {
+    lines.push(`${timecode(at)} ${title}`);
+    at += (leads[i] || 0) + durations[i];
   });
   return lines;
 }
@@ -348,7 +447,7 @@ export async function toWide(inPath, outPath) {
 
 // Головна функція. items — рядки таблиці в потрібному порядку.
 // onProgress(text) — необов'язковий колбек для живого журналу.
-export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, separators = true, intro = true, onProgress = () => {} } = {}) {
+export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, separators = true, intro = true, announce = true, onProgress = () => {} } = {}) {
   if (!Array.isArray(items) || items.length < 2) {
     throw new Error('Для добірки треба щонайменше два епізоди.');
   }
@@ -380,15 +479,27 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     onProgress('роблю вступ');
     introPath = await makeIntro(workDir, {
       count: items.length,
-      big: `${items.length} ІСТОРІЙ`,
+      big: introTitle(items.length),
       small: 'ПРО УКРАЇНУ',
-      spoken: `У цьому відео ${items.length} коротких історій про Україну. Почнімо.`,
+      spoken: introLine(items.length),
     }, onProgress);
     introSeconds = await durationSeconds(introPath);
   }
 
+  // Оголошення «Факт перший», «Факт другий»… — перед КОЖНИМ сюжетом, зокрема
+  // й першим. Вони ж правлять за роздільники: перехідний звук у них уже є.
+  let leads = null;
   let sequence = parts;
-  if (separators && parts.length > 1) {
+  if (announce) {
+    onProgress('роблю оголошення фактів');
+    const cards = [];
+    for (let i = 0; i < parts.length; i++) {
+      cards.push(await makeAnnounce(workDir, { number: i + 1, total: parts.length }, onProgress));
+    }
+    leads = [];
+    for (const card of cards) leads.push(await durationSeconds(card));
+    sequence = parts.flatMap((part, i) => [cards[i], part]);
+  } else if (separators && parts.length > 1) {
     onProgress('роблю роздільники між сюжетами');
     const seps = [];
     for (let i = 0; i < parts.length - 1; i++) seps.push(await makeSeparator(workDir, i + 1, onProgress));
@@ -409,12 +520,10 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     final = await toWide(joined, path.join(workDir, 'compilation-16x9.mp4'));
   }
   const size = (await stat(final)).size;
-  const episodeChapters = buildChapters(
-    items.map((it) => it.title || it.theme || it.id),
-    durations,
-    separators && parts.length > 1 ? SEPARATOR_SECONDS : 0,
-    introSeconds,
-  );
+  const titles = items.map((it) => it.title || it.theme || it.id);
+  const episodeChapters = leads
+    ? buildChaptersWithLeads(titles, durations, leads, introSeconds)
+    : buildChapters(titles, durations, separators && parts.length > 1 ? SEPARATOR_SECONDS : 0, introSeconds);
   // Перший розділ мусить починатися з нуля, інакше YouTube їх не визнає.
   const chapters = introPath ? ['0:00 Вступ', ...episodeChapters] : episodeChapters;
   onProgress('готово');
