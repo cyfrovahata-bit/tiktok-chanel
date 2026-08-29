@@ -15,8 +15,23 @@ import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { drive } from './drive.js';
 
-const NAME = 'compilation-preview.jpg';
+// Два різні файли, і плутати їх не можна:
+//   video   — вертикаль 9:16, стає першим кадром самої добірки (він же те, що
+//             видно у стрічці Facebook);
+//   youtube — горизонталь 16:9, обкладинка для YouTube; у відео не потрапляє
+//             взагалі, її ставить заливка окремим викликом.
+const NAMES = {
+  video: 'compilation-preview.jpg',
+  youtube: 'compilation-thumb.jpg',
+};
+export const PREVIEW_KINDS = Object.keys(NAMES);
 const MAX_BYTES = 12 * 1024 * 1024;
+
+function nameFor(kind) {
+  const name = NAMES[String(kind || 'video')];
+  if (!name) throw new Error(`Невідомий вид прев'ю: ${kind}`);
+  return name;
+}
 
 function folderId() {
   const id = process.env.PREVIEW_FOLDER_ID || process.env.VIDEO_FOLDER_ID || '';
@@ -24,9 +39,9 @@ function folderId() {
   return id;
 }
 
-async function findFile() {
+async function findFile(kind) {
   const res = await drive().files.list({
-    q: `'${folderId()}' in parents and name = '${NAME}' and trashed = false`,
+    q: `'${folderId()}' in parents and name = '${nameFor(kind)}' and trashed = false`,
     fields: 'files(id, name, size, modifiedTime)',
     pageSize: 1,
     supportsAllDrives: true,
@@ -36,40 +51,47 @@ async function findFile() {
 }
 
 // Скільки важить і коли оновлено — щоб мінідодаток показав, чи прев'ю взагалі є.
-export async function previewInfo() {
-  const file = await findFile().catch(() => null);
-  if (!file) return { exists: false };
+export async function previewInfo(kind = 'video') {
+  const file = await findFile(kind).catch(() => null);
+  if (!file) return { kind, exists: false };
   return {
+    kind,
     exists: true,
     bytes: Number(file.size) || 0,
     updatedAt: file.modifiedTime || null,
   };
 }
 
+// Стан обох файлів одним запитом — саме це показує мінідодаток.
+export async function previewState() {
+  const entries = await Promise.all(PREVIEW_KINDS.map((kind) => previewInfo(kind)));
+  return Object.fromEntries(entries.map((info) => [info.kind, info]));
+}
+
 // data — base64 (з префіксом data: або без нього), як його шле мінідодаток.
-export async function savePreview({ data, mimeType } = {}) {
+export async function savePreview({ kind = 'video', data, mimeType } = {}) {
   const buffer = Buffer.from(String(data || '').replace(/^data:[^,]+,/, ''), 'base64');
   if (!buffer.length) throw new Error('Порожній файл');
   if (buffer.length > MAX_BYTES) {
     throw new Error(`Прев'ю завелике (${Math.round(buffer.length / 1e6)} МБ, ліміт ${MAX_BYTES / 1e6} МБ)`);
   }
   const media = { mimeType: mimeType || 'image/jpeg', body: Readable.from(buffer) };
-  const existing = await findFile();
+  const existing = await findFile(kind);
   const res = existing
     ? await drive().files.update({ fileId: existing.id, media, fields: 'id, modifiedTime', supportsAllDrives: true })
     : await drive().files.create({
-      requestBody: { name: NAME, parents: [folderId()] },
+      requestBody: { name: nameFor(kind), parents: [folderId()] },
       media,
       fields: 'id, modifiedTime',
       supportsAllDrives: true,
     });
-  return { fileId: res.data.id, bytes: buffer.length, updatedAt: res.data.modifiedTime || null };
+  return { kind, fileId: res.data.id, bytes: buffer.length, updatedAt: res.data.modifiedTime || null };
 }
 
 // Кладе прев'ю у destPath. Повертає шлях або null, якщо прев'ю немає —
 // відсутнє прев'ю не помилка, вступ просто лишиться на чорному тлі.
-export async function fetchPreview(destPath) {
-  const file = await findFile().catch(() => null);
+export async function fetchPreview(destPath, kind = 'video') {
+  const file = await findFile(kind).catch(() => null);
   if (!file) return null;
   const res = await drive().files.get(
     { fileId: file.id, alt: 'media', supportsAllDrives: true },
@@ -79,8 +101,8 @@ export async function fetchPreview(destPath) {
   return destPath;
 }
 
-export async function removePreview() {
-  const file = await findFile();
+export async function removePreview(kind = 'video') {
+  const file = await findFile(kind);
   if (!file) return false;
   await drive().files.delete({ fileId: file.id, supportsAllDrives: true });
   return true;

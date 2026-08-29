@@ -24,7 +24,7 @@ import { photoSchedule } from '../src/photo-plan.js';
 import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { compileLong, orderEpisodes } from '../src/compile-long.js';
-import { savePreview, previewInfo, removePreview, fetchPreview } from '../src/preview.js';
+import { savePreview, previewState, removePreview, fetchPreview } from '../src/preview.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty } from '../src/autopublish.js';
@@ -504,8 +504,8 @@ const server = http.createServer(async (req, res) => {
     // що й фото власних сюжетів.
     if (pathname === '/api/compile/preview') {
       if (req.method === 'GET') {
-        try { return json(res, 200, await previewInfo()); }
-        catch (error) { return json(res, 200, { exists: false, error: error.message }); }
+        try { return json(res, 200, await previewState()); }
+        catch (error) { return json(res, 200, { error: error.message }); }
       }
       if (req.method === 'POST') {
         // Довжину перевіряємо ДО читання тіла: інакше будь-хто, хто знає
@@ -518,8 +518,11 @@ const server = http.createServer(async (req, res) => {
         if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
         if (!isOwner(check.user)) return json(res, 403, { error: 'Міняти прев\'ю може лише власник каналу' });
         try {
-          if (body.remove) return json(res, 200, { removed: await removePreview(), exists: false });
-          const saved = await savePreview(body);
+          const kind = body.kind === 'youtube' ? 'youtube' : 'video';
+          if (body.remove) {
+            return json(res, 200, { kind, removed: await removePreview(kind), exists: false });
+          }
+          const saved = await savePreview({ ...body, kind });
           return json(res, 200, { ok: true, exists: true, ...saved });
         } catch (error) {
           return json(res, 400, { error: error.message });

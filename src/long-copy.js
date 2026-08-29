@@ -124,3 +124,108 @@ ${listTitles(items)}
 
 Відповідь — лише сам текст вступу, без лапок і пояснень.`;
 }
+
+// --- Назва, опис, текст для Facebook -----------------------------------------
+// Усе це генерується автоматично й одразу йде в заливку, тож головна вимога до
+// розбору — ніколи не лишити відео без назви. Модель зрідка відповідає не тим
+// форматом; у такому разі падаємо на назву добірки, а не на порожнечу.
+
+export const TITLE_LIMIT = 100;      // жорстка межа YouTube
+export const DESCRIPTION_LIMIT = 5000;
+
+export function metaPrompt({ title, theme, items = [] }) {
+  return `Ти пишеш назву й опис до довгого відео українського каналу фактів.
+
+НАЗВА ДОБІРКИ (вона ж на обкладинці): ${title}
+ЩО СПІЛЬНОГО: ${theme}
+
+СЮЖЕТИ ВСЕРЕДИНІ:
+${listTitles(items)}
+
+НАЗВА ДЛЯ YOUTUBE
+• До ${TITLE_LIMIT} символів, українською.
+• НЕ повторюй слова з обкладинки: вона вже каже «${title}». Назва має додавати
+  те, ЧОГО там немає — конкретику з сюжетів.
+• Почни з найцікавішого конкретного об'єкта чи твердження, а не з числа.
+• Без КАПСУ, без емодзі, без «шок», «ви не повірите» і трьох знаків оклику.
+
+ОПИС ДЛЯ YOUTUBE
+• Два-три речення, які переказують найсильніше з добірки конкретикою:
+  назвами, місцями, числами. Без «у цьому відео ви дізнаєтесь».
+• Ніяких таймкодів і ніяких хештегів — їх додає застосунок сам.
+
+ТЕКСТ ДЛЯ FACEBOOK
+• Два коротких абзаци й питання до читача в кінці.
+• Перші два рядки — найважливіші: у стрічці видно лише їх.
+• Без таймкодів і без хештегів.
+
+Відповідь — ЛИШЕ JSON, без розмітки:
+{"youtubeTitle":"…","description":"…","facebook":"…"}`;
+}
+
+function clamp(text, limit) {
+  const s = String(text || '').replace(/\s+/g, ' ').trim();
+  return s.length > limit ? `${s.slice(0, limit - 1).trimEnd()}…` : s;
+}
+
+export function parseMeta(answer, { title = '', items = [] } = {}) {
+  let data = {};
+  try {
+    const text = String(answer || '');
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    data = start >= 0 && end > start ? JSON.parse(text.slice(start, end + 1)) : {};
+  } catch {
+    data = {};
+  }
+  // Запасна назва — сама добірка плюс перший сюжет: не блискуче, зате чесно
+  // й ніколи не порожньо.
+  const first = items[0]?.title || items[0]?.theme || '';
+  const fallbackTitle = [title, first].filter(Boolean).join(': ') || title || 'Добірка фактів';
+  return {
+    youtubeTitle: clamp(data.youtubeTitle || fallbackTitle, TITLE_LIMIT),
+    description: String(data.description || '').trim(),
+    facebook: String(data.facebook || '').trim(),
+    generated: Boolean(data.youtubeTitle),
+  };
+}
+
+export const HASHTAGS_YOUTUBE = '#Україна #цікавіфакти #історіяУкраїни';
+export const HASHTAGS_FACEBOOK = '#Україна #цікавіфакти';
+
+// Збирає остаточний опис для YouTube: текст, таймкоди розділів, підпис.
+// chapters приходять із монтажу — вони порахували себе за фактичними
+// тривалостями, тож підставляються як є.
+export function youtubeDescription({ description, chapters = [], items = [] }) {
+  const parts = [];
+  if (description) parts.push(description);
+  if (chapters.length) parts.push(`⏱ Таймкоди:\n${chapters.join('\n')}`);
+  else if (items.length) {
+    // Без таймкодів список сюжетів робить половину їхньої роботи: глядач бачить,
+    // що всередині, ще до того, як натисне.
+    parts.push(`Що всередині:\n${items.map((it) => `• ${it.title || it.theme}`).join('\n')}`);
+  }
+  parts.push('Нові факти виходять щодня — підписуйся, щоб не пропустити.');
+  parts.push(HASHTAGS_YOUTUBE);
+  return clampBlock(parts.join('\n\n'), DESCRIPTION_LIMIT);
+}
+
+export function facebookPost({ facebook, description }) {
+  const body = facebook || description || '';
+  return `${body}\n\n${HASHTAGS_FACEBOOK}`.trim();
+}
+
+// Опис ріжемо по абзацах, а не посеред слова: обрубаний таймкод виглядає
+// як помилка, а зайвий абзац просто не потрапить.
+function clampBlock(text, limit) {
+  if (text.length <= limit) return text;
+  const blocks = text.split('\n\n');
+  const out = [];
+  let size = 0;
+  for (const block of blocks) {
+    if (size + block.length + 2 > limit) break;
+    out.push(block);
+    size += block.length + 2;
+  }
+  return out.join('\n\n');
+}

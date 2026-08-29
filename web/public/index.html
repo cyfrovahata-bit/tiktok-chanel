@@ -272,10 +272,16 @@
     <div class="cut-list" id="cutList"></div>
     <div class="cut-opts-title">Прев'ю</div>
     <p class="own-hint" id="cutPreviewState">Перевіряю…</p>
-    <input type="file" id="cutPreviewFile" accept="image/*" hidden />
+    <input type="file" id="cutPreviewFile" accept="image/*" hidden data-kind="video" />
+    <input type="file" id="cutThumbFile" accept="image/*" hidden data-kind="youtube" />
     <div class="own-actions">
-      <button class="btn secondary" id="cutPreviewPick">🖼 Завантажити прев'ю</button>
-      <button class="btn secondary" id="cutPreviewClear">Прибрати</button>
+      <button class="btn secondary" id="cutPreviewPick" data-kind="video">🖼 Прев'ю для відео</button>
+      <button class="btn secondary" id="cutPreviewClear" data-kind="video">Прибрати</button>
+    </div>
+    <p class="own-hint" id="cutThumbState">Перевіряю…</p>
+    <div class="own-actions">
+      <button class="btn secondary" id="cutThumbPick" data-kind="youtube">🖼 Обкладинка YouTube</button>
+      <button class="btn secondary" id="cutThumbClear" data-kind="youtube">Прибрати</button>
     </div>
 
     <div class="cut-opts-title">Налаштування</div>
@@ -959,60 +965,86 @@
       r.readAsDataURL(file);
     });
 
+    const PREVIEW_UI = {
+      video: {
+        state: '#cutPreviewState', pick: '#cutPreviewPick', file: '#cutPreviewFile',
+        label: '🖼 Прев\'ю для відео',
+        empty: 'Прев\'ю для відео немає — вступ буде на чорному тлі.',
+        has: 'Прев\'ю для відео',
+      },
+      youtube: {
+        state: '#cutThumbState', pick: '#cutThumbPick', file: '#cutThumbFile',
+        label: '🖼 Обкладинка YouTube',
+        empty: 'Обкладинки YouTube немає — відео вийде з випадковим кадром.',
+        has: 'Обкладинка YouTube',
+      },
+    };
+
     async function cutPreviewState() {
-      const box = $('#cutPreviewState');
+      let all = {};
       try {
-        const info = await fetch('/api/compile/preview').then((x) => x.json());
-        if (!info.exists) {
-          box.textContent = 'Прев\'ю немає — вступ буде на чорному тлі.';
-          return;
-        }
+        all = await fetch('/api/compile/preview').then((x) => x.json());
+      } catch (e) {
+        all = {};
+      }
+      for (const [kind, ui] of Object.entries(PREVIEW_UI)) {
+        const box = $(ui.state);
+        const info = all?.[kind];
+        if (!info) { box.textContent = 'Стан прев\'ю невідомий.'; continue; }
+        if (!info.exists) { box.textContent = ui.empty; continue; }
         const when = info.updatedAt ? new Date(info.updatedAt).toLocaleDateString('uk-UA') : '';
         const size = info.bytes ? `${Math.round(info.bytes / 1024)} КБ` : '';
-        box.textContent = `Прев'ю на місці${when ? `, від ${when}` : ''}${size ? `, ${size}` : ''}.`;
-      } catch (e) {
-        box.textContent = 'Стан прев\'ю невідомий.';
+        box.textContent = `${ui.has} на місці${when ? `, від ${when}` : ''}${size ? `, ${size}` : ''}.`;
       }
     }
 
-    $('#cutPreviewPick').addEventListener('click', () => $('#cutPreviewFile').click());
-
-    $('#cutPreviewFile').addEventListener('change', async (e) => {
-      const file = e.target.files?.[0];
-      e.target.value = '';
-      if (!file) return;
-      if (!initData) { toast('Відкрий через Telegram'); return; }
-      const btn = $('#cutPreviewPick');
+    async function previewUpload(kind, file) {
+      const ui = PREVIEW_UI[kind];
+      const btn = $(ui.pick);
       btn.disabled = true; btn.textContent = 'Вивантажую…';
       try {
         const r = await fetch('/api/compile/preview', {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            initData, data: await previewToBase64(file), mimeType: file.type || 'image/jpeg',
+            initData, kind, data: await previewToBase64(file), mimeType: file.type || 'image/jpeg',
           }),
         }).then((x) => x.json());
-        toast(r.error || 'Прев\'ю збережено');
+        toast(r.error || 'Збережено');
       } catch (err) {
         toast(err.message);
       } finally {
-        btn.disabled = false; btn.textContent = '🖼 Завантажити прев\'ю';
+        btn.disabled = false; btn.textContent = ui.label;
         cutPreviewState();
       }
-    });
+    }
 
-    $('#cutPreviewClear').addEventListener('click', async () => {
-      if (!initData) { toast('Відкрий через Telegram'); return; }
-      try {
-        const r = await fetch('/api/compile/preview', {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ initData, remove: true }),
-        }).then((x) => x.json());
-        toast(r.error || (r.removed ? 'Прев\'ю прибрано' : 'Прев\'ю й не було'));
-      } catch (err) {
-        toast(err.message);
-      }
-      cutPreviewState();
-    });
+    for (const [kind, ui] of Object.entries(PREVIEW_UI)) {
+      $(ui.pick).addEventListener('click', () => $(ui.file).click());
+      $(ui.file).addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        if (!initData) { toast('Відкрий через Telegram'); return; }
+        await previewUpload(kind, file);
+      });
+    }
+
+    for (const btn of document.querySelectorAll('#cutPreviewClear, #cutThumbClear')) {
+      btn.addEventListener('click', async () => {
+        if (!initData) { toast('Відкрий через Telegram'); return; }
+        const kind = btn.dataset.kind;
+        try {
+          const r = await fetch('/api/compile/preview', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ initData, kind, remove: true }),
+          }).then((x) => x.json());
+          toast(r.error || (r.removed ? 'Прибрано' : 'Його й не було'));
+        } catch (err) {
+          toast(err.message);
+        }
+        cutPreviewState();
+      });
+    }
 
     // --- Свій сюжет ---------------------------------------------------------
     // Фото шлемо по одному окремими запитами: десяток знімків із телефона в

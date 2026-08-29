@@ -49,3 +49,73 @@ test('порожній набір сюжетів не ламає промт', ()
   const p = previewPromptVideo({ title: 'Тема', theme: 'опис', items: [] });
   assert.doesNotMatch(p, /undefined/);
 });
+
+// --- Назва й опис ------------------------------------------------------------
+import {
+  metaPrompt, parseMeta, youtubeDescription, facebookPost, TITLE_LIMIT, DESCRIPTION_LIMIT,
+} from '../src/long-copy.js';
+
+test('промт назви забороняє повторювати обкладинку', () => {
+  const p = metaPrompt(SET);
+  assert.match(p, /НЕ повторюй слова з обкладинки/);
+  assert.match(p, /5 замків України/);
+  assert.match(p, new RegExp(`До ${TITLE_LIMIT} символів`));
+});
+
+test('розбирає відповідь моделі', () => {
+  const out = parseMeta('{"youtubeTitle":"Замок, якого не було","description":"Опис.","facebook":"ФБ"}', SET);
+  assert.equal(out.youtubeTitle, 'Замок, якого не було');
+  assert.equal(out.facebook, 'ФБ');
+  assert.equal(out.generated, true);
+});
+
+test('крива відповідь не лишає відео без назви', () => {
+  const out = parseMeta('нічого не вийшло', {
+    title: '5 замків України',
+    items: [{ title: 'Хотинська фортеця: замок із фільмів' }],
+  });
+  assert.equal(out.generated, false);
+  assert.match(out.youtubeTitle, /5 замків України/);
+  assert.ok(out.youtubeTitle.length > 0);
+});
+
+test('задовга назва ріжеться під межу YouTube', () => {
+  const long = 'а'.repeat(200);
+  const out = parseMeta(JSON.stringify({ youtubeTitle: long }), SET);
+  assert.ok(out.youtubeTitle.length <= TITLE_LIMIT, `вийшло ${out.youtubeTitle.length}`);
+});
+
+test('опис збирається з тексту, таймкодів і хештегів', () => {
+  const d = youtubeDescription({
+    description: 'Два речення про добірку.',
+    chapters: ['0:00 Вступ', '0:05 Хотин'],
+  });
+  assert.match(d, /Два речення про добірку\./);
+  assert.match(d, /0:00 Вступ/);
+  assert.match(d, /#Україна/);
+  assert.match(d, /підписуйся/);
+});
+
+test('без таймкодів опис показує список сюжетів', () => {
+  const d = youtubeDescription({ description: 'Текст.', items: SET.items });
+  assert.match(d, /Що всередині:/);
+  assert.match(d, /Хотинська фортеця/);
+  assert.doesNotMatch(d, /Таймкоди/);
+});
+
+test('надто довгий опис ріжеться по абзацах, а не посеред таймкоду', () => {
+  const d = youtubeDescription({
+    description: 'я'.repeat(DESCRIPTION_LIMIT - 100),
+    chapters: ['0:00 Вступ', '1:00 Другий'],
+  });
+  assert.ok(d.length <= DESCRIPTION_LIMIT);
+  // Або блок таймкодів цілий, або його немає зовсім — половини бути не може.
+  assert.ok(!d.includes('⏱') || d.includes('1:00 Другий'));
+});
+
+test('текст для Facebook іде зі своїми хештегами й без таймкодів', () => {
+  const t = facebookPost({ facebook: 'Коротко.\n\nПитання?' });
+  assert.match(t, /Питання\?/);
+  assert.match(t, /#Україна #цікавіфакти$/);
+  assert.doesNotMatch(t, /історіяУкраїни/);
+});
