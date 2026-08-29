@@ -169,3 +169,61 @@ test('картка короткої подяки несе готовий тек�
   assert.match(cards[0], /[Дд]якуємо|[Рр]аді|[Пп]риємно/);
   assert.match(cards[0], /лишайтеся|попереду|заходьте|цікав/);
 });
+
+// --- Лайки -------------------------------------------------------------------
+
+function adapterWithLike(comments, log) {
+  return {
+    key: 'fb',
+    label: 'Facebook',
+    icon: '💬',
+    enabled: () => true,
+    fetch: async () => comments,
+    reply: async (id, text) => log.push({ act: 'reply', id, text }),
+    like: async (id) => log.push({ act: 'like', id }),
+    link: () => 'https://example.com/post',
+  };
+}
+
+test('коментар із чернеткою отримує лайк', async () => {
+  const log = [];
+  await checkPlatform(adapterWithLike([
+    { id: 'c1', text: 'Дякую!', author: 'Іван', postId: 'p1' },
+  ], log), {
+    state: { seen: {}, drafts: {} },
+    postIndex: [],
+    notifyFn: async () => ({ message_id: 1 }),
+    chatId: 1,
+  });
+  assert.ok(log.some((l) => l.act === 'like' && l.id === 'c1'));
+});
+
+test('там, де модель радить промовчати, лайка немає', async () => {
+  // Уподобаний випад виглядав би згодою з ним.
+  const log = [];
+  await checkPlatform(adapterWithLike([
+    { id: 'c2', text: 'тупа маячня від ботів', author: 'Тролль', postId: 'p1' },
+  ], log), {
+    state: { seen: {}, drafts: {} },
+    postIndex: [],
+    chat: async () => 'ПРОПУСТИТИ',
+    notifyFn: async () => ({ message_id: 1 }),
+    chatId: 1,
+  });
+  assert.ok(!log.some((l) => l.act === 'like'), 'випад лайкати не можна');
+});
+
+test('двічі той самий коментар не лайкається', async () => {
+  const log = [];
+  const state = { seen: {}, drafts: {} };
+  const comments = [{ id: 'c3', text: 'супер', author: 'Іван', postId: 'p1' }];
+  await checkPlatform(adapterWithLike(comments, log), {
+    state, postIndex: [], notifyFn: async () => ({ message_id: 1 }), chatId: 1,
+  });
+  // Другий прохід: коментар уже бачений, але навіть якби ні — лайк не повториться.
+  state.seen = {};
+  await checkPlatform(adapterWithLike(comments, log), {
+    state, postIndex: [], notifyFn: async () => ({ message_id: 1 }), chatId: 1,
+  });
+  assert.equal(log.filter((l) => l.act === 'like').length, 1);
+});

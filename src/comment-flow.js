@@ -29,6 +29,11 @@ const AUTO_THANKS = process.env.COMMENTS_AUTO_THANKS === '1';
 // пожартувати рівно настільки, щоб не вийшло глузування. Коментарів мало —
 // кількадесят на добу, — тож сильніша модель коштує копійки.
 const MODEL = process.env.COMMENTS_MODEL || 'gpt-4o';
+// Лайки коментарів. Вмикати їх безпечніше за автовідповіді: лайк не можна
+// сформулювати невдало, а глядач бачить, що його прочитали. Не ставимо лише
+// там, де модель радить промовчати — уподобаний випад виглядав би згодою.
+const AUTO_LIKE = process.env.COMMENTS_AUTO_LIKE !== '0';
+const LIKE_PER_RUN = Number(process.env.COMMENTS_LIKE_PER_RUN) || 15;
 const SKIP = 'ПРОПУСТИТИ';
 
 // Реєстр платформ: ключ → адаптер. Заповнюється при старті (registerPlatform).
@@ -412,6 +417,25 @@ export async function checkPlatform(adapter, options = {}) {
   // картки. Їх найбільше, а рішення там ніякого: власник щоразу натискав би
   // «Надіслати». Контекст ролика їм не потрібен, тож це працює навіть там, де
   // прив'язка коментаря до ролика ще не будується.
+  // Лайкаємо окремо від відповідей: більшість коментарів відповіді не
+  // отримає — ані автоматичної, ані від власника, — але побачити, що їх
+  // прочитали, має кожен.
+  state.liked = state.liked || {};
+  let likes = 0;
+  const like = async (comment) => {
+    if (!AUTO_LIKE || !adapter.like || likes >= LIKE_PER_RUN) return;
+    const key = `${adapter.key}:${comment.id}`;
+    if (state.liked[key]) return;
+    try {
+      await adapter.like(comment.id, options);
+      state.liked[key] = 1;
+      likes += 1;
+      result.liked = (result.liked || 0) + 1;
+    } catch (error) {
+      console.error(`[comments:${adapter.key}] лайк:`, error.message);
+    }
+  };
+
   const auto = [];
   const rest = [];
   state.thanks = state.thanks || {};
@@ -430,6 +454,7 @@ export async function checkPlatform(adapter, options = {}) {
     const recent = state.thanks[under] || [];
     const text = thanksReply(comment, { recent });
     try {
+      await like(comment);
       await adapter.reply(comment.id, text, options);
     } catch (error) {
       // Не вдалося — лишаємо коментар нерозібраним: наступний прохід або
@@ -467,6 +492,11 @@ export async function checkPlatform(adapter, options = {}) {
     // Картка йде ЗАВЖДИ, навіть коли модель радить промовчати: власник має
     // бачити всі коментарі й вирішувати сам. Без чернетки просто немає кнопки
     // «Надіслати».
+    // Лайк ставимо ЛИШЕ там, де є чернетка: порожня означає, що модель радить
+    // промовчати (образа, провокація, спам), а вподобати таке — гірше за
+    // мовчання.
+    if (draft) await like(comment);
+
     const message = await notify(
       chatId,
       card(adapter, comment, draft, { auto: Boolean(comment.autoDraft) }),

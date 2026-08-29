@@ -69,6 +69,17 @@ export function replyFacebook(commentId, message, options = {}) {
   });
 }
 
+// Уподобання коментаря від імені Сторінки. Той самий дозвіл, що й на
+// відповіді (pages_manage_engagement), окремий ендпоінт. Instagram такого не
+// вміє через API, тож там лишається тільки відповідь.
+export function likeFacebook(commentId, options = {}) {
+  return graphRequest(`${encodeURIComponent(commentId)}/likes`, {
+    method: 'POST',
+    token: options.token || token(),
+    fetchImpl: options.fetchImpl,
+  });
+}
+
 export const facebookAdapter = {
   key: 'fb',
   label: 'Facebook',
@@ -76,6 +87,7 @@ export const facebookAdapter = {
   enabled: facebookEnabled,
   fetch: fetchFacebookComments,
   reply: replyFacebook,
+  like: likeFacebook,
   link: (c) => `https://www.facebook.com/${c.postId}`,
 };
 
