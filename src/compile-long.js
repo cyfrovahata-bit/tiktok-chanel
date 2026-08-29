@@ -274,11 +274,11 @@ function announceFilter(assPath, seconds, delayMs) {
     + 'alimiter=limit=0.95,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]';
 }
 
-async function makeAnnounce(workDir, { number, total }, onProgress = () => {}) {
+async function makeAnnounce(workDir, { number, total, label = '' }, onProgress = () => {}) {
   let voicePath = null;
   let voiceSeconds = 1.1;
   try {
-    voicePath = await voiceClip(factKey(number), factLine(number), { onProgress });
+    voicePath = await voiceClip(factKey(number, label), factLine(number, label), { onProgress });
     voiceSeconds = await durationSeconds(voicePath);
   } catch (error) {
     onProgress(`   оголошення ${number} без голосу: ${String(error.message).split('\n')[0]}`);
@@ -286,9 +286,13 @@ async function makeAnnounce(workDir, { number, total }, onProgress = () => {}) {
   const seconds = Number((ANNOUNCE_LEAD + voiceSeconds + ANNOUNCE_TAIL).toFixed(2));
 
   const assPath = path.join(workDir, `announce-${number}.ass`);
-  // Дрібний рядок — обов'язково зі словом: голе «З 15» під написом «ФАКТ 3»
+  // Дрібний рядок: назва сюжету, якщо вона є, — те саме, що чути в голосі.
+  // Без назви лишається «З 15 ФАКТІВ», і обов'язково зі словом: голе «З 15»
   // читається як «3 15», бо кирилична З і трійка в цьому шрифті майже однакові.
-  await writeFile(assPath, introAss(factTitle(number), `З ${total} ${factWordForm(total).toUpperCase()}`, seconds), 'utf8');
+  const small = String(label || '').trim()
+    ? String(label).trim().toUpperCase()
+    : `З ${total} ${factWordForm(total).toUpperCase()}`;
+  await writeFile(assPath, introAss(factTitle(number), small, seconds), 'utf8');
 
   const raw = path.join(workDir, `announce-raw-${number}.mp4`);
   // Німа картка потрібна лише запасним шляхам, тож і збирається лише там:
@@ -493,7 +497,7 @@ export async function toWide(inPath, outPath) {
 
 // Головна функція. items — рядки таблиці в потрібному порядку.
 // onProgress(text) — необов'язковий колбек для живого журналу.
-export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, separators = true, intro = true, announce = true, previewPath = null, onProgress = () => {} } = {}) {
+export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, separators = true, intro = true, announce = true, previewPath = null, labels = [], onProgress = () => {} } = {}) {
   if (!Array.isArray(items) || items.length < 2) {
     throw new Error('Для добірки треба щонайменше два епізоди.');
   }
@@ -542,7 +546,9 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     onProgress('роблю оголошення фактів');
     const cards = [];
     for (let i = 0; i < parts.length; i++) {
-      cards.push(await makeAnnounce(workDir, { number: i + 1, total: parts.length }, onProgress));
+      cards.push(await makeAnnounce(
+        workDir, { number: i + 1, total: parts.length, label: labels[i] || '' }, onProgress,
+      ));
     }
     leads = [];
     for (const card of cards) leads.push(await durationSeconds(card));

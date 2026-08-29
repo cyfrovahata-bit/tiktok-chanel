@@ -72,9 +72,15 @@ export function introLine(count) {
   return `Чи знав ти таку Україну? ${count} ${factWordForm(count)}, яких ти, можливо, не знав.`;
 }
 
-// Оголошення перед сюжетом: «Факт перший», «Факт третій», «Факт п'ятнадцятий».
-export function factLine(number) {
-  return `Факт ${ordinalUkrainian(number, 'ий')}.`;
+// Оголошення перед сюжетом. Без назви — «Факт третій»; із назвою —
+// «Факт третій. Хотинська фортеця». Друге звучить помітно краще: глядач одразу
+// чує, про що буде, а не лише порядковий номер. Платимо за це синтезом на
+// кожну нову пару «номер + назва», але репліки короткі, і ключ із хешем
+// сам перевикористає ту, що вже є.
+export function factLine(number, label = '') {
+  const base = `Факт ${ordinalUkrainian(number, 'ий')}.`;
+  const name = String(label || '').trim().replace(/[.!?…]+$/, '');
+  return name ? `${base} ${name}.` : base;
 }
 
 // Напис на картці оголошення: «ФАКТ 3».
@@ -95,9 +101,9 @@ export function introKey(count) {
   return `intro-${n}-${textHash(introLine(n))}`;
 }
 
-export function factKey(number) {
+export function factKey(number, label = '') {
   const n = Math.trunc(number);
-  return `fact-${String(n).padStart(2, '0')}-${textHash(factLine(n))}`;
+  return `fact-${String(n).padStart(2, '0')}-${textHash(factLine(n, label))}`;
 }
 
 // Повний список реплік банку — для разової генерації наперед.

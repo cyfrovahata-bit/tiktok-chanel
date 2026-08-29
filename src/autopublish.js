@@ -13,6 +13,7 @@
 import { readAllItems, isReady } from './sheets.js';
 import { listVideoFiles, setVideoAppProperties, videoName, streamVideo } from './videos.js';
 import { publish } from './publish.js';
+import { shortDisplacedByLong } from './long-plan.js';
 import { sendMessage, ownerChatId } from './telegram.js';
 
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://tiktok-chanel-production.up.railway.app').replace(/\/$/, '');
@@ -227,6 +228,10 @@ export async function runAutoPublishOnce(options = {}) {
   for (const platform of enabledMetaPlatforms()) {
     const slot = slotFor(platformHours(platform), now);
     if (!slot) continue;
+    // У неділю, вівторок і п'ятницю вечірній слот YouTube займає довга
+    // збірка — шортс туди не йде, щоб два своїх відео не змагалися між собою
+    // за той самий показ.
+    if (shortDisplacedByLong(platform, slot.label.slice(0, 2), now)) continue;
     if (!groups.has(slot.key)) groups.set(slot.key, { slot, platforms: [] });
     groups.get(slot.key).platforms.push(platform);
   }

@@ -139,3 +139,59 @@ test('зовсім крива відповідь не лишає нас без �
   assert.deepEqual(out.ids, ['ID-01', 'ID-02', 'ID-03', 'ID-04', 'ID-05']);
   assert.equal(out.toppedUp, true);
 });
+
+// --- Витіснений шортс --------------------------------------------------------
+import { shortDisplacedByLong } from '../src/long-plan.js';
+
+test('о 18:00 у день збірки шортс не йде лише на YouTube', () => {
+  assert.equal(shortDisplacedByLong('youtube', 18, NEDILYA), true);
+  assert.equal(shortDisplacedByLong('tiktok', 18, NEDILYA), false);
+  assert.equal(shortDisplacedByLong('instagram', 18, NEDILYA), false);
+});
+
+test('інші години й інші дні не чіпаємо', () => {
+  assert.equal(shortDisplacedByLong('youtube', 8, NEDILYA), false);
+  assert.equal(shortDisplacedByLong('youtube', 12, PYATNYTSYA), false);
+  assert.equal(shortDisplacedByLong('youtube', 18, SEREDA), false);
+});
+
+test('година зі слота приходить рядком «18» — теж має спрацювати', () => {
+  assert.equal(shortDisplacedByLong('youtube', '18', VIVTOROK), true);
+});
+
+// --- Підписи до сюжетів і тижнева добірка ------------------------------------
+import { shortLabel } from '../src/long-plan.js';
+
+test('модель дає підпис до кожного сюжету', () => {
+  const answer = '{"title":"5 замків","picks":[{"id":"ID-01","label":"Хотинська фортеця"},'
+    + '{"id":"ID-02","label":"Замок Паланок"},{"id":"ID-03","label":"Олеський замок"},'
+    + '{"id":"ID-04","label":"Луцький замок"},{"id":"ID-05","label":"Кам\'янець"}]}';
+  const out = parseThemeSet(answer, POOL, 5);
+  assert.equal(out.labels[0], 'Хотинська фортеця');
+  assert.equal(out.labels.length, 5);
+});
+
+test('без підпису від моделі він виводиться з назви', () => {
+  const pool = [{ id: 'X', title: 'Хотинська фортеця: замок, який ти бачив у фільмах' }];
+  const out = parseThemeSet('{"ids":["X"]}', pool, 1);
+  assert.equal(out.labels[0], 'Хотинська фортеця');
+});
+
+test('підпис із назви: до двокрапки, без хвостів', () => {
+  assert.equal(shortLabel('Софія Київська: що ховається під стінами'), 'Софія Київська');
+  assert.equal(shortLabel('«Кобзар» площею 0,6 мм²: мікромініатюра'), 'Кобзар площею 0,6 мм²');
+  assert.equal(shortLabel(''), '');
+});
+
+test('тижневий промт просить іншу назву й перелічує вже вжиті', () => {
+  const p = buildThemePrompt(POOL, 15, { loose: true, avoidTitles: ['Підземна Україна'] });
+  assert.match(p, /тижнева добірка найкращого/);
+  assert.match(p, /ЦІ НАЗВИ ВЖЕ БУЛИ/);
+  assert.match(p, /Підземна Україна/);
+});
+
+test('звичайний промт лишається тематичним', () => {
+  const p = buildThemePrompt(POOL, 5);
+  assert.match(p, /ГОЛОВНЕ ПРАВИЛО/);
+  assert.doesNotMatch(p, /ЦІ НАЗВИ ВЖЕ БУЛИ/);
+});
