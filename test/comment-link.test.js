@@ -147,3 +147,46 @@ test('опис потрапляє в промт разом із озвучкою
   assert.match(prompt, /КОЛЕКЦІЯ ПОЇХАЛА НА ВИСТАВКУ/);
   assert.match(prompt, /ЗОЛОТО ЧЕКАЛО/);
 });
+
+// --- Позиція й тон -----------------------------------------------------------
+// Це не косметика: саме ці рядки вирішують, чи канал виглядатиме як людина,
+// що вміє тримати удар, чи як бот, який виправдовується.
+import { draftReply } from '../src/comment-flow.js';
+
+test('промт задає спокійний доброзичливий тон і дозволяє гумор', () => {
+  const p = draftPrompt({ author: 'Іван', text: 'норм' }, 'Facebook', null);
+  assert.match(p, /ТОН\./);
+  assert.match(p, /гумор/);
+  assert.match(p, /ніколи не глузування|не глузування/);
+});
+
+test('на закид про якість — подяка й «вчимося», а не виправдовування', () => {
+  const p = draftPrompt({ author: 'Іван', text: 'озвучка жахлива' }, 'Facebook', null);
+  assert.match(p, /ЯКЩО ЛАЮТЬ ЯКІСТЬ/);
+  assert.match(p, /не сперечайся й не/);
+  assert.match(p, /вчимося/);
+});
+
+test('на закид про помилку — визнати, пояснити, не сперечатися', () => {
+  const p = draftPrompt({ author: 'Іван', text: 'насправді було не так' }, 'Facebook', null);
+  assert.match(p, /ЯКЩО КАЖУТЬ, ЩО МИ ПОМИЛИЛИСЯ/);
+  assert.match(p, /все не вміщається/);
+  assert.match(p, /ніколи не сперечайся/);
+  // Головне: не вигадувати підтверджень, яких немає.
+  assert.match(p, /не вигадуй підтверджень/);
+});
+
+test('українська позиція лишилася на місці', () => {
+  const p = draftPrompt({ author: 'Іван', text: 'совок' }, 'Facebook', null);
+  assert.match(p, /ПОЗИЦІЯ КАНАЛУ/);
+  assert.match(p, /не виправдовуйся за український сюжет/);
+});
+
+test('чернетку пише окрема модель, а не та, що описи', async () => {
+  let seen = null;
+  await draftReply({ author: 'Іван', text: 'дякую' }, {
+    chat: async (_prompt, options) => { seen = options; return 'Дякуємо!'; },
+  });
+  assert.ok(seen?.model, 'модель має передаватися явно');
+  assert.notEqual(seen.model, 'gpt-4o-mini');
+});
