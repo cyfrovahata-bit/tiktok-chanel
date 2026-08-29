@@ -118,3 +118,54 @@ test('звичайні подяки при цьому лишаються авт�
     assert.equal(isShortAppreciation(text), true, text);
   }
 });
+
+// --- Режим перевірки ---------------------------------------------------------
+// Поки автовідповіді вимкнені, короткі подяки мають доходити до власника — але
+// вже з готовим текстом, а не порожні: інакше він не побачить, що саме бот
+// постив би після вмикання.
+import { checkPlatform } from '../src/comment-flow.js';
+
+function fakeAdapter(comments, posted) {
+  return {
+    key: 'fb',
+    label: 'Facebook',
+    icon: '💬',
+    enabled: () => true,
+    fetch: async () => comments,
+    reply: async (id, text) => { posted.push({ id, text }); },
+    link: () => 'https://example.com/post',
+  };
+}
+
+test('без вмикання нічого не публікується — усе йде карткою', async () => {
+  const posted = [];
+  const cards = [];
+  const state = { seen: {}, drafts: {} };
+  const result = await checkPlatform(fakeAdapter([
+    { id: 'c1', text: 'Дякую!', author: 'Іван', postId: 'p1' },
+    { id: 'c2', text: '❤️', author: 'Оля', postId: 'p1' },
+  ], posted), {
+    state,
+    postIndex: [],
+    notifyFn: async (_chat, text) => { cards.push(text); return { message_id: cards.length }; },
+    chatId: 1,
+  });
+
+  assert.equal(posted.length, 0, 'у режимі перевірки бот не має постити сам');
+  assert.equal(result.auto ?? 0, 0);
+  assert.equal(cards.length, 2);
+});
+
+test('картка короткої подяки несе готовий текст і позначку', async () => {
+  const cards = [];
+  await checkPlatform(fakeAdapter([{ id: 'c1', text: 'дуже цікаво', author: 'Іван', postId: 'p1' }], []), {
+    state: { seen: {}, drafts: {} },
+    postIndex: [],
+    notifyFn: async (_chat, text) => { cards.push(text); return { message_id: 1 }; },
+    chatId: 1,
+  });
+
+  assert.match(cards[0], /Коротка подяка/);
+  assert.match(cards[0], /[Дд]якуємо|[Рр]аді|[Пп]риємно/);
+  assert.match(cards[0], /лишайтеся|попереду|заходьте|цікав/);
+});

@@ -19,7 +19,10 @@ const MAX_PER_RUN = Number(process.env.COMMENTS_PER_RUN) || 5;
 // Автовідповіді на короткі подяки. Своя стеля на прохід: Сторінка, яка за
 // хвилину лишає двадцять коментарів, ловить обмеження Facebook.
 const AUTO_PER_RUN = Number(process.env.COMMENTS_AUTO_PER_RUN) || 5;
-const AUTO_THANKS = process.env.COMMENTS_AUTO_THANKS !== '0';
+// Поки вимкнено: короткі подяки теж ідуть карткою, але з готовим текстом
+// автовідповіді — щоб власник побачив, що саме бот постив би, і оцінив це на
+// живих коментарях. Вмикається одним COMMENTS_AUTO_THANKS=1.
+const AUTO_THANKS = process.env.COMMENTS_AUTO_THANKS === '1';
 const SKIP = 'ПРОПУСТИТИ';
 
 // Реєстр платформ: ключ → адаптер. Заповнюється при старті (registerPlatform).
@@ -227,7 +230,10 @@ function keyboard(platformKey, commentId, hasDraft = true) {
   return { inline_keyboard: [row] };
 }
 
-function card(adapter, comment, draft) {
+function card(adapter, comment, draft, { auto = false } = {}) {
+  const head = auto
+    ? '🤝 Коротка подяка. Це та сама відповідь, яку бот надішле сам, коли ввімкнемо:'
+    : 'Відповідь від ШІ:';
   return [
     `${adapter.icon} Коментар · ${adapter.label}`,
     adapter.link(comment),
@@ -235,7 +241,7 @@ function card(adapter, comment, draft) {
     `${comment.author}:`,
     comment.text,
     '',
-    draft ? 'Відповідь від ШІ:' : '⚠️ Модель радить не відповідати (образа, провокація або спам).',
+    draft ? head : '⚠️ Модель радить не відповідати (образа, провокація або спам).',
     draft || 'Якщо все ж хочеш — напиши свій текст відповіддю на це повідомлення.',
   ].filter((line) => line !== null).join('\n');
 }
@@ -274,11 +280,16 @@ export async function checkPlatform(adapter, options = {}) {
   // прив'язка коментаря до ролика ще не будується.
   const auto = [];
   const rest = [];
+  state.thanks = state.thanks || {};
   for (const comment of ordered) {
-    (AUTO_THANKS && isShortAppreciation(comment.text) ? auto : rest).push(comment);
+    if (!isShortAppreciation(comment.text)) { rest.push(comment); continue; }
+    if (AUTO_THANKS) { auto.push(comment); continue; }
+    // Автовідповіді вимкнені: текст усе одно готуємо тут, а не моделлю —
+    // власник має побачити рівно те, що піде в ефір після вмикання.
+    const under = String(comment.postId || comment.videoId || comment.mediaId || '');
+    rest.push({ ...comment, autoDraft: thanksReply(comment, { recent: state.thanks[under] || [] }) });
   }
 
-  state.thanks = state.thanks || {};
   for (const comment of auto.slice(0, AUTO_PER_RUN)) {
     const key = `${adapter.key}:${comment.id}`;
     const under = String(comment.postId || comment.videoId || comment.mediaId || '');
@@ -301,20 +312,22 @@ export async function checkPlatform(adapter, options = {}) {
 
   for (const comment of rest.slice(0, MAX_PER_RUN)) {
     const key = `${adapter.key}:${comment.id}`;
-    let draft = null;
-    try {
-      const post = findPost(index, adapter.key, comment);
-      draft = await draftReply(comment, { ...options, platformLabel: adapter.label, post });
-    } catch (error) {
-      console.error(`[comments:${adapter.key}] чернетка:`, error.message);
-      continue; // спробуємо наступного разу
+    let draft = comment.autoDraft || null;
+    if (!draft) {
+      try {
+        const post = findPost(index, adapter.key, comment);
+        draft = await draftReply(comment, { ...options, platformLabel: adapter.label, post });
+      } catch (error) {
+        console.error(`[comments:${adapter.key}] чернетка:`, error.message);
+        continue; // спробуємо наступного разу
+      }
     }
     // Картка йде ЗАВЖДИ, навіть коли модель радить промовчати: власник має
     // бачити всі коментарі й вирішувати сам. Без чернетки просто немає кнопки
     // «Надіслати».
     const message = await notify(
       chatId,
-      card(adapter, comment, draft),
+      card(adapter, comment, draft, { auto: Boolean(comment.autoDraft) }),
       keyboard(adapter.key, comment.id, Boolean(draft)),
     );
     state.seen[key] = 'pending';
