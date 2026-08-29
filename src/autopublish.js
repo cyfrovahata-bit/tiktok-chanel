@@ -14,6 +14,7 @@ import { readAllItems, isReady } from './sheets.js';
 import { listVideoFiles, setVideoAppProperties, videoName, streamVideo } from './videos.js';
 import { publish } from './publish.js';
 import { shortDisplacedByLong, isCompilationDay, COMPILATION_HOUR, LONG_VIDEO_PLATFORMS } from './long-plan.js';
+import { runLongDayOnce, compilationStillOn } from './long-day.js';
 import { sendMessage, ownerChatId } from './telegram.js';
 
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://tiktok-chanel-production.up.railway.app').replace(/\/$/, '');
@@ -229,6 +230,9 @@ export async function runAutoPublishOnce(options = {}) {
     now = new Date(),
     listItems = readAllItems,
     listFiles = listVideoFiles,
+    // Чи виходить сьогодні довга збірка. null — питання не ставили, тоді
+    // орієнтуємось на сам розклад.
+    compilationOn = null,
   } = options;
 
   const reminder = await remindFacebookOnce(options).catch((error) => {
@@ -246,7 +250,7 @@ export async function runAutoPublishOnce(options = {}) {
     // У неділю, вівторок і п'ятницю вечірній слот YouTube займає довга
     // збірка — шортс туди не йде, щоб два своїх відео не змагалися між собою
     // за той самий показ.
-    if (shortDisplacedByLong(platform, slot.label.slice(0, 2), now)) continue;
+    if (shortDisplacedByLong(platform, slot.label.slice(0, 2), now, compilationOn)) continue;
     if (!groups.has(slot.key)) groups.set(slot.key, { slot, platforms: [] });
     groups.get(slot.key).platforms.push(platform);
   }
@@ -259,7 +263,7 @@ export async function runAutoPublishOnce(options = {}) {
   const [items, files] = await Promise.all([listItems(), listFiles()]);
   const results = [];
   for (const group of groups.values()) {
-    results.push(await runGroup({ ...options, items, files, ...group }));
+    results.push(await runGroup({ ...options, compilationOn, items, files, ...group }));
   }
   if (results.length === 1) {
     return reminder ? { ...results[0], facebookReminded: reminder.itemId } : results[0];
@@ -271,6 +275,7 @@ async function runGroup({
   now = new Date(),
   slot,
   platforms,
+  compilationOn = null,
   items,
   files,
   setProperties = setVideoAppProperties,
@@ -344,7 +349,7 @@ async function runGroup({
     // YouTube і Facebook він не з'явиться ніколи — там сьогодні сама збірка.
     // Мітку ставимо ОДРАЗУ, разом із клеймом: інакше завтрашня черга віддала б
     // ролик YouTube як «ще не опублікований».
-    if (isCompilationDay(now) && Number(slot.label.slice(0, 2)) === COMPILATION_HOUR) {
+    if ((compilationOn ?? isCompilationDay(now)) && Number(slot.label.slice(0, 2)) === COMPILATION_HOUR) {
       for (const platform of LONG_VIDEO_PLATFORMS) claim[platformSkipProperty(platform)] = slot.key;
     }
     await setProperties(file.id, claim);
@@ -451,7 +456,18 @@ export function startAutoPublisher() {
     if (!running) {
       running = true;
       try {
-        const result = await runAutoPublishOnce();
+        // Денний цикл довгої збірки живе на тому самому тікові: він теж
+        // хвилинний, і тримати другий таймер заради нього немає сенсу. Його
+        // падіння не має зупиняти автопублікацію шортсів.
+        const longDay = await runLongDayOnce({ now: new Date() }).catch((error) => {
+          console.error('[long-day] цикл упав:', error.message);
+          return null;
+        });
+        if (longDay && !['not-a-compilation-day', 'wait', 'none'].includes(longDay.status)) {
+          console.log(`[long-day] ${longDay.status}`);
+        }
+        const compilationOn = await compilationStillOn(new Date()).catch(() => null);
+        const result = await runAutoPublishOnce({ compilationOn });
         if (!['outside-window', 'disabled', 'waiting-for-video', 'cooldown'].includes(result.status)) {
           console.log(`[autopublish] ${result.status}${result.itemId ? `: ${result.itemId}` : ''}`);
         }

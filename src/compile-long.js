@@ -213,7 +213,9 @@ async function makeIntro(workDir, { count, big, small, top, spoken, previewPath 
   let voicePath = null;
   let voiceSeconds = 3.2;
   try {
-    voicePath = await voiceClip(introKey(count), spoken, { onProgress });
+    // Ключ рахуємо з САМОГО тексту: у тематичних добірок він щоразу інший, і
+    // ключ «intro-5» видавав би чужий голос від попереднього тижня.
+    voicePath = await voiceClip(introKey(count, spoken), spoken, { onProgress });
     voiceSeconds = await durationSeconds(voicePath);
   } catch (error) {
     onProgress(`   вступ без голосу: ${String(error.message).split('\n')[0]}`);
@@ -497,7 +499,7 @@ export async function toWide(inPath, outPath) {
 
 // Головна функція. items — рядки таблиці в потрібному порядку.
 // onProgress(text) — необов'язковий колбек для живого журналу.
-export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, separators = true, intro = true, announce = true, previewPath = null, labels = [], onProgress = () => {} } = {}) {
+export async function compileLong(items, { wide = false, keepCta = false, reuseVideo = true, separators = true, intro = true, announce = true, previewPath = null, labels = [], introBig = null, introSpoken = null, introSmall = null, onProgress = () => {} } = {}) {
   if (!Array.isArray(items) || items.length < 2) {
     throw new Error('Для добірки треба щонайменше два епізоди.');
   }
@@ -527,12 +529,15 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
   let introSeconds = 0;
   if (intro) {
     onProgress('роблю вступ');
+    // Тематична добірка приносить свій напис і свій хук («5 замків України» +
+    // «один із цих замків не існував ніколи»). Без них лишається стала
+    // заставка — те, що було до автоматичних збірок.
     introPath = await makeIntro(workDir, {
       count: items.length,
-      top: INTRO_QUESTION,
-      big: introTitle(items.length),
-      small: INTRO_TAGLINE,
-      spoken: introLine(items.length),
+      top: introBig ? '' : INTRO_QUESTION,
+      big: introBig || introTitle(items.length),
+      small: introSmall ?? (introBig ? '' : INTRO_TAGLINE),
+      spoken: introSpoken || introLine(items.length),
       previewPath,
     }, onProgress);
     introSeconds = await durationSeconds(introPath);

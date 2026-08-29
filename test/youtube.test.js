@@ -92,3 +92,22 @@ test('YouTube: #Shorts у назві не дублюється', async () => {
   assert.equal(client.calls[0].requestBody.snippet.title, 'Соледар #shorts');
 });
 
+
+import { longTitle } from '../src/youtube.js';
+
+test('назва довгого відео йде без #Shorts', () => {
+  // Вертикальне відео на 13 хвилин Shorts'ом не стане, і хештег лише
+  // обіцяє глядачеві не те.
+  assert.equal(longTitle('5 замків України #Shorts'), '5 замків України');
+  assert.equal(longTitle('Замок, якого не було'), 'Замок, якого не було');
+});
+
+test('задовга назва довгого відео ріжеться під межу YouTube', () => {
+  const out = longTitle('я'.repeat(180));
+  assert.ok(out.length <= 100, `вийшло ${out.length}`);
+  assert.ok(out.endsWith('…'));
+});
+
+test('порожня назва — це помилка, а не тихе відео без назви', () => {
+  assert.throws(() => longTitle('   '), /порожня назва/);
+});

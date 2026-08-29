@@ -25,6 +25,8 @@ import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { compileLong, orderEpisodes } from '../src/compile-long.js';
 import { savePreview, previewState, removePreview, fetchPreview } from '../src/preview.js';
+import { readPlan } from '../src/long-day.js';
+import { plannedSize } from '../src/long-plan.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty } from '../src/autopublish.js';
@@ -498,6 +500,20 @@ const server = http.createServer(async (req, res) => {
     // перезбирається з архіву БЕЗ останнього слайда (заклик підписатися),
     // і лише в останньому епізоді заклик лишається. Робота довга, тому
     // запуск і опитування стану рознесені: старт віддає відповідь одразу.
+    // План сьогоднішньої добірки: тема, сюжети, готові промти на прев'ю і —
+    // після монтажу — тексти для публікації. Усе, що власникові треба скопіювати.
+    if (req.method === 'GET' && pathname === '/api/long/today') {
+      const today = kyivToday();
+      const size = plannedSize();
+      if (!size) return json(res, 200, { day: today, planned: false });
+      try {
+        const plan = await readPlan(today);
+        return json(res, 200, { day: today, planned: true, size, plan: plan || null });
+      } catch (error) {
+        return json(res, 200, { day: today, planned: true, size, error: error.message });
+      }
+    }
+
     // Прев'ю добірки: картинка, яку власник намалював у ChatGPT. Лягає на Drive
     // під сталим іменем, тож переживає передеплой і використовується щотижня,
     // доки її не замінять. Тіло приймаємо як base64 у JSON — тим самим шляхом,

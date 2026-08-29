@@ -270,6 +270,9 @@
       до найсвіжішого (у списку навпаки), щоб недавній ролик не йшов першим.
       Сірим — ті, що вже були в добірці; позначити їх ще раз можна.</p>
     <div class="cut-list" id="cutList"></div>
+    <div class="cut-opts-title">Сьогоднішня добірка</div>
+    <div id="cutToday"><p class="own-hint">Перевіряю…</p></div>
+
     <div class="cut-opts-title">Прев'ю</div>
     <p class="own-hint" id="cutPreviewState">Перевіряю…</p>
     <input type="file" id="cutPreviewFile" accept="image/*" hidden data-kind="video" />
@@ -932,7 +935,7 @@
     $('#cutToggle').addEventListener('click', () => {
       const panel = $('#cutPanel');
       panel.classList.toggle('open');
-      if (panel.classList.contains('open')) { cutRenderList(); cutPoll(); cutPreviewState(); }
+      if (panel.classList.contains('open')) { cutRenderList(); cutPoll(); cutPreviewState(); cutTodayLoad(); }
     });
 
     $('#cutStart').addEventListener('click', async () => {
@@ -979,6 +982,76 @@
         has: 'Обкладинка YouTube',
       },
     };
+
+    // Автоматична добірка дня: тема, сюжети, промти на прев'ю, а після монтажу
+    // ще й тексти публікації. Кнопки саме копіюють — переписувати руками
+    // сорокарядковий промт ніхто не буде.
+    async function copyToClipboard(text, okMessage) {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast(okMessage);
+      } catch (e) {
+        // У старих вебв'ю Telegram clipboard недоступний — тоді показуємо
+        // текст, щоб його можна було виділити пальцем.
+        const box = document.createElement('textarea');
+        box.className = 'notes'; box.rows = 8; box.value = text; box.readOnly = true;
+        $('#cutToday').appendChild(box);
+        box.focus(); box.select();
+        toast('Скопіюй вручну — виділено');
+      }
+    }
+
+    function cutTodayRender(data) {
+      const box = $('#cutToday');
+      box.innerHTML = '';
+      if (!data?.planned) {
+        box.appendChild(el('p', 'own-hint', 'Сьогодні довгої добірки немає — вони у неділю, вівторок і п\'ятницю.'));
+        return;
+      }
+      const plan = data.plan;
+      if (!plan) {
+        box.appendChild(el('p', 'own-hint', `Добірку на ${data.size} сюжетів ще не підібрано — це стається о 08:00.`));
+        return;
+      }
+      if (plan.cancelled) {
+        box.appendChild(el('p', 'own-hint', `Скасовано: ${esc(plan.reason || 'без причини')}. О 18:00 вийде звичайний шортс.`));
+        return;
+      }
+      box.appendChild(el('p', 'own-hint',
+        `${esc(plan.title)} — ${plan.size} сюжетів${plan.builtAt ? ', змонтовано' : ''}${plan.youtubeId ? ', опубліковано' : ''}.`));
+      if (plan.labels?.length) {
+        box.appendChild(el('p', 'own-hint', plan.labels.map((l, i) => `${i + 1}. ${esc(l)}`).join(' · ')));
+      }
+
+      const actions = el('div', 'own-actions');
+      const add = (label, text, okMessage) => {
+        if (!text) return;
+        const btn = el('button', 'btn secondary', label);
+        btn.addEventListener('click', () => copyToClipboard(text, okMessage));
+        actions.appendChild(btn);
+      };
+      add('📋 Промт прев\'ю для відео', plan.prompts?.video, 'Промт скопійовано');
+      add('📋 Промт обкладинки YouTube', plan.prompts?.youtube, 'Промт скопійовано');
+      add('📋 Текст для Facebook', plan.meta?.facebook, 'Текст скопійовано');
+      box.appendChild(actions);
+
+      if (plan.youtubeId) {
+        const link = el('p', 'own-hint', '');
+        const a = document.createElement('a');
+        a.href = `https://youtu.be/${plan.youtubeId}`;
+        a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Відкрити на YouTube';
+        link.appendChild(a);
+        box.appendChild(link);
+      }
+    }
+
+    async function cutTodayLoad() {
+      try {
+        cutTodayRender(await fetch('/api/long/today').then((x) => x.json()));
+      } catch (e) {
+        $('#cutToday').innerHTML = '<p class="own-hint">Стан добірки невідомий.</p>';
+      }
+    }
 
     async function cutPreviewState() {
       let all = {};

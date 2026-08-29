@@ -112,8 +112,10 @@ export const LONG_VIDEO_PLATFORMS = ['youtube', 'facebook'];
 // завжди. А от на YouTube і Facebook цей ролик не вийде НІКОЛИ, навіть
 // завтра: інакше глядач побачив би той самий сюжет двічі — окремо й усередині
 // збірки. У монтаж наступних збірок він при цьому потрапляє нарівні з рештою.
-export function shortDisplacedByLong(platform, slotHour, now = new Date()) {
-  if (!isCompilationDay(now)) return false;
+export function shortDisplacedByLong(platform, slotHour, now = new Date(), planned = null) {
+  // planned = false означає, що добірку сьогодні скасували (не приїхало
+  // прев'ю) — тоді вечірній слот повертається шортсу, як у звичайний день.
+  if (!(planned ?? isCompilationDay(now))) return false;
   if (Number(slotHour) !== COMPILATION_HOUR) return false;
   return LONG_VIDEO_PLATFORMS.includes(String(platform));
 }

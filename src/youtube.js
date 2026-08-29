@@ -102,6 +102,77 @@ export async function publishYouTubeShort({ videoBuffer, title, description }, o
   };
 }
 
+// Заливає ДОВГЕ відео — добірку. Від шортса відрізняється трьома речами:
+//   • жодного #Shorts ані в назві, ані в описі: вертикальне відео довше за три
+//     хвилини Shorts'ом усе одно не стане, а хештег лише збиває з пантелику;
+//   • опис іде як є, разом із таймкодами розділів — саме з них YouTube робить
+//     розділи на смузі перемотки;
+//   • після заливки ставимо власну обкладинку. Без неї YouTube вибирає кадр
+//     сам, і замінити його потім можна лише руками.
+export async function publishYouTubeLong(
+  { videoBuffer, title, description, thumbnailBuffer = null },
+  options = {},
+) {
+  const buffer = Buffer.isBuffer(videoBuffer) ? videoBuffer : Buffer.from(videoBuffer || '');
+  if (!buffer.length) throw new Error('YouTube: порожній файл відео');
+
+  const requestedPrivacy = process.env.YOUTUBE_PRIVACY || 'public';
+  const client = options.client || youtube();
+
+  const res = await client.videos.insert({
+    part: ['snippet', 'status'],
+    requestBody: {
+      snippet: {
+        title: longTitle(title),
+        description: String(description || '').slice(0, DESCRIPTION_LIMIT),
+        categoryId: process.env.YOUTUBE_CATEGORY_ID || DEFAULT_CATEGORY_ID,
+      },
+      status: {
+        privacyStatus: requestedPrivacy,
+        selfDeclaredMadeForKids: false,
+        containsSyntheticMedia: process.env.YOUTUBE_AI_LABEL !== '0',
+      },
+    },
+    media: { body: Readable.from(buffer) },
+  });
+
+  const id = res.data?.id;
+  if (!id) throw new Error('YouTube не повернув ID відео');
+
+  // Обкладинка — окремий виклик, і його невдача не має скасовувати заливку:
+  // відео вже на каналі, лишити його неопублікованим через картинку було б
+  // гірше. Тому повертаємо ознаку, а не кидаємо помилку.
+  let thumbnail = 'не задано';
+  if (thumbnailBuffer?.length) {
+    try {
+      await client.thumbnails.set({
+        videoId: id,
+        media: { mimeType: 'image/jpeg', body: Readable.from(thumbnailBuffer) },
+      });
+      thumbnail = 'поставлено';
+    } catch (error) {
+      thumbnail = `не вдалося: ${String(error.message).split('\n')[0]}`;
+    }
+  }
+
+  const privacyStatus = res.data.status?.privacyStatus || null;
+  return {
+    id: String(id),
+    privacyStatus,
+    uploadStatus: res.data.status?.uploadStatus || null,
+    requestedPrivacy,
+    forcedPrivate: requestedPrivacy !== 'private' && privacyStatus === 'private',
+    thumbnail,
+  };
+}
+
+// Назва довгого відео: та сама межа в сто символів, але без #Shorts.
+export function longTitle(value) {
+  const raw = String(value || '').replace(/[<>]/g, '').replace(/#shorts\b/gi, '').trim();
+  if (!raw) throw new Error('YouTube: порожня назва відео');
+  return raw.length > TITLE_LIMIT ? `${raw.slice(0, TITLE_LIMIT - 1).trimEnd()}…` : raw;
+}
+
 // Публічна статистика власних роликів: перегляди, лайки, коментарі, довжина.
 // Вистачає скоупа youtube.readonly, який у токена вже є, тож повторна згода
 // не потрібна. Глибші метрики — утримання, покази, CTR, джерела трафіку —

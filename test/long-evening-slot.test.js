@@ -92,3 +92,21 @@ test('у звичайний день вечірній слот YouTube прац�
   assert.ok(h.posts.some((p) => p.platform === 'youtube'));
   assert.ok(!h.files.get('AUTO-20260801-0900.mp4').appProperties.youtubeSkipped);
 });
+
+test('скасована добірка повертає вечірній слот YouTube', async () => {
+  // Прев'ю не приїхало до 16:00 — довгого відео сьогодні не буде, тож шортс
+  // о 18:00 має вийти на всі платформи, як у звичайний день.
+  const h = harness(['AUTO-20260801-0900']);
+  await runAutoPublishOnce({ now: NEDILYA_18, compilationOn: false, ...h.deps });
+
+  assert.ok(h.posts.some((p) => p.platform === 'youtube'));
+  assert.ok(!h.files.get('AUTO-20260801-0900.mp4').appProperties.youtubeSkipped);
+});
+
+test('добірка в силі — слот лишається за нею', async () => {
+  const h = harness(['AUTO-20260801-0900']);
+  await runAutoPublishOnce({ now: NEDILYA_18, compilationOn: true, ...h.deps });
+
+  assert.ok(!h.posts.some((p) => p.platform === 'youtube'));
+  assert.ok(h.files.get('AUTO-20260801-0900.mp4').appProperties.youtubeSkipped);
+});

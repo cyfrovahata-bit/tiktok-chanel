@@ -96,9 +96,9 @@ function textHash(text) {
   return createHash('sha1').update(String(text), 'utf8').digest('hex').slice(0, 6);
 }
 
-export function introKey(count) {
+export function introKey(count, spoken = null) {
   const n = Math.trunc(count);
-  return `intro-${n}-${textHash(introLine(n))}`;
+  return `intro-${n}-${textHash(spoken || introLine(n))}`;
 }
 
 export function factKey(number, label = '') {
