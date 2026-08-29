@@ -8,7 +8,7 @@ import { drive } from './drive.js';
 import { promptFolderId } from './kyiv.js';
 import { sendMessage, ownerChatId, answerCallbackQuery, editMessageReplyMarkup } from './telegram.js';
 import { chatOnce } from './openai.js';
-import { listVideoFiles } from './videos.js';
+import { listVideoFiles, setVideoAppProperties } from './videos.js';
 import { readAllItems } from './sheets.js';
 import { parseSlideLines } from './queue-prompt.js';
 import { isShortAppreciation, thanksReply } from './comment-thanks.js';
@@ -133,9 +133,74 @@ export async function loadPostIndex(options = {}) {
     const rowId = String(name).replace(/\.mp4$/i, '');
     const item = byId.get(rowId);
     if (!item) continue;
-    posts.push({ props: file.appProperties || {}, item });
+    // fileId потрібен, щоб записати знайдений ID допису назад на файл.
+    posts.push({ fileId: file.id, props: file.appProperties || {}, item });
   }
   return posts;
+}
+
+// --- Зіставлення за текстом допису -------------------------------------------
+// Facebook власник публікує руками, тож ID допису на файл ніхто не записує — і
+// зв'язку «коментар → ролик» не існує взагалі. Але текст допису власник
+// копіює з мінідодатка, тобто назва рядка стоїть у ньому дослівно. За нею й
+// знаходимо ролик, а знайшовши — записуємо ID, щоб більше не шукати.
+
+export function normalizeForMatch(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[\p{P}\p{S}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Слова, які є в кожній другій назві й нічого не розрізняють.
+const MATCH_STOP = new Set(['який', 'яка', 'яке', 'які', 'його', 'цього', 'коли', 'було', 'стало', 'через', 'після', 'перед']);
+
+function matchTokens(text) {
+  return normalizeForMatch(text).split(' ').filter((w) => w.length >= 4 && !MATCH_STOP.has(w));
+}
+
+// Повертає { entry, strength } або null. strength: 'strong' — назва міститься
+// в дописі дослівно; 'weak' — збіглася більшість слів. Найменша неоднозначність
+// дає null: хибна прив'язка гірша за її відсутність, бо вона тиха й довічна.
+export function matchPostByText(index, postText, { minShare = 0.7, minGap = 0.15 } = {}) {
+  const hay = normalizeForMatch(postText);
+  if (!hay || !index?.length) return null;
+
+  const strong = index.filter((p) => {
+    const title = normalizeForMatch(p.item.title || '');
+    return title.length >= 12 && hay.includes(title);
+  });
+  if (strong.length === 1) return { entry: strong[0], strength: 'strong' };
+  if (strong.length > 1) return null;
+
+  // Порівнюємо за ОСНОВОЮ слова, а не цілим словом: власник, переписуючи текст
+  // допису, міняє закінчення («у десятках» → «із десятків»), і точне
+  // порівняння через це втрачало половину справжніх збігів.
+  const stem = (word) => word.slice(0, 5);
+  const hayStems = new Set(hay.split(' ').filter((w) => w.length >= 4).map(stem));
+
+  const scored = index
+    .map((p) => {
+      const words = matchTokens(p.item.title || p.item.theme || '');
+      if (!words.length) return { entry: p, score: 0 };
+      const hit = words.filter((w) => hayStems.has(stem(w))).length;
+      return { entry: p, score: hit / words.length };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const [best, second] = scored;
+  if (!best || best.score < minShare) return null;
+  if (second && best.score - second.score < minGap) return null;
+  return { entry: best.entry, strength: 'weak' };
+}
+
+function contextFrom(item) {
+  return {
+    title: item.title || item.theme || '',
+    theme: item.theme || '',
+    script: parseSlideLines(item.extra || ''),
+  };
 }
 
 export function findPost(index, platformKey, comment) {
@@ -145,27 +210,41 @@ export function findPost(index, platformKey, comment) {
   const wanted = comment?.[field];
   if (!wanted) return null;
   const hit = index.find((p) => samePostId(p.props[prop], wanted));
-  if (!hit) return null;
-  const { item } = hit;
+  if (hit) return { ...contextFrom(hit.item), matchedBy: 'id' };
+
+  // ID не записаний — пробуємо за текстом самого допису.
+  const byText = matchPostByText(index, comment.postText);
+  if (!byText) return null;
   return {
-    title: item.title || item.theme || '',
-    theme: item.theme || '',
-    script: parseSlideLines(item.extra || ''),
+    ...contextFrom(byText.entry.item),
+    matchedBy: byText.strength,
+    // Закріплюємо зв'язок лише за дослівним збігом: слабкий дає контекст на
+    // один раз, але в Drive не лягає.
+    bind: byText.strength === 'strong'
+      ? { fileId: byText.entry.fileId, prop, postId: String(wanted) }
+      : null,
   };
 }
 
 // --- Чернетка ----------------------------------------------------------------
 
 export function draftPrompt(comment, platformLabel = '', post = null) {
-  const context = post && (post.title || post.script?.length)
+  const context = !post || !(post.title || post.script?.length)
     ? [
+      // Без цього рядка модель поводиться так, ніби ролик знає, і вигадує
+      // його зміст — саме звідси беруться відповіді «не про те».
+      'РОЛИК НЕВІДОМИЙ: зв\'язати коментар із конкретним відео не вдалося.',
+      'НЕ вигадуй, про що воно було, і не переказуй жодного змісту. Відповідай',
+      'лише на те, що написала людина.',
+      '',
+    ]
+    : [
       'ПРО ЩО БУВ РОЛИК — прочитай спершу це, глядач коментує саме його:',
       post.title ? `Назва: ${post.title}` : null,
       post.theme && post.theme !== post.title ? `Тема: ${post.theme}` : null,
       post.script?.length ? 'Дослівний текст озвучки:' : null,
       ...(post.script || []).map((line, i) => `${i + 1}. ${line}`),
-    ].filter(Boolean).concat([''])
-    : [];
+    ].filter(Boolean).concat(['']);
 
   return [
     'Ти — автор українського каналу коротких пізнавальних роликів.',
@@ -316,6 +395,14 @@ export async function checkPlatform(adapter, options = {}) {
     if (!draft) {
       try {
         const post = findPost(index, adapter.key, comment);
+        // Знайшли ролик за текстом допису — записуємо ID на файл, як це
+        // зробила б автопублікація. Наступного разу шукати вже не доведеться.
+        if (post?.bind) {
+          const { fileId, prop, postId } = post.bind;
+          await (options.setProperties || setVideoAppProperties)(fileId, { [prop]: postId });
+          const entry = index.find((p) => p.fileId === fileId);
+          if (entry) entry.props[prop] = postId;
+        }
         draft = await draftReply(comment, { ...options, platformLabel: adapter.label, post });
       } catch (error) {
         console.error(`[comments:${adapter.key}] чернетка:`, error.message);

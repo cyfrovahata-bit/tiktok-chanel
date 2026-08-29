@@ -31,7 +31,10 @@ export async function fetchFacebookComments(options = {}) {
       // Вкладені comments — це відповіді на коментар. Потрібні, щоб не
       // пропонувати відповісти там, де Сторінка вже відповіла (байдуже,
       // ботом чи руками з телефона).
-      fields: 'id,created_time,comments.limit(25){id,message,created_time,from,comments.limit(10){from}}',
+      // message самого допису потрібен, щоб знайти ролик: ID допису на файл
+      // ніхто не записує (Facebook публікується вручну), а текст власник
+      // копіює з мінідодатка — отже назва рядка стоїть у ньому дослівно.
+      fields: 'id,message,created_time,comments.limit(25){id,message,created_time,from,comments.limit(10){from}}',
       limit: options.limit || LIMIT,
     },
     token: options.token || token(),
@@ -49,6 +52,7 @@ export async function fetchFacebookComments(options = {}) {
         text: c.message,
         author: c.from?.name || 'Глядач',
         postId: post.id,
+        postText: post.message || '',
         publishedAt: c.created_time || '',
       });
     }
