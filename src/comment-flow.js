@@ -163,13 +163,22 @@ function matchTokens(text) {
 // Повертає { entry, strength } або null. strength: 'strong' — назва міститься
 // в дописі дослівно; 'weak' — збіглася більшість слів. Найменша неоднозначність
 // дає null: хибна прив'язка гірша за її відсутність, бо вона тиха й довічна.
+// Скільки початку опису беремо як «відбиток». Ціле речення унікальне, а от
+// хвіст опису в усіх однаковий — заклики, хештеги.
+const DESC_FINGERPRINT = 60;
+
 export function matchPostByText(index, postText, { minShare = 0.7, minGap = 0.15 } = {}) {
   const hay = normalizeForMatch(postText);
   if (!hay || !index?.length) return null;
 
+  // Дослівний збіг шукаємо і за назвою, і за початком опису: власник вставляє
+  // у Facebook саме той опис, який пропонує бот, і назви в дописі може не бути
+  // взагалі.
   const strong = index.filter((p) => {
     const title = normalizeForMatch(p.item.title || '');
-    return title.length >= 12 && hay.includes(title);
+    if (title.length >= 12 && hay.includes(title)) return true;
+    const desc = normalizeForMatch(p.item.description || '').slice(0, DESC_FINGERPRINT);
+    return desc.length >= 40 && hay.includes(desc);
   });
   if (strong.length === 1) return { entry: strong[0], strength: 'strong' };
   if (strong.length > 1) return null;
@@ -180,11 +189,22 @@ export function matchPostByText(index, postText, { minShare = 0.7, minGap = 0.15
   const stem = (word) => word.slice(0, 5);
   const hayStems = new Set(hay.split(' ').filter((w) => w.length >= 4).map(stem));
 
+  // Слова, які є в кожному другому описі («відео», «Україна», «підписуйся»),
+  // нічого не розрізняють — і саме на них слабкий збіг чіплявся б навмання.
+  // Тому спершу рахуємо, у скількох рядках слово трапляється, і надто часті
+  // викидаємо.
+  const rowWords = index.map((p) => new Set(
+    matchTokens(`${p.item.title || ''} ${p.item.description || p.item.theme || ''}`).map(stem),
+  ));
+  const df = new Map();
+  for (const set of rowWords) for (const w of set) df.set(w, (df.get(w) || 0) + 1);
+  const tooCommon = (w) => (df.get(w) || 0) > Math.max(2, index.length * 0.25);
+
   const scored = index
-    .map((p) => {
-      const words = matchTokens(p.item.title || p.item.theme || '');
+    .map((p, i) => {
+      const words = [...rowWords[i]].filter((w) => !tooCommon(w));
       if (!words.length) return { entry: p, score: 0 };
-      const hit = words.filter((w) => hayStems.has(stem(w))).length;
+      const hit = words.filter((w) => hayStems.has(w)).length;
       return { entry: p, score: hit / words.length };
     })
     .sort((a, b) => b.score - a.score);
@@ -199,6 +219,13 @@ function contextFrom(item) {
   return {
     title: item.title || item.theme || '',
     theme: item.theme || '',
+    // Опис — це те, що глядач ПРОЧИТАВ під дописом, перш ніж коментувати. Без
+    // нього модель бачила лише те, що звучало у відео, і не розуміла half
+    // коментарів, які відповідають саме на текст поста.
+    description: item.description || '',
+    // Рядки озвучки лежать у колонці G — затвердженому сценарії. Якщо ChatGPT
+    // переписав її своїм шаблоном, розбір поверне порожнечу; тоді контекстом
+    // лишаються назва, тема й опис, і це краще, ніж нічого.
     script: parseSlideLines(item.extra || ''),
   };
 }
@@ -242,6 +269,7 @@ export function draftPrompt(comment, platformLabel = '', post = null) {
       'ПРО ЩО БУВ РОЛИК — прочитай спершу це, глядач коментує саме його:',
       post.title ? `Назва: ${post.title}` : null,
       post.theme && post.theme !== post.title ? `Тема: ${post.theme}` : null,
+      post.description ? `Текст під дописом, який глядач прочитав:\n${post.description}` : null,
       post.script?.length ? 'Дослівний текст озвучки:' : null,
       ...(post.script || []).map((line, i) => `${i + 1}. ${line}`),
     ].filter(Boolean).concat(['']);
