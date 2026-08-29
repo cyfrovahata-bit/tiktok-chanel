@@ -11,10 +11,15 @@ import { chatOnce } from './openai.js';
 import { listVideoFiles } from './videos.js';
 import { readAllItems } from './sheets.js';
 import { parseSlideLines } from './queue-prompt.js';
+import { isShortAppreciation, thanksReply } from './comment-thanks.js';
 
 const FILE_NAME = 'comments.json';
 const KEEP = 400;
 const MAX_PER_RUN = Number(process.env.COMMENTS_PER_RUN) || 5;
+// Автовідповіді на короткі подяки. Своя стеля на прохід: Сторінка, яка за
+// хвилину лишає двадцять коментарів, ловить обмеження Facebook.
+const AUTO_PER_RUN = Number(process.env.COMMENTS_AUTO_PER_RUN) || 5;
+const AUTO_THANKS = process.env.COMMENTS_AUTO_THANKS !== '0';
 const SKIP = 'ПРОПУСТИТИ';
 
 // Реєстр платформ: ключ → адаптер. Заповнюється при старті (registerPlatform).
@@ -261,7 +266,40 @@ export async function checkPlatform(adapter, options = {}) {
   }
 
   // Найстаріші першими, щоб відповіді йшли в порядку появи коментарів.
-  for (const comment of fresh.reverse().slice(0, MAX_PER_RUN)) {
+  const ordered = fresh.reverse();
+
+  // Короткі подяки — «дякую», «цікаво», сердечко — відповідаються самі, без
+  // картки. Їх найбільше, а рішення там ніякого: власник щоразу натискав би
+  // «Надіслати». Контекст ролика їм не потрібен, тож це працює навіть там, де
+  // прив'язка коментаря до ролика ще не будується.
+  const auto = [];
+  const rest = [];
+  for (const comment of ordered) {
+    (AUTO_THANKS && isShortAppreciation(comment.text) ? auto : rest).push(comment);
+  }
+
+  state.thanks = state.thanks || {};
+  for (const comment of auto.slice(0, AUTO_PER_RUN)) {
+    const key = `${adapter.key}:${comment.id}`;
+    const under = String(comment.postId || comment.videoId || comment.mediaId || '');
+    const recent = state.thanks[under] || [];
+    const text = thanksReply(comment, { recent });
+    try {
+      await adapter.reply(comment.id, text, options);
+    } catch (error) {
+      // Не вдалося — лишаємо коментар нерозібраним: наступний прохід або
+      // відповість, або віддасть його власникові.
+      console.error(`[comments:${adapter.key}] автовідповідь:`, error.message);
+      continue;
+    }
+    state.seen[key] = 'auto';
+    // Пам'ятаємо, що вже стоїть під цим дописом: два однакові рядки під одним
+    // постом видають автовідповідь найдужче.
+    state.thanks[under] = [...recent, text].slice(-12);
+    result.auto = (result.auto || 0) + 1;
+  }
+
+  for (const comment of rest.slice(0, MAX_PER_RUN)) {
     const key = `${adapter.key}:${comment.id}`;
     let draft = null;
     try {
@@ -282,6 +320,13 @@ export async function checkPlatform(adapter, options = {}) {
     state.seen[key] = 'pending';
     state.drafts[key] = { text: draft || null, messageId: message?.message_id ?? null };
     if (draft) result.asked += 1; else result.flagged += 1;
+  }
+
+  // Один рядок замість десятка карток: власник має знати, що бот відповів,
+  // але читати кожну подяку йому нема потреби.
+  if (result.auto) {
+    await notify(chatId, `🤝 ${adapter.label}: відповів сам на ${result.auto} коротких подяк.`)
+      .catch(() => {});
   }
 
   if (!options.state) await writeState(state);
