@@ -13,7 +13,7 @@
 import { readAllItems, isReady } from './sheets.js';
 import { listVideoFiles, setVideoAppProperties, videoName, streamVideo } from './videos.js';
 import { publish } from './publish.js';
-import { shortDisplacedByLong } from './long-plan.js';
+import { shortDisplacedByLong, isCompilationDay, COMPILATION_HOUR, LONG_VIDEO_PLATFORMS } from './long-plan.js';
 import { sendMessage, ownerChatId } from './telegram.js';
 
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://tiktok-chanel-production.up.railway.app').replace(/\/$/, '');
@@ -116,6 +116,20 @@ function platformIdProperty(platform) {
   return PLATFORM_META[platform]?.idProperty ?? `${platform}PostId`;
 }
 
+// Мітка «цій платформі цей ролик не піде ніколи». Ставиться вечірнім роликам
+// у дні довгих збірок: YouTube і Facebook отримують того дня саму збірку, а
+// сюжет із неї окремо там не виходить — інакше глядач побачив би його двічі.
+// Без такої мітки черга просто віддала б ролик YouTube наступного ранку: вона
+// тримає його доти, доки він потрібен хоч комусь із увімкнених платформ.
+export function platformSkipProperty(platform) {
+  return `${platform}Skipped`;
+}
+
+// Платформа своє відпрацювала: або опублікувала, або їй свідомо не піде.
+function platformSettled(props, platform) {
+  return Boolean(props?.[platformIdProperty(platform)] || props?.[platformSkipProperty(platform)]);
+}
+
 // Мітка «цей ролик узято в роботу для цієї платформи в цьому вікні». Раніше
 // мітка була одна на всі платформи (autoPostSlot), але з роздільним розкладом
 // YouTube може публікуватися ввечері, а TikTok опівдні — і спільна мітка
@@ -189,6 +203,7 @@ export async function remindFacebookOnce({
     .find(({ file }) => (
       file
       && !file.appProperties?.facebookPostId
+      && !file.appProperties?.facebookSkipped // вечір дня збірки — Facebook його не отримує
       && !file.appProperties?.facebookRemindedAt
     ));
   if (!candidate) return null;
@@ -306,7 +321,7 @@ async function runGroup({
         // на ньому й стоїть, поки всі не отримають своє. Стару мітку клейма
         // тут НЕ перевіряємо: група могла взяти ролик учора, опублікувати
         // своє й далі чекати решту — і завтра має лишитися на ньому ж.
-        && wanted.some((platform) => !candidateFile.appProperties?.[platformIdProperty(platform)])
+        && wanted.some((platform) => !platformSettled(candidateFile.appProperties, platform))
         // Скинуте вручну в цьому ж вікні: інакше воно вийшло б повторно
         // тим самим тиком, і скидання не мало б сенсу.
         && candidateFile.appProperties?.autoPostSkipSlot !== slot.key
@@ -318,13 +333,20 @@ async function runGroup({
     // Цій групі на спільному ролику вже нічого робити — вона своє віддала й
     // чекає, поки дотягнуться платформи з пізнішими вікнами. Клейм не ставимо
     // й повідомлень не шлемо, інакше кожне вікно давало б «уже опубліковано».
-    if (!platforms.some((platform) => !file.appProperties?.[platformIdProperty(platform)])) {
+    if (!platforms.some((platform) => !platformSettled(file.appProperties, platform))) {
       return { status: 'in-step', slot: slot.key, itemId: item.id };
     }
     // autoPostSlot/autoPostItemId лишаються як спільна мітка: на них
     // спираються мінідодаток і збереження історії при перегенерації.
     const claim = { autoPostSlot: slot.key, autoPostItemId: item.id };
     for (const platform of platforms) claim[claimProperty(platform)] = slot.key;
+    // Вечір дня збірки: цей сюжет виходить лише в TikTok та Instagram, а на
+    // YouTube і Facebook він не з'явиться ніколи — там сьогодні сама збірка.
+    // Мітку ставимо ОДРАЗУ, разом із клеймом: інакше завтрашня черга віддала б
+    // ролик YouTube як «ще не опублікований».
+    if (isCompilationDay(now) && Number(slot.label.slice(0, 2)) === COMPILATION_HOUR) {
+      for (const platform of LONG_VIDEO_PLATFORMS) claim[platformSkipProperty(platform)] = slot.key;
+    }
     await setProperties(file.id, claim);
     applyLocalProperties(file, claim);
   }
@@ -333,7 +355,7 @@ async function runGroup({
     return { status: 'missing-sheet-row', slot: slot.key, fileId: file.id };
   }
 
-  const missing = platforms.filter((platform) => !file.appProperties?.[platformIdProperty(platform)]);
+  const missing = platforms.filter((platform) => !platformSettled(file.appProperties, platform));
   if (!missing.length) {
     if (file.appProperties?.[NOTIFIED] !== slot.key) {
       await notify(

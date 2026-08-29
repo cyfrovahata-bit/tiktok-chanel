@@ -43,18 +43,30 @@ test('дату показу беремо з колонки, а без неї —
 // --- Відбір -----------------------------------------------------------------
 
 function rows(n, from = 1) {
-  // n рядків із датами 2026-07-01, 02, 03… — найстаріші перші, як у таблиці.
+  // n рядків із датами 2026-08-01, 02, 03… — найстаріші перші, як у таблиці.
+  // Серпень навмисно: липнева партія відсікається за датою (див. DEFAULTS).
   return Array.from({ length: n }, (_, i) => {
     const day = String(from + i).padStart(2, '0');
-    return { id: `ID-${day}`, title: `Сюжет ${day}`, pubDate: `2026-07-${day}` };
+    return { id: `ID-${day}`, title: `Сюжет ${day}`, pubDate: `2026-08-${day}` };
   });
 }
 
 const TODAY = '2026-08-30';
 
-test('перші десять роликів каналу у збірку не йдуть', () => {
-  const out = candidates(rows(15), { today: TODAY });
-  assert.deepEqual(out.map((r) => r.id), ['ID-11', 'ID-12', 'ID-13', 'ID-14', 'ID-15']);
+test('рання партія каналу у збірки не йде — відсікаємо за датою', () => {
+  const pool = [
+    { id: 'РАННІЙ', pubDate: '2026-07-19' },
+    { id: 'МЕЖА', pubDate: '2026-07-20' },
+    { id: 'ПІЗНІШИЙ', pubDate: '2026-07-25' },
+  ];
+  const out = candidates(pool, { today: TODAY });
+  assert.deepEqual(out.map((r) => r.id), ['МЕЖА', 'ПІЗНІШИЙ'], 'сама межа лишається придатною');
+});
+
+test('межу можна зсунути, не чіпаючи код', () => {
+  const pool = [{ id: 'СТАРИЙ', pubDate: '2026-06-01' }];
+  assert.equal(candidates(pool, { today: TODAY }).length, 0);
+  assert.equal(candidates(pool, { today: TODAY, notBefore: '2026-01-01' }).length, 1);
 });
 
 test('щойно показане не беремо', () => {
@@ -63,39 +75,40 @@ test('щойно показане не беремо', () => {
     { id: 'ВЧОРАШНІЙ', pubDate: '2026-08-29' },
     { id: 'РІВНО-10-ДНІВ', pubDate: '2026-08-20' },
   ];
-  const out = candidates(fresh, { today: TODAY, skipFirst: 0 });
+  const out = candidates(fresh, { today: TODAY });
   assert.deepEqual(out.map((r) => r.id), ['СТАРИЙ', 'РІВНО-10-ДНІВ']);
 });
 
 test('ролик, який недавно був у збірці, відпочиває', () => {
   const pool = [
-    { id: 'ДАВНО', pubDate: '2026-07-01' },
-    { id: 'ТИЖДЕНЬ-ТОМУ', pubDate: '2026-07-01' },
-    { id: 'МІСЯЦЬ-ТОМУ', pubDate: '2026-07-01' },
+    { id: 'ДАВНО', pubDate: '2026-08-01' },
+    { id: 'ТИЖДЕНЬ-ТОМУ', pubDate: '2026-08-01' },
+    { id: 'МІСЯЦЬ-ТОМУ', pubDate: '2026-08-01' },
   ];
   const used = { 'ТИЖДЕНЬ-ТОМУ': '2026-08-23', 'МІСЯЦЬ-ТОМУ': '2026-07-25' };
   const out = candidates(pool, {
-    today: TODAY, skipFirst: 0, compiledAt: (id) => used[id] || null,
+    today: TODAY, compiledAt: (id) => used[id] || null,
   });
   assert.deepEqual(out.map((r) => r.id), ['ДАВНО', 'МІСЯЦЬ-ТОМУ']);
 });
 
 test('для п\'ятничних 15 карантин повторів вимикається нулем', () => {
-  const pool = [{ id: 'А', pubDate: '2026-07-01' }, { id: 'Б', pubDate: '2026-07-01' }];
+  const pool = [{ id: 'А', pubDate: '2026-08-01' }, { id: 'Б', pubDate: '2026-08-01' }];
   const out = candidates(pool, {
-    today: TODAY, skipFirst: 0, cooldownDays: 0, compiledAt: () => '2026-08-29',
+    today: TODAY, cooldownDays: 0, compiledAt: () => '2026-08-29',
   });
   assert.deepEqual(out.map((r) => r.id), ['А', 'Б']);
 });
 
 test('слабкі ролики зі списку власника не беруться ніколи', () => {
   const out = candidates(rows(15), { today: TODAY, excludeIds: ['ID-12', 'ID-14'] });
-  assert.deepEqual(out.map((r) => r.id), ['ID-11', 'ID-13', 'ID-15']);
+  assert.ok(!out.some((r) => r.id === 'ID-12' || r.id === 'ID-14'));
+  assert.ok(out.some((r) => r.id === 'ID-13'));
 });
 
 test('ролик без жодної дати пропускаємо, а не беремо навмання', () => {
-  const out = candidates([{ id: 'БЕЗ-ДАТИ' }, { id: 'ID-01', pubDate: '2026-07-01' }],
-    { today: TODAY, skipFirst: 0 });
+  const out = candidates([{ id: 'БЕЗ-ДАТИ' }, { id: 'ID-01', pubDate: '2026-08-01' }],
+    { today: TODAY });
   assert.deepEqual(out.map((r) => r.id), ['ID-01']);
 });
 

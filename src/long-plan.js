@@ -55,7 +55,11 @@ export function shownOn(item) {
 }
 
 export const DEFAULTS = {
-  skipFirst: 10,      // найперші ролики каналу — слабкі, у збірки не йдуть
+  // Ролики, опубліковані до цієї дати, у збірки не йдуть: рання партія слабша
+  // за нинішню, і в довгому відео це чути одразу. Межу назвав власник,
+  // передивившись архів.
+  notBefore: '2026-07-20',
+  skipFirst: 0,       // додаткова відсічка «перших N рядків», якщо знадобиться
   freshDays: 10,      // щойно показане глядач пам'ятає, повтор дратує
   cooldownDays: 21,   // як довго ролик відпочиває після попередньої збірки
 };
@@ -70,6 +74,7 @@ export function candidates(published, {
   now = new Date(),
   today = null,
   excludeIds = [],
+  notBefore = DEFAULTS.notBefore,
   skipFirst = DEFAULTS.skipFirst,
   freshDays = DEFAULTS.freshDays,
   cooldownDays = DEFAULTS.cooldownDays,
@@ -83,6 +88,7 @@ export function candidates(published, {
       if (banned.has(String(item.id))) return false;
 
       const shown = shownOn(item);
+      if (notBefore && (!shown || shown < notBefore)) return false;
       const sinceShown = daysBetween(shown, day);
       // Дати немає взагалі — ролик пропускаємо: краще не взяти придатний,
       // ніж поставити в збірку вчорашній.
@@ -99,13 +105,13 @@ export function candidates(published, {
 
 // Куди йде сама довга збірка. Facebook публікується вручну, тож автоматика
 // звільняє слот лише там, де ввечері справді вийде довге відео.
-export const LONG_VIDEO_PLATFORMS = ['youtube'];
+export const LONG_VIDEO_PLATFORMS = ['youtube', 'facebook'];
 
 // Чи віддано вечірній слот цієї платформи довгій збірці. TikTok та Instagram
-// довгого відео не отримують узагалі — пропуск відібрав би в них публікацію
-// без жодної вигоди, тож їхній шортс о 18:00 виходить як завжди. Ролик, який
-// не пішов на YouTube, нікуди не дінеться: мітки слотів поплатформні, і
-// наступного ранку він дістанеться YouTube першим.
+// довгого відео не отримують узагалі — їхній шортс о 18:00 виходить як
+// завжди. А от на YouTube і Facebook цей ролик не вийде НІКОЛИ, навіть
+// завтра: інакше глядач побачив би той самий сюжет двічі — окремо й усередині
+// збірки. У монтаж наступних збірок він при цьому потрапляє нарівні з рештою.
 export function shortDisplacedByLong(platform, slotHour, now = new Date()) {
   if (!isCompilationDay(now)) return false;
   if (Number(slotHour) !== COMPILATION_HOUR) return false;
