@@ -190,3 +190,66 @@ test('чернетку пише окрема модель, а не та, що о
   assert.ok(seen?.model, 'модель має передаватися явно');
   assert.notEqual(seen.model, 'gpt-4o-mini');
 });
+
+// --- Назва ролика в картці ---------------------------------------------------
+import { checkPlatform } from '../src/comment-flow.js';
+
+function adapterFor(comments, cards) {
+  return {
+    key: 'fb',
+    label: 'Facebook',
+    icon: '💬',
+    enabled: () => true,
+    fetch: async () => comments,
+    reply: async () => {},
+    like: async () => {},
+    link: (c) => `https://www.facebook.com/${c.postId}`,
+  };
+}
+
+test('картка показує назву ролика, а не лише посилання', async () => {
+  const cards = [];
+  await checkPlatform(adapterFor([{
+    id: 'c1', text: 'а це де', author: 'Іван',
+    postId: 'p1', postText: INDEX[0].item.title,
+  }], cards), {
+    state: { seen: {}, drafts: {} },
+    postIndex: INDEX.map((p) => ({ ...p, props: {} })),
+    chat: async () => 'Це в Одесі.',
+    setProperties: async () => {},
+    notifyFn: async (_chat, text) => { cards.push(text); return { message_id: 1 }; },
+    chatId: 1,
+  });
+  assert.match(cards[0], /🎬 Одеські катакомби/);
+  assert.match(cards[0], /facebook\.com\/p1/);
+});
+
+test('коли ролик не знайдено — картка каже це прямо', async () => {
+  const cards = [];
+  await checkPlatform(adapterFor([{
+    id: 'c2', text: 'а це де', author: 'Іван', postId: 'p9', postText: 'Доброго ранку, друзі',
+  }], cards), {
+    state: { seen: {}, drafts: {} },
+    postIndex: INDEX.map((p) => ({ ...p, props: {} })),
+    chat: async () => 'Відповідь.',
+    notifyFn: async (_chat, text) => { cards.push(text); return { message_id: 1 }; },
+    chatId: 1,
+  });
+  assert.match(cards[0], /ролик не визначено/);
+});
+
+test('коротка подяка теж приходить із назвою ролика', async () => {
+  const cards = [];
+  await checkPlatform(adapterFor([{
+    id: 'c3', text: 'дякую', author: 'Іван',
+    postId: 'p1', postText: INDEX[1].item.title,
+  }], cards), {
+    state: { seen: {}, drafts: {} },
+    postIndex: INDEX.map((p) => ({ ...p, props: {} })),
+    setProperties: async () => {},
+    notifyFn: async (_chat, text) => { cards.push(text); return { message_id: 1 }; },
+    chatId: 1,
+  });
+  assert.match(cards[0], /🎬 Хотинська фортеця/);
+  assert.match(cards[0], /Коротка подяка/);
+});

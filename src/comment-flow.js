@@ -369,12 +369,19 @@ function keyboard(platformKey, commentId, hasDraft = true) {
   return { inline_keyboard: [row] };
 }
 
-function card(adapter, comment, draft, { auto = false } = {}) {
+function card(adapter, comment, draft, { auto = false, post = null } = {}) {
   const head = auto
     ? '🤝 Коротка подяка. Це та сама відповідь, яку бот надішле сам, коли ввімкнемо:'
     : 'Відповідь від ШІ:';
+  // Назва ролика поруч із посиланням: саме за нею видно, про що мова, не
+  // відкриваючи Facebook. «Не визначено» теж кажемо чесно — тоді й відповідь
+  // буде без контексту, і це варто знати заздалегідь.
+  const about = post?.title
+    ? `🎬 ${post.title}`
+    : '🎬 ролик не визначено — відповідь буде без контексту';
   return [
     `${adapter.icon} Коментар · ${adapter.label}`,
+    about,
     adapter.link(comment),
     '',
     `${comment.author}:`,
@@ -471,18 +478,27 @@ export async function checkPlatform(adapter, options = {}) {
 
   for (const comment of rest.slice(0, MAX_PER_RUN)) {
     const key = `${adapter.key}:${comment.id}`;
+    // Ролик шукаємо ДЛЯ ВСІХ карток, а не лише там, де потрібна чернетка:
+    // його назва йде в картку, і власник має бачити, про що мова, навіть у
+    // короткій подяці.
+    let post = null;
+    try {
+      post = findPost(index, adapter.key, comment);
+      // Знайшли за текстом допису — записуємо ID на файл, як це зробила б
+      // автопублікація. Наступного разу шукати вже не доведеться.
+      if (post?.bind) {
+        const { fileId, prop, postId } = post.bind;
+        await (options.setProperties || setVideoAppProperties)(fileId, { [prop]: postId });
+        const entry = index.find((p) => p.fileId === fileId);
+        if (entry) entry.props[prop] = postId;
+      }
+    } catch (error) {
+      console.error(`[comments:${adapter.key}] пошук ролика:`, error.message);
+    }
+
     let draft = comment.autoDraft || null;
     if (!draft) {
       try {
-        const post = findPost(index, adapter.key, comment);
-        // Знайшли ролик за текстом допису — записуємо ID на файл, як це
-        // зробила б автопублікація. Наступного разу шукати вже не доведеться.
-        if (post?.bind) {
-          const { fileId, prop, postId } = post.bind;
-          await (options.setProperties || setVideoAppProperties)(fileId, { [prop]: postId });
-          const entry = index.find((p) => p.fileId === fileId);
-          if (entry) entry.props[prop] = postId;
-        }
         draft = await draftReply(comment, { ...options, platformLabel: adapter.label, post });
       } catch (error) {
         console.error(`[comments:${adapter.key}] чернетка:`, error.message);
@@ -499,7 +515,7 @@ export async function checkPlatform(adapter, options = {}) {
 
     const message = await notify(
       chatId,
-      card(adapter, comment, draft, { auto: Boolean(comment.autoDraft) }),
+      card(adapter, comment, draft, { auto: Boolean(comment.autoDraft), post }),
       keyboard(adapter.key, comment.id, Boolean(draft)),
     );
     state.seen[key] = 'pending';
