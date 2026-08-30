@@ -18,6 +18,16 @@ function bare(text) {
   return String(text || '').replace(DECOR, ' ').trim().toLowerCase();
 }
 
+// Сторінка називається «Чи Ви Знали?» — зі знаком питання в самій назві. Тому
+// «Чи Знали Ви? Дякую.» це подяка, а не запитання, і відповідати на неї
+// «дякуємо за запитання» — соромно. Прибираємо назву перед будь-яким
+// розбором; усе, що після неї, розбирається як звичайний коментар.
+const CHANNEL_NAME = /чи\s+(?:ви\s+знали|знали\s+ви)\s*[?？!.…]*/giu;
+
+export function withoutChannelName(text) {
+  return String(text || '').replace(CHANNEL_NAME, ' ').replace(/\s+/g, ' ').trim();
+}
+
 // Слова подяки й схвалення. Тільки основи: далі порівнюємо за початком слова,
 // тож «дякую», «дякуємо», «дяки» ловляться однією.
 const PRAISE = [
@@ -57,8 +67,10 @@ const MAX_WORDS = 5;
 
 // Чи це той самий короткий схвальний коментар, на який можна відповісти самим.
 export function isShortAppreciation(text) {
-  const raw = String(text || '');
-  if (!raw.trim()) return false;
+  if (!String(text || '').trim()) return false;
+  // Назва каналу зі знаком питання всередині не робить коментар запитанням.
+  const raw = withoutChannelName(text);
+  if (!raw.trim()) return true;
   // Питання — це завжди до власника: там або факт, або суперечка.
   if (/[?？]/.test(raw)) return false;
   // Посилання й згадки — майже завжди спам або звернення до третьої особи.

@@ -262,3 +262,31 @@ test('на текстову подяку зачини лишаються поп�
   const text = thanksReply({ id: 'w1', text: 'дуже цікаво' });
   assert.ok(THANKS.some((opener) => text.startsWith(opener)), text);
 });
+
+// Сторінка називається «Чи Ви Знали?» — зі знаком питання просто в назві.
+// Через це «Чи Знали Ви? Дякую» поїхало власникові як запитання, а ШІ
+// відповіла «дякуємо за запитання». Питання там не було жодного.
+import { withoutChannelName } from '../src/comment-thanks.js';
+
+test('назва сторінки не робить коментар запитанням', () => {
+  for (const text of ['Чи Знали Ви? Дякую.', 'Чи Ви Знали? Дякую', 'чи ви знали! дякую']) {
+    assert.equal(isShortAppreciation(text), true, text);
+  }
+});
+
+test('сама назва сторінки — теж звернення, а не питання', () => {
+  assert.equal(isShortAppreciation('Чи Знали Ви?'), true);
+  assert.equal(withoutChannelName('Чи Знали Ви?'), '');
+});
+
+test('справжнє запитання після назви лишається запитанням', () => {
+  assert.equal(isShortAppreciation('Чи знали ви, що насправді все не так?'), false);
+  assert.equal(isShortAppreciation('Чи Ви Знали? А звідки дані?'), false);
+  assert.equal(isShortAppreciation('Чи знали ви що це неправда'), false);
+});
+
+test('назва не з\'їдає решту коментаря', () => {
+  assert.equal(withoutChannelName('Чи Знали Ви? Дякую.'), 'Дякую.');
+  assert.match(withoutChannelName('Дякую, канал «Чи Ви Знали»!'), /^Дякую, канал/);
+  assert.equal(withoutChannelName('просто текст'), 'просто текст');
+});
