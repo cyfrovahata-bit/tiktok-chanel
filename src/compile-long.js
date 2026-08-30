@@ -353,25 +353,117 @@ export function stingName() {
   return Object.hasOwn(STINGS, name) ? name : DEFAULT_STING;
 }
 
-// Складає filter_complex оголошення. Вхід 0 — чорна картка, вхід 1 — голос,
+// Звукова частина переходу, зібрана з опису варіанта. Потрібна двом місцям —
+// картці «ФАКТ N» і перегортанню сторінки, — тому живе окремо. extra — це вже
+// готові доріжки, які треба домішати (голос диктора на картці); at — номер
+// першого вільного входу ffmpeg.
+export function stingAudio(seconds, at, extra = [], sting = stingName()) {
+  const { inputs, chain, tracks } = STINGS[sting](seconds, at);
+  const all = [...extra, ...tracks];
+  // amix вимагає щонайменше двох входів, а зовсім без доріжок узяти звук
+  // нізвідки — тоді просто тиша потрібної довжини.
+  let join;
+  if (all.length >= 2) {
+    join = `${all.map((t) => `[${t}]`).join('')}amix=inputs=${all.length}:duration=longest:normalize=0,`;
+  } else if (all.length === 1) {
+    join = `[${all[0]}]anull,`;
+  } else {
+    inputs.push(`anullsrc=r=48000:cl=stereo:d=${seconds}`);
+    join = `[${at}:a]anull,`;
+  }
+  return {
+    inputs,
+    // Дзвіночок довший за сам перехід, тож без спаду він обірвався б
+    // клацанням просто перед першим кадром факту.
+    filter: `${chain}${join}`
+      + `afade=t=out:st=${Math.max(0, seconds - 0.3).toFixed(2)}:d=0.3,`
+      + 'alimiter=limit=0.95,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]',
+  };
+}
+
+// Складає filter_complex картки. Вхід 0 — чорний кадр, вхід 1 — голос,
 // далі йдуть входи самого звуку, тож їхні номери рахуються від двійки.
 export function announceFilter(assPath, seconds, delayMs, sting = stingName()) {
-  const { inputs, chain, tracks } = STINGS[sting](seconds, 2);
-  // amix з одним входом ffmpeg не приймає, тож без звуку лишається сам голос.
-  const join = tracks.length
-    ? `[voice]${tracks.map((t) => `[${t}]`).join('')}amix=inputs=${tracks.length + 1}:duration=longest:normalize=0,`
-    : '[voice]anull,';
+  const { inputs, filter } = stingAudio(seconds, 2, ['voice'], sting);
   return {
     inputs,
     filter: `[0:v]subtitles=${assPath}:fontsdir=${FONTS_DIR},`
       + `fade=t=out:st=${(seconds - 0.35).toFixed(2)}:d=0.35[v];`
       + `[1:a]adelay=${delayMs}|${delayMs}[voice];`
-      + `${chain}${join}`
-      // Дзвіночок довший за німу картку, тож без спаду він обірвався б
-      // клацанням просто перед першим кадром факту.
-      + `afade=t=out:st=${Math.max(0, seconds - 0.3).toFixed(2)}:d=0.3,`
-      + 'alimiter=limit=0.95,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]',
+      + filter,
   };
+}
+
+// --- Перегортання сторінки ---------------------------------------------------
+// Замість чорної картки між фактами — сторінка, що відходить ліворуч і
+// відкриває наступний факт. Будується з двох нерухомих кадрів: останнього
+// кадру попереднього факту й першого кадру наступного. Так перехід коштує
+// півсекунди кодування замість перекодування всієї добірки — а склейка
+// лишається побітовою (concat -c copy).
+// Який перехід між фактами. Стандартний — перегортання сторінки: власник
+// послухав готову добірку й вирішив, що чорна картка з написом і голосом між
+// фактами зайва, потрібен сам звук і рух. Стару картку лишено під
+// LONG_TRANSITION=card, повну тишу — під none.
+export const TRANSITIONS = ['flip', 'card', 'none'];
+export const DEFAULT_TRANSITION = 'flip';
+
+export function transitionMode() {
+  const name = String(process.env.LONG_TRANSITION || DEFAULT_TRANSITION).trim();
+  return TRANSITIONS.includes(name) ? name : DEFAULT_TRANSITION;
+}
+
+export const FLIP_MOVE = 0.55;   // скільки їде сама сторінка
+export const FLIP_HOLD = 0.55;   // скільки наступний кадр стоїть після неї
+
+// Хід сторінки: повільний старт, розгін, м'яке гальмування. Рівномірний зсув
+// читається як механічний витиск, а не як рух руки.
+function flipProgress(move) {
+  const u = `min(1,t/${move})`;
+  return `(3*pow(${u},2)-2*pow(${u},3))`;
+}
+
+async function grabFrame(source, at, out) {
+  // sseof від'ємний — відлік від кінця; для першого кадру беремо не нульовий,
+  // бо на нульовому в частини роликів ще стоїть затемнення.
+  const args = at === 'end'
+    ? ['-y', '-sseof', '-0.35', '-i', source, '-vframes', '1', '-q:v', '2', out]
+    : ['-y', '-ss', '0.1', '-i', source, '-vframes', '1', '-q:v', '2', out];
+  await run('ffmpeg', args);
+  return out;
+}
+
+export async function makeFlip(workDir, fromPath, toPath, number, onProgress = () => {}) {
+  const seconds = Number((FLIP_MOVE + FLIP_HOLD).toFixed(2));
+  const tag = String(number).padStart(2, '0');
+  const a = await grabFrame(fromPath, 'end', path.join(workDir, `flip-${tag}-a.png`));
+  const b = await grabFrame(toPath, 'start', path.join(workDir, `flip-${tag}-b.png`));
+  const p = flipProgress(FLIP_MOVE);
+
+  const { inputs: sound, filter: audio } = stingAudio(seconds, 3);
+  const raw = path.join(workDir, `flip-raw-${tag}.mp4`);
+  const args = ['-y',
+    '-loop', '1', '-t', String(seconds), '-i', a,
+    '-loop', '1', '-t', String(seconds), '-i', b,
+    // Тінь, яку сторінка кидає на те, що під нею: найтемніша при самому краї
+    // й тане праворуч. Без неї перехід читається як звичайний витиск.
+    '-f', 'lavfi', '-t', String(seconds),
+    '-i', "color=c=black:s=160x1920,format=rgba,geq=r=0:g=0:b=0:a='210*(1-X/W)'"];
+  for (const input of sound) args.push('-f', 'lavfi', '-i', input);
+  args.push(
+    '-filter_complex',
+    `[1:v][2:v]overlay=x='1080*(1-${p})':y=0[under];`
+    + `[under][0:v]overlay=x='-1080*${p}':y=0,format=yuv420p[v];`
+    + audio,
+    '-map', '[v]', '-map', '[a]', '-t', String(seconds), '-r', '30',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', raw,
+  );
+  await run('ffmpeg', args);
+
+  const out = path.join(workDir, `flip-${tag}.mp4`);
+  await remuxToReelsSpec(raw, out);
+  for (const f of [a, b, raw]) await rm(f, { force: true }).catch(() => {});
+  onProgress(`   перехід ${number}`);
+  return out;
 }
 
 async function makeAnnounce(workDir, { number, total, label = '' }, onProgress = () => {}) {
@@ -647,21 +739,32 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     introSeconds = await durationSeconds(introPath);
   }
 
-  // Картки «ФАКТ 1», «ФАКТ 2»… — перед КОЖНИМ фактом, зокрема й першим. Вони ж
-  // правлять за роздільники: перехідний звук у них уже є.
+  // Перехід перед КОЖНИМ фактом, зокрема й першим. Він же править за
+  // роздільник: звук у ньому вже є.
+  //
+  // «flip» — сторінка відходить ліворуч і відкриває наступний факт; «card» —
+  // стара чорна картка «ФАКТ 3» з назвою; «none» — без переходів зовсім.
   let leads = null;
   let sequence = parts;
-  if (announce) {
-    onProgress('роблю картки фактів');
+  const mode = announce ? transitionMode() : 'none';
+  if (mode !== 'none') {
+    onProgress(mode === 'flip' ? 'роблю переходи між фактами' : 'роблю картки фактів');
     const cards = [];
     for (let i = 0; i < parts.length; i++) {
-      cards.push(await makeAnnounce(
-        workDir, { number: i + 1, total: parts.length, label: labels[i] || '' }, onProgress,
-      ));
+      if (mode === 'card') {
+        cards.push(await makeAnnounce(
+          workDir, { number: i + 1, total: parts.length, label: labels[i] || '' }, onProgress,
+        ));
+        continue;
+      }
+      // Перегортати перед першим фактом можна лише з чогось: якщо вступу
+      // немає, то й сторінки, яка відходить, теж немає.
+      const from = i === 0 ? introPath : parts[i - 1];
+      cards.push(from ? await makeFlip(workDir, from, parts[i], i + 1, onProgress) : null);
     }
     leads = [];
-    for (const card of cards) leads.push(await durationSeconds(card));
-    sequence = parts.flatMap((part, i) => [cards[i], part]);
+    for (const card of cards) leads.push(card ? await durationSeconds(card) : 0);
+    sequence = parts.flatMap((part, i) => (cards[i] ? [cards[i], part] : [part]));
   } else if (separators && parts.length > 1) {
     onProgress('роблю роздільники між фактами');
     const seps = [];

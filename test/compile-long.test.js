@@ -163,7 +163,7 @@ test('дубль ID у таблиці не подвоює епізод у доб
 // Звук чути лише в готовій добірці, через годину після монтажу, тож усе, що
 // можна перевірити тут, перевіряємо тут: і вибір варіанта, і те, що фільтр
 // складається коректно (крива кількість входів amix валить увесь монтаж).
-import { announceFilter, stingName, STINGS, DEFAULT_STING } from '../src/compile-long.js';
+import { announceFilter, stingName, STINGS, DEFAULT_STING, stingAudio } from '../src/compile-long.js';
 
 test('стандартний звук оголошення — дзвіночок із подихом', () => {
   delete process.env.ANNOUNCE_STING;
@@ -201,4 +201,43 @@ test('фільтр оголошення завжди віддає доріжки
   const { filter } = announceFilter('/tmp/a.ass', 3.5, 450, 'chime-air');
   assert.match(filter, /\[v\];/);
   assert.match(filter, /\[a\]$/);
+});
+
+// --- Перехід між фактами -----------------------------------------------------
+import { transitionMode, TRANSITIONS, DEFAULT_TRANSITION, FLIP_MOVE, FLIP_HOLD } from '../src/compile-long.js';
+
+test('стандартний перехід — перегортання сторінки', () => {
+  delete process.env.LONG_TRANSITION;
+  assert.equal(DEFAULT_TRANSITION, 'flip');
+  assert.equal(transitionMode(), 'flip');
+});
+
+test('LONG_TRANSITION вертає стару картку або прибирає перехід зовсім', () => {
+  for (const mode of TRANSITIONS) {
+    process.env.LONG_TRANSITION = mode;
+    assert.equal(transitionMode(), mode);
+  }
+  process.env.LONG_TRANSITION = 'нема-такого';
+  assert.equal(transitionMode(), DEFAULT_TRANSITION);
+  delete process.env.LONG_TRANSITION;
+});
+
+test('перехід коротший за дві секунди — інакше добірка розповзається', () => {
+  assert.ok(FLIP_MOVE + FLIP_HOLD <= 1.5, 'перехід задовгий');
+  assert.ok(FLIP_MOVE >= 0.3, 'сторінка смикається');
+});
+
+test('звук переходу живе й без голосу диктора', () => {
+  const { inputs, filter } = stingAudio(1.1, 3);
+  assert.ok(inputs.length > 0);
+  assert.match(filter, /amix=inputs=4/);      // чотири доріжки дзвіночка з подихом
+  assert.doesNotMatch(filter, /\[voice\]/);   // голосу між фактами більше немає
+  assert.match(filter, /\[a\]$/);
+});
+
+test('без жодної доріжки звук не ламається, а стає тишею', () => {
+  const { inputs, filter } = stingAudio(1.1, 3, [], 'none');
+  assert.equal(inputs.length, 1);
+  assert.match(inputs[0], /anullsrc/);
+  assert.doesNotMatch(filter, /amix/);
 });
