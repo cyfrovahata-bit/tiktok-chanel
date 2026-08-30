@@ -622,7 +622,7 @@ export function parseCallbackData(data) {
 export function humanError(message) {
   const text = String(message || '');
   if (/does not exist|cannot be loaded|Unsupported post request/i.test(text)) {
-    return 'коментар уже видалено або сховано';
+    return 'коментар уже видалено або сховано (пробував і гілку, і сам коментар)';
   }
   if (/rate limit|too many|#4\b|#17\b/i.test(text)) {
     return 'Facebook тимчасово обмежив дії Сторінки — спробуй за годину';
@@ -631,6 +631,29 @@ export function humanError(message) {
     return 'бракує доступу: перевір токен Сторінки';
   }
   return text;
+}
+
+// Куди саме Facebook прийме відповідь у гілці — питання без однозначної
+// відповіді: на частині коментарів проходить публікація у верхній коментар, на
+// частині — у саму репліку. Тому пробуємо обидва шляхи, перш ніж казати, що не
+// вийшло: помилка «об'єкта немає» на одному ID ще не означає, що гілка мертва.
+export async function sendReply(adapter, targets, text, options = {}) {
+  const tried = [...new Set(targets.filter(Boolean).map(String))];
+  let last = null;
+  for (const id of tried) {
+    try {
+      await adapter.reply(id, text, options);
+      return { id, tried };
+    } catch (error) {
+      last = error;
+      // Помилка не про зниклий об'єкт (бракує доступу, обмеження) — другий ID
+      // не допоможе, і смикати API ще раз немає сенсу.
+      if (!/does not exist|cannot be loaded|Unsupported post request/i.test(String(error.message))) break;
+    }
+  }
+  const error = new Error(last?.message || 'не вдалося опублікувати');
+  error.tried = tried;
+  throw error;
 }
 
 export async function handleCallback(callbackQuery, options = {}) {
@@ -673,7 +696,7 @@ export async function handleCallback(callbackQuery, options = {}) {
       return true;
     }
     try {
-      await adapter.reply(draft.replyTo || commentId, draft.text, options);
+      await sendReply(adapter, [draft.replyTo, commentId], draft.text, options);
       state.seen[key] = 'sent';
       await finish('Опубліковано ✅');
     } catch (error) {
@@ -700,7 +723,7 @@ export async function handleMessage(message, options = {}) {
 
   const notify = options.notifyFn || sendMessage;
   try {
-    await adapter.reply(draft.replyTo || rest.join(':'), text, options);
+    await sendReply(adapter, [draft.replyTo, rest.join(':')], text, options);
     state.seen[key] = 'sent';
     delete state.drafts[key];
     await writeState(state);

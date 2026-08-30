@@ -192,7 +192,7 @@ test('зникнення коментаря пояснюється по-людс
   // Саме це побачив власник: «Unsupported post request. Object with ID…».
   assert.equal(
     humanError("Unsupported post request. Object with ID '122109' does not exist, cannot be loaded due to missing permissions"),
-    'коментар уже видалено або сховано',
+    'коментар уже видалено або сховано (пробував і гілку, і сам коментар)',
   );
 });
 
@@ -203,4 +203,47 @@ test('обмеження й доступи теж називаються сло�
 
 test('незнайому помилку не ховаємо', () => {
   assert.equal(humanError('щось геть нове'), 'щось геть нове');
+});
+
+// --- Два шляхи публікації ----------------------------------------------------
+import { sendReply } from '../src/comment-flow.js';
+
+const GONE = "Unsupported post request. Object with ID '1' does not exist";
+
+test('якщо верхній коментар не приймає — пробуємо саму репліку', async () => {
+  const tried = [];
+  const adapter = {
+    reply: async (id) => {
+      tried.push(id);
+      if (id === 'TOP') throw new Error(GONE);
+    },
+  };
+  const out = await sendReply(adapter, ['TOP', 'REPLY'], 'текст');
+  assert.deepEqual(tried, ['TOP', 'REPLY']);
+  assert.equal(out.id, 'REPLY');
+});
+
+test('перший же успіх зупиняє спроби', async () => {
+  const tried = [];
+  const adapter = { reply: async (id) => { tried.push(id); } };
+  await sendReply(adapter, ['TOP', 'REPLY'], 'текст');
+  assert.deepEqual(tried, ['TOP']);
+});
+
+test('помилка НЕ про зниклий об\'єкт другого ID не смикає', async () => {
+  // Бракує доступу — другий ID тут нічим не зарадить, а зайвий виклик лише
+  // наближає обмеження Facebook.
+  const tried = [];
+  const adapter = {
+    reply: async (id) => { tried.push(id); throw new Error('Invalid OAuth access token'); },
+  };
+  await assert.rejects(() => sendReply(adapter, ['TOP', 'REPLY'], 'текст'));
+  assert.deepEqual(tried, ['TOP']);
+});
+
+test('однакові ID не пробуються двічі', async () => {
+  const tried = [];
+  const adapter = { reply: async (id) => { tried.push(id); throw new Error(GONE); } };
+  await assert.rejects(() => sendReply(adapter, ['SAME', 'SAME'], 'текст'));
+  assert.deepEqual(tried, ['SAME']);
 });
