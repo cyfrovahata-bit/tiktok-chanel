@@ -14,7 +14,10 @@ import { parseSlideLines } from './queue-prompt.js';
 import { isShortAppreciation, thanksReply } from './comment-thanks.js';
 
 const FILE_NAME = 'comments.json';
-const KEEP = 400;
+// Скільки рішень тримаємо в пам'яті. Було 400 — вистачало, поки бот дивився
+// лише десять останніх дописів. Глибокий обхід сягає сотень, і на короткій
+// пам'яті давно пропущені коментарі поверталися б картками знову.
+const KEEP = Number(process.env.COMMENTS_KEEP) || 5000;
 const MAX_PER_RUN = Number(process.env.COMMENTS_PER_RUN) || 5;
 // Автовідповіді на короткі подяки. Своя стеля на прохід: Сторінка, яка за
 // хвилину лишає двадцять коментарів, ловить обмеження Facebook.
@@ -587,11 +590,16 @@ export async function checkPlatform(adapter, options = {}) {
 
 export async function checkAll(options = {}) {
   const state = options.state || await readState();
+  // Час глибокого обходу вирішуємо тут, один раз на прохід — щоб усі платформи
+  // в одному проході працювали однаково.
+  const lastDeep = Date.parse(state.deepAt || '') || 0;
+  const deep = options.deep ?? (Date.now() - lastDeep > DEEP_EVERY_MS);
+  if (deep) state.deepAt = new Date().toISOString();
   const results = [];
   for (const adapter of platforms.values()) {
     if (adapter.enabled && !adapter.enabled()) continue;
     try {
-      results.push(await checkPlatform(adapter, { ...options, state }));
+      results.push(await checkPlatform(adapter, { ...options, state, deep }));
     } catch (error) {
       results.push({ platform: adapter.key, error: error.message });
     }
@@ -807,6 +815,10 @@ export async function rethinkSkipped(options = {}) {
 // --- Спостерігач -------------------------------------------------------------
 
 const WATCH_MS = Number(process.env.COMMENTS_POLL_MS) || 15 * 60 * 1000;
+// Раз на добу проходимо ВСІ дописи, а не десять останніх: під старими роликами
+// теж пишуть, просто рідко. Позначку тримаємо у стані на Drive, щоб перезапуск
+// контейнера не запускав глибокий обхід щоразу.
+const DEEP_EVERY_MS = Number(process.env.COMMENTS_DEEP_EVERY_MS) || 24 * 60 * 60 * 1000;
 let watchTimer = null;
 
 export function startCommentWatcher() {

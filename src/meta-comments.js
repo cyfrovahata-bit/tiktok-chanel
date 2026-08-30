@@ -24,10 +24,34 @@ export function facebookEnabled() {
 // Коментарі під свіжими дописами Сторінки. Беремо саме всі дописи, а не лише
 // опубліковані нами: автопублікацію у Facebook вимкнено, власник постить руками,
 // і відповідати треба насамперед під тими дописами.
+// deep=true — глибокий обхід: ідемо сторінками аж до META_COMMENTS_DEEP_MAX
+// дописів. Так забираємо коментарі під старими роликами, куди звичайний прохід
+// не зазирає. Робити це щочверть години немає сенсу: майже всі коментарі
+// приходять під свіжими дописами, а повний обхід історії — це десятки
+// звернень до Graph API щоразу.
 export async function fetchFacebookComments(options = {}) {
   const pageId = process.env.META_PAGE_ID;
-  const data = await graphRequest(`${encodeURIComponent(pageId)}/posts`, {
+  const pageSize = options.limit || LIMIT;
+  const maxPosts = options.deep
+    ? (Number(process.env.META_COMMENTS_DEEP_MAX) || 200)
+    : pageSize;
+
+  const out = [];
+  let after = null;
+  let scanned = 0;
+  do {
+    // eslint-disable-next-line no-await-in-loop
+    const page = await fetchPostsPage(pageId, { pageSize, after, options });
+    scanned += collectFromPosts(page.data || [], pageId, out);
+    after = options.deep ? page.paging?.cursors?.after || null : null;
+  } while (after && scanned < maxPosts);
+  return out;
+}
+
+function fetchPostsPage(pageId, { pageSize, after, options }) {
+  return graphRequest(`${encodeURIComponent(pageId)}/posts`, {
     params: {
+      ...(after ? { after } : {}),
       // Вкладені comments — це відповіді на коментар. Потрібні, щоб не
       // пропонувати відповісти там, де Сторінка вже відповіла (байдуже,
       // ботом чи руками з телефона).
@@ -36,13 +60,17 @@ export async function fetchFacebookComments(options = {}) {
       // копіює з мінідодатка — отже назва рядка стоїть у ньому дослівно.
       fields: 'id,message,created_time,comments.limit(25)'
         + '{id,message,created_time,from,comments.limit(15){id,message,created_time,from}}',
-      limit: options.limit || LIMIT,
+      limit: pageSize,
     },
     token: options.token || token(),
     fetchImpl: options.fetchImpl,
   });
-  const out = [];
-  for (const post of data.data || []) {
+}
+
+// Розбирає одну сторінку дописів у список коментарів. Повертає, скільки
+// дописів переглянули — за цим лічильником зупиняється глибокий обхід.
+function collectFromPosts(posts, pageId, out) {
+  for (const post of posts) {
     const common = { postId: post.id, postText: post.message || '' };
     for (const c of post.comments?.data || []) {
       // Свої ж коментарі пропускаємо, інакше бот відповідатиме сам собі.
@@ -105,7 +133,7 @@ export async function fetchFacebookComments(options = {}) {
       });
     }
   }
-  return out;
+  return posts.length;
 }
 
 export function replyFacebook(commentId, message, options = {}) {

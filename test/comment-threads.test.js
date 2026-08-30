@@ -247,3 +247,58 @@ test('однакові ID не пробуються двічі', async () => {
   await assert.rejects(() => sendReply(adapter, ['SAME', 'SAME'], 'текст'));
   assert.deepEqual(tried, ['SAME']);
 });
+
+// --- Глибокий обхід ----------------------------------------------------------
+// Звичайний прохід дивиться десять останніх дописів; раз на добу треба пройти
+// всю історію, бо під старими роликами теж пишуть.
+
+test('звичайний прохід бере лише першу сторінку дописів', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(String(url));
+    return reply({
+      data: [{ id: 'P1', message: 'Допис', comments: { data: [] } }],
+      paging: { cursors: { after: 'CURSOR2' } },
+    });
+  };
+  await fetchFacebookComments({ fetchImpl });
+  assert.equal(calls.length, 1, 'по сторінках не ходимо');
+});
+
+test('глибокий обхід іде за курсором далі', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(String(url));
+    // Дві сторінки, далі курсора немає.
+    if (calls.length === 1) {
+      return reply({
+        data: [{ id: 'P1', message: 'Перший', comments: { data: [{ id: 'C1', message: 'Дякую', from: { id: 'U1', name: 'Оля' } }] } }],
+        paging: { cursors: { after: 'CURSOR2' } },
+      });
+    }
+    return reply({
+      data: [{ id: 'P2', message: 'Другий', comments: { data: [{ id: 'C2', message: 'Клас', from: { id: 'U2', name: 'Петро' } }] } }],
+    });
+  };
+  const list = await fetchFacebookComments({ fetchImpl, deep: true });
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].includes('after=CURSOR2'), 'друга сторінка береться за курсором');
+  assert.deepEqual(list.map((c) => c.id), ['C1', 'C2']);
+});
+
+test('глибокий обхід не ходить нескінченно', async () => {
+  // Facebook віддає курсор навіть на порожній сторінці — без стелі це був би
+  // вічний цикл на кожному нічному проході.
+  process.env.META_COMMENTS_DEEP_MAX = '3';
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return reply({
+      data: [{ id: `P${calls}`, message: 'Допис', comments: { data: [] } }],
+      paging: { cursors: { after: `CURSOR${calls + 1}` } },
+    });
+  };
+  await fetchFacebookComments({ fetchImpl, deep: true });
+  assert.ok(calls <= 4, `забагато звернень: ${calls}`);
+  delete process.env.META_COMMENTS_DEEP_MAX;
+});
