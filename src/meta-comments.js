@@ -34,7 +34,8 @@ export async function fetchFacebookComments(options = {}) {
       // message самого допису потрібен, щоб знайти ролик: ID допису на файл
       // ніхто не записує (Facebook публікується вручну), а текст власник
       // копіює з мінідодатка — отже назва рядка стоїть у ньому дослівно.
-      fields: 'id,message,created_time,comments.limit(25){id,message,created_time,from,comments.limit(10){from}}',
+      fields: 'id,message,created_time,comments.limit(25)'
+        + '{id,message,created_time,from,comments.limit(15){id,message,created_time,from}}',
       limit: options.limit || LIMIT,
     },
     token: options.token || token(),
@@ -42,18 +43,60 @@ export async function fetchFacebookComments(options = {}) {
   });
   const out = [];
   for (const post of data.data || []) {
+    const common = { postId: post.id, postText: post.message || '' };
     for (const c of post.comments?.data || []) {
-      // Свої ж відповіді пропускаємо, інакше бот відповідатиме сам собі.
-      if (!c.id || !c.message || c.from?.id === pageId) continue;
-      const answered = (c.comments?.data || []).some((r) => r.from?.id === pageId);
-      if (answered) continue;
+      // Свої ж коментарі пропускаємо, інакше бот відповідатиме сам собі.
+      if (!c.id || c.from?.id === pageId) continue;
+
+      const raw = c.comments?.data || [];
+      // «Чи ми вже писали» рахуємо по ВСІХ відповідях, а не лише по тих, що
+      // мають id: відповідь без id — це все одно наша відповідь, і пропустити
+      // її означало б написати в гілку вдруге.
+      const ours = raw.filter((r) => r.from?.id === pageId);
+      const replies = raw.filter((r) => r.id);
+      const answered = ours.length > 0;
+      const lastOursAt = answered ? ours[ours.length - 1].created_time || '' : '';
+
+      // Верхній рівень: як і раніше — доки Сторінка тут не писала.
+      if (c.message && !answered) {
+        out.push({
+          ...common,
+          id: c.id,
+          text: c.message,
+          author: c.from?.name || 'Глядач',
+          publishedAt: c.created_time || '',
+        });
+      }
+
+      // Гілка. Беремо ОДНОГО кандидата на гілку — останню чужу репліку, — а
+      // всю розмову передаємо контекстом. Інакше на одну гілку прилітало б по
+      // три картки, і бот відповідав би тричі там, де досить раз.
+      const foreign = replies.filter((r) => r.from?.id !== pageId && r.message);
+      const after = answered
+        // Ми вже писали в цю гілку. Далі втручаємось, лише якщо звертаються до
+        // каналу — це вирішує модель, тож підсовуємо їй тільки нове.
+        ? foreign.filter((r) => (r.created_time || '') > lastOursAt)
+        : foreign;
+      const last = after[after.length - 1];
+      if (!last) continue;
+
       out.push({
-        id: c.id,
-        text: c.message,
-        author: c.from?.name || 'Глядач',
-        postId: post.id,
-        postText: post.message || '',
-        publishedAt: c.created_time || '',
+        ...common,
+        id: last.id,
+        text: last.message,
+        author: last.from?.name || 'Глядач',
+        publishedAt: last.created_time || '',
+        parentId: c.id,
+        parentAuthor: c.from?.name || 'Глядач',
+        parentText: c.message || '',
+        threadAnswered: answered,
+        thread: replies
+          .filter((r) => r.message)
+          .map((r) => ({
+            author: r.from?.id === pageId ? 'Канал' : (r.from?.name || 'Глядач'),
+            text: r.message,
+            ours: r.from?.id === pageId,
+          })),
       });
     }
   }
