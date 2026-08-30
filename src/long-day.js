@@ -217,6 +217,33 @@ export async function rehookDay({ now = new Date(), ask = chatOnce } = {}) {
   return writePlan({ ...plan, hook });
 }
 
+// Перезібрати вже змонтоване. Скид (resetDay) для цього завеликий: він
+// перебирає набір і викидає прев'ю, яке власник малював пів години. Тут же
+// набір, назва, вступ і прев'ю лишаються, а зникає лише саме відео — щоб
+// монтаж пішов заново новим кодом чи з новим вступом.
+export async function rebuildDay({ now = new Date() } = {}) {
+  const date = kyivToday(now);
+  const plan = await readPlan(date);
+  if (!plan) return null;
+  if (plan.youtubeId) throw new Error('Добірка вже на YouTube — перезбирати пізно');
+  if (!plan.builtAt) return plan;
+
+  if (plan.videoFileId) {
+    try {
+      await drive().files.delete({ fileId: plan.videoFileId, supportsAllDrives: true });
+    } catch (error) {
+      console.error('[long-day] старе відео не видалив:', error.message);
+    }
+  }
+  // Мітки «вже в добірці» лишаємо: набір той самий, і знімати їх означало б
+  // дозволити цим фактам потрапити в наступну добірку без карантину.
+  const next = { ...plan };
+  for (const key of ['builtAt', 'videoFileId', 'videoName', 'chapters', 'sizeBytes', 'meta', 'failures', 'lastError']) {
+    delete next[key];
+  }
+  return writePlan(next);
+}
+
 // --- Крок 1: підбір ----------------------------------------------------------
 
 export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = notify } = {}) {

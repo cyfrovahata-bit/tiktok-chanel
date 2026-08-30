@@ -25,7 +25,7 @@ import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { compileLong, orderEpisodes } from '../src/compile-long.js';
 import { savePreview, previewState, removePreview, fetchPreview } from '../src/preview.js';
-import { readPlan, buildDay, planDay, resetDay, rehookDay } from '../src/long-day.js';
+import { readPlan, buildDay, planDay, resetDay, rehookDay, rebuildDay } from '../src/long-day.js';
 import { plannedSize } from '../src/long-plan.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
@@ -571,9 +571,18 @@ const server = http.createServer(async (req, res) => {
       if (longBuild.running) return json(res, 409, { error: 'Монтаж уже триває' });
 
       const today = kyivToday();
-      const plan = await readPlan(today).catch(() => null);
+      let plan = await readPlan(today).catch(() => null);
       if (!plan) return json(res, 400, { error: 'Добірку на сьогодні ще не підібрано' });
       if (plan.cancelled) return json(res, 400, { error: `Сьогодні скасовано: ${plan.reason || ''}` });
+      // rebuild — «перезібрати»: набір, назва, вступ і прев'ю лишаються, зникає
+      // лише саме відео, щоб монтаж пішов заново.
+      if (plan.builtAt && body.rebuild) {
+        try {
+          plan = await rebuildDay();
+        } catch (error) {
+          return json(res, 400, { error: error.message });
+        }
+      }
       if (plan.builtAt) return json(res, 400, { error: 'Сьогоднішня добірка вже змонтована' });
 
       // Монтаж триває хвилини — HTTP-запит стільки не живе, тож відповідаємо

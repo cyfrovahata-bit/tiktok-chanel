@@ -1037,9 +1037,14 @@
       };
 
       // «Зібрати зараз» — коли прев'ю вже готове й чекати 16:00 немає сенсу.
-      // Публікація при цьому лишається на 18:00.
-      if (!plan.builtAt && !plan.youtubeId) {
-        const run = el('button', 'btn primary', data.build?.running ? 'Монтую…' : '▶️ Зібрати зараз');
+      // Після монтажу та сама кнопка стає «Перезібрати»: набір, назва, вступ і
+      // прев'ю лишаються, зникає лише саме відео. Без неї єдиним способом
+      // перемонтувати був повний скид — тобто малювати прев'ю наново.
+      // Публікація в обох випадках лишається на 18:00.
+      if (!plan.youtubeId) {
+        const rebuild = Boolean(plan.builtAt);
+        const label = rebuild ? '🔁 Перезібрати відео' : '▶️ Зібрати зараз';
+        const run = el('button', 'btn primary', data.build?.running ? 'Монтую…' : label);
         run.disabled = Boolean(data.build?.running);
         run.addEventListener('click', async () => {
           if (!initData) { toast('Відкрий через Telegram'); return; }
@@ -1047,7 +1052,7 @@
           try {
             const r = await fetch('/api/long/build', {
               method: 'POST', headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ initData }),
+              body: JSON.stringify({ initData, rebuild }),
             }).then((x) => x.json());
             toast(r.error || `Монтую «${r.title}» — це кілька хвилин`);
           } catch (e) {
@@ -1056,12 +1061,12 @@
           setTimeout(cutTodayLoad, 3000);
         });
         actions.appendChild(run);
-
       }
 
       // Вступ видно й чути лише в готовому відео, тож найчастіша правка — саме
-      // він. Окрема кнопка переписує його, не чіпаючи ні набору, ні прев'ю.
-      if (!plan.builtAt && !plan.youtubeId) {
+      // він, і найчастіше вже ПІСЛЯ монтажу. Кнопка переписує тільки текст, не
+      // чіпаючи ні набору, ні прев'ю; далі лишається перезібрати.
+      if (!plan.youtubeId) {
         const rehook = el('button', 'btn secondary', '🎙 Новий вступ');
         rehook.addEventListener('click', async () => {
           if (!initData) { toast('Відкрий через Telegram'); return; }
@@ -1071,7 +1076,10 @@
               method: 'POST', headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ initData }),
             }).then((x) => x.json());
-            toast(r.error || (r.hook ? 'Новий вступ готовий' : 'Вступу не буде — піде звичайна репліка'));
+            const done = r.hook ? 'Новий вступ готовий' : 'Вступу не буде — піде звичайна репліка';
+            // Після монтажу сам собою вступ у відео не зміниться — треба
+            // перезібрати, і про це краще сказати одразу.
+            toast(r.error || (plan.builtAt ? `${done}. Тепер «Перезібрати відео»` : done));
           } catch (e) {
             toast(e.message);
           }
