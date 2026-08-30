@@ -33,6 +33,13 @@ import {
 } from './long-copy.js';
 import { kyivToday, kyivMinutes } from './kyiv.js';
 
+// Тексти добірки — вступ, назва, опис — пише сильніша модель, ніж решта
+// каналу. Їх усього кілька на тиждень, а різниця чутна одразу: gpt-4o-mini
+// раз за разом видавав «чи знаєш ти, що…?» і «далі покажемо ще більше»,
+// хоч у промті це прямо заборонено.
+const COPY_MODEL = process.env.LONG_COPY_MODEL || 'gpt-4o';
+const COPY = { model: COPY_MODEL };
+
 export const NOTIFY_AT = 8 * 60;   // 08:00 — ранкове повідомлення
 export const BUILD_AT = 16 * 60;   // 16:00 — дедлайн прев'ю й початок монтажу
 export const PUBLISH_AT = 18 * 60; // 18:00 — вихід
@@ -186,7 +193,7 @@ async function makeHook({ ask, title, theme, chosen }) {
   let hook = '';
   for (const retry of [false, true]) {
     try {
-      hook = String(await ask(hookPrompt({ title, theme, items: chosen }, { retry }))).trim()
+      hook = String(await ask(hookPrompt({ title, theme, items: chosen }, { retry }), COPY)).trim()
         .replace(/^["«]|["»]$/g, '').trim();
     } catch (error) {
       console.error('[long-day] вступ не згенеровано:', error.message);
@@ -301,7 +308,7 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
     }
     try {
       named = parseTitleAnswer(
-        await ask(buildTitlePrompt(chosen, { avoidTitles }) + extra),
+        await ask(buildTitlePrompt(chosen, { avoidTitles }) + extra, COPY),
         set.ids,
       );
     } catch (error) {
@@ -410,7 +417,7 @@ export async function buildDay({ now = new Date(), ask = chatOnce, notifyFn = no
   // Назва й опис — після монтажу: лише тепер відомі справжні таймкоди.
   let answer = '';
   try {
-    answer = await ask(metaPrompt({ title: plan.title, theme: plan.theme, items }));
+    answer = await ask(metaPrompt({ title: plan.title, theme: plan.theme, items }), COPY);
   } catch (error) {
     console.error('[long-day] тексти не згенеровано:', error.message);
   }
