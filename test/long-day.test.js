@@ -51,3 +51,26 @@ test('пізній перезапуск наздоганяє пропущени�
 test('файл стану дня названий за датою', () => {
   assert.equal(planName('2026-08-30'), 'long-2026-08-30.json');
 });
+
+// --- Вступ добірки -----------------------------------------------------------
+import { introVariantFor } from '../src/long-day.js';
+import { INTRO_VARIANTS, introLine } from '../src/voice-bank.js';
+
+test('варіант вступу залежить від дати — сусідні добірки не однакові', () => {
+  const days = ['2026-08-30', '2026-09-01', '2026-09-04', '2026-09-06'];
+  const picked = days.map((d) => introVariantFor(d));
+  for (const v of picked) {
+    assert.ok(Number.isInteger(v) && v >= 0 && v < INTRO_VARIANTS.length, `поза межами: ${v}`);
+  }
+  assert.ok(new Set(picked).size > 1, 'усі дні дали один варіант');
+  // Той самий день — той самий вступ: інакше перезбір міняв би озвучку.
+  assert.equal(introVariantFor('2026-08-30'), introVariantFor('2026-08-30'));
+});
+
+test('зсув варіанта лишається в межах списку', () => {
+  for (let shift = 0; shift < 12; shift++) {
+    const v = introVariantFor('2026-08-30', shift);
+    assert.ok(v >= 0 && v < INTRO_VARIANTS.length);
+    assert.equal(typeof introLine(5, v), 'string');
+  }
+});

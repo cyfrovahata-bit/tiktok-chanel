@@ -28,9 +28,10 @@ import {
   parseTitleAnswer, neutralTitle, cleanLabel, DEFAULTS,
 } from './long-plan.js';
 import {
-  metaPrompt, parseMeta, youtubeDescription, facebookPost, hookPrompt, hookWeakness,
+  metaPrompt, parseMeta, youtubeDescription, facebookPost,
   previewPromptVideo, previewPromptYouTube,
 } from './long-copy.js';
+import { INTRO_VARIANTS, introLine } from './voice-bank.js';
 import { kyivToday, kyivMinutes } from './kyiv.js';
 
 // Тексти добірки — вступ, назва, опис — пише сильніша модель, ніж решта
@@ -183,45 +184,33 @@ export async function resetDay({ now = new Date(), previews = true } = {}) {
   return removed;
 }
 
-// Вступ диктора: окремий запит, бо він вимагає іншого тону, ніж підбір теми.
-// Модель регулярно зривається в абстракцію («історія перетворює руїни на
-// легенди») або бере дивину з першого ж факту, який глядач побачить одразу
-// після вступу. І те, й те перевіряється кодом — і перепитується.
+// Вступ диктора. Раніше його писала модель під кожну добірку — і щоразу
+// невлучно: то анонс одного об'єкта з п'яти, то запитання, на яке легко
+// відповісти «ні», то «далі ми покажемо ще більше». Власник попросив просту
+// загадкову фразу, і це правильно: назву добірки глядач бачить на заставці,
+// а вступ має лише пообіцяти кількість і настрій.
 //
-// chosen мають бути в порядку відео: саме перший із них іде за вступом.
-async function makeHook({ ask, title, theme, chosen }) {
-  let hook = '';
-  for (const retry of [false, true]) {
-    try {
-      hook = String(await ask(hookPrompt({ title, theme, items: chosen }, { retry }), COPY)).trim()
-        .replace(/^["«]|["»]$/g, '').trim();
-    } catch (error) {
-      console.error('[long-day] вступ не згенеровано:', error.message);
-      return '';
-    }
-    const weak = hookWeakness(hook, chosen);
-    if (!weak) return hook;
-    console.error(`[long-day] вступ слабкий (${weak}) — перепитую`);
-  }
-  // І друга спроба слабка: краще без вступу, ніж порожні слова — компонувач
-  // тоді бере звичайну репліку з голосового банку.
-  return '';
+// Тепер це шаблон із голосового банку. Варіант чергується за датою, щоб
+// добірки не зливалися в одну, а «Новий вступ» просто бере наступний.
+export function introVariantFor(date, shift = 0) {
+  const digits = String(date).replace(/\D/g, '');
+  const base = Number(digits.slice(-4)) || 0;
+  return (base + Number(shift || 0)) % INTRO_VARIANTS.length;
 }
 
 // Перегенерувати САМ вступ, не чіпаючи набору, назви й прев'ю. Потрібно, коли
 // текст не сподобався: переробляти через повний скид означало б малювати
 // прев'ю заново.
-export async function rehookDay({ now = new Date(), ask = chatOnce } = {}) {
+export async function rehookDay({ now = new Date() } = {}) {
   const date = kyivToday(now);
   const plan = await readPlan(date);
   if (!plan || plan.cancelled) return plan;
 
-  const all = await readAllItems();
-  // Той самий порядок, що й у готовому відео, — інакше «перший факт» у
-  // перевірці буде не тим, який глядач побачить першим.
-  const { items } = orderEpisodes(all, plan.ids);
-  const hook = await makeHook({ ask, title: plan.title, theme: plan.theme, chosen: items });
-  return writePlan({ ...plan, hook });
+  // Наступний варіант по колу. Синтезувати його не треба: варіантів лічена
+  // кількість на кожен розмір добірки, тож усі вже лежать у голосовому банку.
+  const current = plan.introVariant ?? introVariantFor(date);
+  const introVariant = (current + 1) % INTRO_VARIANTS.length;
+  return writePlan({ ...plan, introVariant, hook: introLine(plan.size, introVariant) });
 }
 
 // Перезібрати вже змонтоване. Скид (resetDay) для цього завеликий: він
@@ -323,7 +312,8 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
   const title = named.honest ? named.title : neutralTitle(size, avoidTitles);
   const theme = named.theme || set.theme || '';
 
-  const hook = await makeHook({ ask, title, theme, chosen });
+  const introVariant = introVariantFor(date);
+  const hook = introLine(size, introVariant);
 
   const plan = {
     date,
@@ -331,6 +321,7 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
     title,
     theme,
     hook,
+    introVariant,
     ids: set.ids,
     // Підпис-огризок («Як кормова культура перетворилася») диктор прочитає як
     // обірвану думку — краще сам номер факту.

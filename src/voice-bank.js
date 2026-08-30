@@ -66,10 +66,42 @@ export function introTitle(count) {
   return `${count} ${factWordForm(count).toUpperCase()}`;
 }
 
+// «1 історія», «2 історії», «5 історій».
+export function storyWordForm(count) {
+  const n = Math.abs(Math.trunc(Number(count) || 0));
+  const teen = n % 100;
+  if (teen >= 11 && teen <= 14) return 'історій';
+  const last = n % 10;
+  if (last === 1) return 'історія';
+  if (last >= 2 && last <= 4) return 'історії';
+  return 'історій';
+}
+
 // Що диктор каже на вступі. Число лишаємо цифрами: перед синтезом tts.js сам
 // розгортає його в слово з правильним наголосом.
-export function introLine(count) {
-  return `Чи знав ти таку Україну? ${count} ${factWordForm(count)}, яких ти, можливо, не знав.`;
+//
+// Спроба писати вступ моделлю під кожну добірку провалилася: замість гачка
+// виходив то анонс одного об'єкта з п'яти, то запитання, на яке легко
+// відповісти «ні», то порожня обіцянка «далі покажемо ще більше». Власник
+// попросив просту загадкову фразу — і має рацію: заставка й так показує назву
+// добірки, вступ мусить лише пообіцяти кількість і настрій.
+//
+// Варіанти чергуються, щоб добірки не зливалися в одну. Кожен синтезується
+// РАЗ на кількість фактів і далі береться з банку — жодних витрат на ElevenLabs
+// і жодної затримки в монтажі.
+export const INTRO_VARIANTS = [
+  (n, w) => `Чи знав ти таку Україну? ${n} ${w}, яких ти, можливо, не чув.`,
+  (n, w) => `Україна, якої ти не знав. ${n} ${w} в одному відео.`,
+  (n, w) => `${n} ${w} про Україну, яких немає в підручниках.`,
+  (n, w) => `Україна зблизька. ${n} ${w}, у які важко повірити.`,
+  (n, w) => `${n} ${w} про Україну — і кожну легко проґавити.`,
+];
+
+export function introLine(count, variant = 0) {
+  const n = Math.trunc(Number(count) || 0);
+  const at = ((Math.trunc(Number(variant) || 0) % INTRO_VARIANTS.length) + INTRO_VARIANTS.length)
+    % INTRO_VARIANTS.length;
+  return INTRO_VARIANTS[at](n, storyWordForm(n));
 }
 
 // Оголошення перед сюжетом. Без назви — «Факт третій»; із назвою —
@@ -107,10 +139,22 @@ export function factKey(number, label = '') {
 }
 
 // Повний список реплік банку — для разової генерації наперед.
-export function bankPlan({ maxFacts = 20, minFacts = 2 } = {}) {
+//
+// Вступів тепер більше, ніж було: кожен варіант фрази на кожен розмір
+// добірки. Зате всі вони відомі наперед, тож монтаж жодного разу не чекає
+// на синтез. facts потрібні лише з ANNOUNCE_VOICE=1 — між фактами диктор
+// мовчить, — тож наперед їх не женемо.
+export function bankPlan({ maxFacts = 20, minFacts = 2, facts = false } = {}) {
   const plan = [];
-  for (let n = minFacts; n <= maxFacts; n++) plan.push({ key: introKey(n), text: introLine(n) });
-  for (let n = 1; n <= maxFacts; n++) plan.push({ key: factKey(n), text: factLine(n) });
+  for (let n = minFacts; n <= maxFacts; n++) {
+    INTRO_VARIANTS.forEach((_, variant) => {
+      const text = introLine(n, variant);
+      plan.push({ key: introKey(n, text), text });
+    });
+  }
+  if (facts) {
+    for (let n = 1; n <= maxFacts; n++) plan.push({ key: factKey(n), text: factLine(n) });
+  }
   return plan;
 }
 

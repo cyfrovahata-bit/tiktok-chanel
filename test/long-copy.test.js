@@ -2,7 +2,7 @@
 // шматок шаблону: людина вставить його в ChatGPT і отримає картинку не про те.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { previewPromptVideo, previewPromptYouTube, hookPrompt, HOOK_WORD_LIMIT } from '../src/long-copy.js';
+import { previewPromptVideo, previewPromptYouTube } from '../src/long-copy.js';
 
 const SET = {
   title: '5 замків України',
@@ -38,13 +38,6 @@ test('вертикальне прев\'ю просить саме 9:16, а YouTu
   assert.match(previewPromptVideo(SET), /1080×1920/);
   assert.doesNotMatch(previewPromptVideo(SET), /1280×720/);
   assert.match(previewPromptYouTube(SET), /1280×720/);
-});
-
-test('промт хука забороняє «у цьому відео» й тримає межу в словах', () => {
-  const p = hookPrompt(SET);
-  assert.match(p, /«у цьому відео»/);
-  assert.match(p, new RegExp(`${HOOK_WORD_LIMIT} слів`));
-  assert.match(p, /5 замків України/);
 });
 
 test('порожній набір сюжетів не ламає промт', () => {
@@ -132,66 +125,6 @@ test('вертикальне прев\'ю теж несе заголовок, я
   assert.doesNotMatch(p, /ЖОДНОГО ТЕКСТУ/);
 });
 
-// --- Сила вступу -------------------------------------------------------------
-import { hookWeakness } from '../src/long-copy.js';
-
-const CASTLES = [
-  { id: 'A1', title: 'Хотинська фортеця: замок, який ти бачив у десятках фільмів' },
-  { id: 'A2', title: 'Паланок: фортеця, яку здолали не гармати, а виснаження' },
-];
-
-test('абстрактний вступ без жодної конкретики визнається слабким', () => {
-  const weak = hookWeakness(
-    'Замок може зникнути, але його дух залишиться. Історія перетворює руїни на легенди.',
-    CASTLES,
-  );
-  assert.match(weak, /конкретики/);
-});
-
-test('вступ, що називає два різні об\'єкти, проходить', () => {
-  assert.equal(
-    hookWeakness('Паланок здолали не гармати. А Хотинська фортеця стоїть досі.', CASTLES),
-    '',
-  );
-});
-
-test('вступ про ОДИН об\'єкт не проходить — попереду ціла добірка', () => {
-  assert.match(
-    hookWeakness('Фортеця Паланок вистояла під артилерією, але здалася тиші.', CASTLES),
-    /лише 1 об/,
-  );
-});
-
-test('спільне для набору слово за об\'єкт не рахується', () => {
-  // «фортеця» є і в Хотинській, і в Паланку — воно нічого не розрізняє.
-  assert.match(hookWeakness('Ці фортеці пережили більше, ніж здається.', CASTLES), /конкретики/);
-});
-
-test('промт хука вимагає кількох об\'єктів і називає їх', () => {
-  const p = hookPrompt({ ...SET, items: CASTLES });
-  assert.match(p, /це ДОБІРКА, а не анонс одного об/);
-  assert.match(p, /Хотинська фортеця/);
-  assert.match(p, /Паланок/);
-});
-
-test('кліше відкидається навіть із конкретикою', () => {
-  assert.match(
-    hookWeakness('Дізнайся, як Паланок здолали не гармати, а Хотинська стоїть.', CASTLES),
-    /кліше/,
-  );
-  assert.match(hookWeakness('У цьому відео Паланок і Хотинська фортеця.', CASTLES), /кліше/);
-});
-
-test('порожній і задовгий вступ не проходять', () => {
-  assert.equal(hookWeakness('', CASTLES), 'порожній');
-  assert.equal(hookWeakness('Паланок Хотинська '.repeat(40), CASTLES), 'задовгий');
-});
-
-test('промт хука на повторі просить назвати більше ніж один об\'єкт', () => {
-  assert.doesNotMatch(hookPrompt(SET), /МИНУЛА СПРОБА/);
-  assert.match(hookPrompt(SET, { retry: true }), /МИНУЛА СПРОБА/);
-});
-
 test('промти прев\'ю вимагають ефектного світла й недомовленості', () => {
   for (const p of [previewPromptVideo(SET), previewPromptYouTube(SET)]) {
     assert.match(p, /золот/i);
@@ -199,27 +132,3 @@ test('промти прев\'ю вимагають ефектного світл
   }
 });
 
-test('запитання у вступі відкидається — на нього легко відповісти «ні»', () => {
-  assert.match(
-    hookWeakness('Чи знаєш ти, що Паланок і Хотинська фортеця пережили штурми?', CASTLES),
-    /запитання/,
-  );
-});
-
-test('порожня обіцянка замість другого факту не проходить', () => {
-  assert.match(
-    hookWeakness('Паланок і Хотинська фортеця вистояли. Далі ми покажемо ще більше.', CASTLES),
-    /кліше/,
-  );
-  assert.match(
-    hookWeakness('Паланок упав без пострілу, Хотинська — ні. Попереду ще більше.', CASTLES),
-    /кліше/,
-  );
-});
-
-test('промт хука вчить на прикладах, а не лише забороняє', () => {
-  const p = hookPrompt({ ...SET, items: CASTLES });
-  assert.match(p, /✅/);
-  assert.match(p, /❌/);
-  assert.match(p, /жодного знака питання/);
-});

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  factWordForm, introTitle, introLine, factLine, factTitle,
+  factWordForm, storyWordForm, introTitle, introLine, INTRO_VARIANTS, factLine, factTitle,
   introKey, factKey, bankPlan, driveName, clipPath,
 } from '../src/voice-bank.js';
 
@@ -20,11 +20,45 @@ test('11–14 беруть множину, попри одиницю на кін
   assert.equal(factWordForm(111), 'фактів');
 });
 
-test('вступ ставить питання й називає кількість', () => {
-  assert.equal(introLine(15), 'Чи знав ти таку Україну? 15 фактів, яких ти, можливо, не знав.');
-  assert.equal(introLine(3), 'Чи знав ти таку Україну? 3 факти, яких ти, можливо, не знав.');
+test('вступ називає кількість і не переказує зміст', () => {
+  assert.equal(introLine(15), 'Чи знав ти таку Україну? 15 історій, яких ти, можливо, не чув.');
+  assert.equal(introLine(3), 'Чи знав ти таку Україну? 3 історії, яких ти, можливо, не чув.');
   assert.equal(introTitle(15), '15 ФАКТІВ');
   assert.equal(introTitle(2), '2 ФАКТИ');
+});
+
+test('варіанти вступу різні, але кожен називає кількість', () => {
+  const seen = new Set();
+  INTRO_VARIANTS.forEach((_, i) => {
+    const line = introLine(5, i);
+    assert.match(line, /5 історій/, `варіант ${i} загубив кількість`);
+    // Ні запитань «чи знаєш ти, що…», ні обіцянок — це вже пробували.
+    assert.doesNotMatch(line, /ще більше|покажемо|здивує/);
+    assert.ok(line.length <= 70, `варіант ${i} задовгий: ${line.length}`);
+    seen.add(line);
+  });
+  assert.equal(seen.size, INTRO_VARIANTS.length, 'варіанти повторюються');
+});
+
+test('номер варіанта ходить по колу й не вилітає за межі', () => {
+  assert.equal(introLine(5, INTRO_VARIANTS.length), introLine(5, 0));
+  assert.equal(introLine(5, -1), introLine(5, INTRO_VARIANTS.length - 1));
+  assert.equal(introLine(5), introLine(5, 0));
+});
+
+test('форма слова «історія» узгоджується з числом', () => {
+  assert.equal(storyWordForm(1), 'історія');
+  assert.equal(storyWordForm(3), 'історії');
+  assert.equal(storyWordForm(5), 'історій');
+  assert.equal(storyWordForm(15), 'історій');
+  assert.equal(storyWordForm(12), 'історій');
+  assert.equal(storyWordForm(22), 'історії');
+});
+
+test('кожен варіант має власну репліку в банку', () => {
+  // Ключ несе хеш тексту, тож два різні варіанти не можуть узяти один mp3.
+  const keys = INTRO_VARIANTS.map((_, i) => introKey(5, introLine(5, i)));
+  assert.equal(new Set(keys).size, keys.length);
 });
 
 test('оголошення читається порядковим числівником', () => {
@@ -57,18 +91,27 @@ test('змінений текст репліки дає ІНШИЙ ключ', ()
   // Саме заради цього в ключі хвіст із хеша: інакше після виправлення тексту
   // збірка й далі підставляла б старий mp3, який лежить у теці.
   const withOldWording = bankPlan({ maxFacts: 2, minFacts: 2 })[0].key;
-  assert.equal(withOldWording, introKey(2));
+  assert.equal(withOldWording, introKey(2, introLine(2, 0)));
   assert.notEqual(introKey(2).slice('intro-2-'.length), introKey(3).slice('intro-3-'.length));
 });
 
-test('план банку покриває і вступи, і всі оголошення', () => {
-  const plan = bankPlan({ maxFacts: 5 });
+test('план банку покриває кожен варіант вступу на кожен розмір', () => {
+  const plan = bankPlan({ maxFacts: 5, minFacts: 4 });
   const keys = plan.map((p) => p.key);
-  assert.deepEqual(keys, [
-    introKey(2), introKey(3), introKey(4), introKey(5),
-    factKey(1), factKey(2), factKey(3), factKey(4), factKey(5),
-  ]);
-  assert.equal(plan.find((p) => p.key === factKey(3)).text, 'Факт третій.');
+  assert.equal(keys.length, 2 * INTRO_VARIANTS.length);   // розміри 4 і 5
+  for (const n of [4, 5]) {
+    for (let v = 0; v < INTRO_VARIANTS.length; v++) {
+      const text = introLine(n, v);
+      assert.ok(plan.some((r) => r.key === introKey(n, text) && r.text === text),
+        `немає варіанта ${v} на ${n}`);
+    }
+  }
   // Ключі не повторюються — інакше одна репліка перетирала б іншу.
   assert.equal(new Set(keys).size, keys.length);
+});
+
+test('оголошення фактів у план не йдуть, доки диктор між ними мовчить', () => {
+  assert.equal(bankPlan({ maxFacts: 5, minFacts: 5 }).some((p) => p.key.startsWith('fact-')), false);
+  const withFacts = bankPlan({ maxFacts: 5, minFacts: 5, facts: true });
+  assert.equal(withFacts.find((p) => p.key === factKey(3)).text, 'Факт третій.');
 });
