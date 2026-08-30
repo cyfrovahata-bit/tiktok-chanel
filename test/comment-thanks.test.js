@@ -227,3 +227,38 @@ test('двічі той самий коментар не лайкається', 
   });
   assert.equal(log.filter((l) => l.act === 'like').length, 1);
 });
+
+// --- Емодзі окремо -----------------------------------------------------------
+import { isEmojiOnly, EMOJI_THANKS } from '../src/comment-thanks.js';
+
+test('коментар без слів упізнається як сама реакція', () => {
+  for (const text of ['❤️🇺🇦🙏❤️🇺🇦', '👍', '🔥🔥🔥', '...']) {
+    assert.equal(isEmojiOnly(text), true, text);
+  }
+  for (const text of ['Дякую!', 'клас 👍', '']) {
+    assert.equal(isEmojiOnly(text), false, text);
+  }
+});
+
+test('на самі емодзі не дякуємо за «слова» й не кажемо «приємно чути»', () => {
+  // Нічого не чули — людина поставила реакцію.
+  for (const id of ['e1', 'e2', 'e3', 'e4', 'e5', 'e6']) {
+    const text = thanksReply({ id, text: '❤️🇺🇦' });
+    assert.doesNotMatch(text, /чути|слова|написати|читати/, text);
+  }
+});
+
+test('на емодзі дякуємо саме за реакцію або підтримку', () => {
+  const texts = ['e1', 'e2', 'e3'].map((id) => thanksReply({ id, text: '👍' }));
+  for (const text of texts) {
+    assert.ok(
+      EMOJI_THANKS.some((opener) => text.startsWith(opener)),
+      `несподіваний зачин: ${text}`,
+    );
+  }
+});
+
+test('на текстову подяку зачини лишаються попередні', () => {
+  const text = thanksReply({ id: 'w1', text: 'дуже цікаво' });
+  assert.ok(THANKS.some((opener) => text.startsWith(opener)), text);
+});

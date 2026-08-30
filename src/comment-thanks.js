@@ -117,6 +117,20 @@ export const THANKS = [
   'Дякуємо за підтримку',
 ];
 
+// Окремий набір для коментарів, у яких НЕМАЄ слів — самі емодзі. «Приємно
+// чути» на сердечка звучить безглуздо: нічого не чули, людина поставила
+// реакцію. Тому тут дякуємо саме за реакцію й за підтримку.
+export const EMOJI_THANKS = [
+  'Дякуємо за реакцію',
+  'Дякуємо за підтримку',
+  'Дякуємо, що відгукнулися',
+  'Дякуємо вам',
+  'Дуже приємно, дякуємо',
+  'Дякуємо, що ви з нами',
+  'Взаємно, дякуємо',
+  'Дякуємо за теплу реакцію',
+];
+
 export const INVITES = [
   'лишайтеся з нами, попереду ще багато цікавого',
   'попереду ще чимало несподіваного про Україну',
@@ -140,12 +154,19 @@ function pick(list, seed, offset = 0) {
 
 // recent — тексти, які вже стоять під цим самим дописом. Повторюватися під
 // одним постом не можна: саме це видає автовідповідь найдужче.
+// Коментар без жодного слова — сама реакція емодзі.
+export function isEmojiOnly(text) {
+  const raw = String(text || '');
+  return Boolean(raw.trim()) && bare(raw) === '';
+}
+
 export function thanksReply(comment, { recent = [] } = {}) {
   const seed = String(comment?.id || comment?.text || '');
+  const openers = isEmojiOnly(comment?.text) ? EMOJI_THANKS : THANKS;
   const used = new Set(recent.map((t) => String(t).toLowerCase().trim()));
-  for (let shift = 0; shift < THANKS.length; shift++) {
-    const text = `${pick(THANKS, seed, shift)} — ${pick(INVITES, seed, shift + 7)}!`;
+  for (let shift = 0; shift < openers.length; shift++) {
+    const text = `${pick(openers, seed, shift)} — ${pick(INVITES, seed, shift + 7)}!`;
     if (!used.has(text.toLowerCase())) return text;
   }
-  return `${pick(THANKS, seed)} — ${pick(INVITES, seed, 3)}!`;
+  return `${pick(openers, seed)} — ${pick(INVITES, seed, 3)}!`;
 }
