@@ -29,9 +29,9 @@ import {
 } from './long-plan.js';
 import {
   metaPrompt, parseMeta, youtubeDescription, facebookPost,
-  previewPromptVideo, previewPromptYouTube,
+  previewPromptVideo, previewPromptYouTube, unitePrompt, parseTail, tailWeakness,
 } from './long-copy.js';
-import { INTRO_VARIANTS, introLine } from './voice-bank.js';
+import { INTRO_OPENERS, introLine } from './voice-bank.js';
 import { kyivToday, kyivMinutes } from './kyiv.js';
 
 // Тексти добірки — вступ, назва, опис — пише сильніша модель, ніж решта
@@ -184,33 +184,55 @@ export async function resetDay({ now = new Date(), previews = true } = {}) {
   return removed;
 }
 
-// Вступ диктора. Раніше його писала модель під кожну добірку — і щоразу
-// невлучно: то анонс одного об'єкта з п'яти, то запитання, на яке легко
-// відповісти «ні», то «далі ми покажемо ще більше». Власник попросив просту
-// загадкову фразу, і це правильно: назву добірки глядач бачить на заставці,
-// а вступ має лише пообіцяти кількість і настрій.
+// Вступ диктора. Початок фрази сталий і задає настрій, а хвіст — про ЦЮ
+// добірку: «Чи знав ти таку Україну? 5 історій, вибитих у камені.»
 //
-// Тепер це шаблон із голосового банку. Варіант чергується за датою, щоб
-// добірки не зливалися в одну, а «Новий вступ» просто бере наступний.
+// Просити в моделі всю фразу ми пробували чотири рази й щоразу отримували не
+// те: анонс одного об'єкта з п'яти, запитання, на яке легко відповісти «ні»,
+// порожню обіцянку «далі покажемо ще більше». Хвіст із двох-шести слів вона
+// пише надійно, а перевірити його можна кодом — що ми й робимо.
 export function introVariantFor(date, shift = 0) {
   const digits = String(date).replace(/\D/g, '');
   const base = Number(digits.slice(-4)) || 0;
-  return (base + Number(shift || 0)) % INTRO_VARIANTS.length;
+  return (base + Number(shift || 0)) % INTRO_OPENERS.length;
+}
+
+async function makeTail({ ask, title, theme, chosen, size }) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let tail = '';
+    try {
+      tail = parseTail(await ask(unitePrompt({ title, theme, items: chosen, size }), COPY));
+    } catch (error) {
+      console.error('[long-day] хвіст вступу не згенеровано:', error.message);
+      return '';
+    }
+    const weak = tailWeakness(tail, { items: chosen, title });
+    if (!weak) return tail;
+    console.error(`[long-day] хвіст «${tail}» не підійшов (${weak})`);
+  }
+  // Двічі не вийшло — лишається сталий хвіст. Він загальний, зате чесний.
+  return '';
 }
 
 // Перегенерувати САМ вступ, не чіпаючи набору, назви й прев'ю. Потрібно, коли
 // текст не сподобався: переробляти через повний скид означало б малювати
 // прев'ю заново.
-export async function rehookDay({ now = new Date() } = {}) {
+export async function rehookDay({ now = new Date(), ask = chatOnce } = {}) {
   const date = kyivToday(now);
   const plan = await readPlan(date);
   if (!plan || plan.cancelled) return plan;
 
-  // Наступний варіант по колу. Синтезувати його не треба: варіантів лічена
-  // кількість на кожен розмір добірки, тож усі вже лежать у голосовому банку.
-  const current = plan.introVariant ?? introVariantFor(date);
-  const introVariant = (current + 1) % INTRO_VARIANTS.length;
-  return writePlan({ ...plan, introVariant, hook: introLine(plan.size, introVariant) });
+  // Міняємо і початок фрази, і хвіст: якщо власник тисне кнопку, його не
+  // влаштував увесь вступ, а не якась одна його половина.
+  const all = await readAllItems();
+  const { items } = orderEpisodes(all, plan.ids);
+  const introVariant = ((plan.introVariant ?? introVariantFor(date)) + 1) % INTRO_OPENERS.length;
+  const introTail = await makeTail({
+    ask, title: plan.title, theme: plan.theme, chosen: items, size: plan.size,
+  });
+  return writePlan({
+    ...plan, introVariant, introTail, hook: introLine(plan.size, introVariant, introTail),
+  });
 }
 
 // Перезібрати вже змонтоване. Скид (resetDay) для цього завеликий: він
@@ -313,7 +335,8 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
   const theme = named.theme || set.theme || '';
 
   const introVariant = introVariantFor(date);
-  const hook = introLine(size, introVariant);
+  const introTail = await makeTail({ ask, title, theme, chosen, size });
+  const hook = introLine(size, introVariant, introTail);
 
   const plan = {
     date,
@@ -322,6 +345,7 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
     theme,
     hook,
     introVariant,
+    introTail,
     ids: set.ids,
     // Підпис-огризок («Як кормова культура перетворилася») диктор прочитає як
     // обірвану думку — краще сам номер факту.

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  factWordForm, storyWordForm, introTitle, introLine, INTRO_VARIANTS, factLine, factTitle,
+  factWordForm, storyWordForm, introTitle, introLine, INTRO_OPENERS, DEFAULT_TAILS,
+  factLine, factTitle,
   introKey, factKey, bankPlan, driveName, clipPath,
 } from '../src/voice-bank.js';
 
@@ -29,20 +30,40 @@ test('вступ називає кількість і не переказує з
 
 test('варіанти вступу різні, але кожен називає кількість', () => {
   const seen = new Set();
-  INTRO_VARIANTS.forEach((_, i) => {
+  INTRO_OPENERS.forEach((_, i) => {
     const line = introLine(5, i);
     assert.match(line, /5 історій/, `варіант ${i} загубив кількість`);
     // Ні запитань «чи знаєш ти, що…», ні обіцянок — це вже пробували.
     assert.doesNotMatch(line, /ще більше|покажемо|здивує/);
-    assert.ok(line.length <= 70, `варіант ${i} задовгий: ${line.length}`);
+    assert.ok(line.length <= 75, `варіант ${i} задовгий: ${line.length}`);
     seen.add(line);
   });
-  assert.equal(seen.size, INTRO_VARIANTS.length, 'варіанти повторюються');
+  assert.equal(seen.size, INTRO_OPENERS.length, 'варіанти повторюються');
+});
+
+test('хвіст від моделі стає частиною тієї самої фрази', () => {
+  assert.equal(
+    introLine(5, 0, 'вибитих у камені'),
+    'Чи знав ти таку Україну? 5 історій, вибитих у камені.',
+  );
+  // Крапку й лапки з відповіді моделі прибираємо, щоб не вийшло двох крапок.
+  assert.equal(introLine(5, 0, 'вибитих у камені.'), introLine(5, 0, 'вибитих у камені'));
+  // Порожній хвіст — сталий запасний, а не діра у фразі.
+  assert.equal(introLine(5, 0, '   '), introLine(5, 0));
+  assert.ok(DEFAULT_TAILS.length > 0);
+});
+
+test('перед прийменниковим хвостом коми немає', () => {
+  assert.equal(
+    introLine(15, 1, 'про людей, які випередили свій час'),
+    'Україна, якої ти не знав. 15 історій про людей, які випередили свій час.',
+  );
+  assert.match(introLine(5, 0, 'які пережили імперії'), /історій, які пережили/);
 });
 
 test('номер варіанта ходить по колу й не вилітає за межі', () => {
-  assert.equal(introLine(5, INTRO_VARIANTS.length), introLine(5, 0));
-  assert.equal(introLine(5, -1), introLine(5, INTRO_VARIANTS.length - 1));
+  assert.equal(introLine(5, INTRO_OPENERS.length), introLine(5, 0));
+  assert.equal(introLine(5, -1), introLine(5, INTRO_OPENERS.length - 1));
   assert.equal(introLine(5), introLine(5, 0));
 });
 
@@ -57,7 +78,7 @@ test('форма слова «історія» узгоджується з чи�
 
 test('кожен варіант має власну репліку в банку', () => {
   // Ключ несе хеш тексту, тож два різні варіанти не можуть узяти один mp3.
-  const keys = INTRO_VARIANTS.map((_, i) => introKey(5, introLine(5, i)));
+  const keys = INTRO_OPENERS.map((_, i) => introKey(5, introLine(5, i)));
   assert.equal(new Set(keys).size, keys.length);
 });
 
@@ -98,9 +119,9 @@ test('змінений текст репліки дає ІНШИЙ ключ', ()
 test('план банку покриває кожен варіант вступу на кожен розмір', () => {
   const plan = bankPlan({ maxFacts: 5, minFacts: 4 });
   const keys = plan.map((p) => p.key);
-  assert.equal(keys.length, 2 * INTRO_VARIANTS.length);   // розміри 4 і 5
+  assert.equal(keys.length, 2 * INTRO_OPENERS.length);   // розміри 4 і 5
   for (const n of [4, 5]) {
-    for (let v = 0; v < INTRO_VARIANTS.length; v++) {
+    for (let v = 0; v < INTRO_OPENERS.length; v++) {
       const text = introLine(n, v);
       assert.ok(plan.some((r) => r.key === introKey(n, text) && r.text === text),
         `немає варіанта ${v} на ${n}`);

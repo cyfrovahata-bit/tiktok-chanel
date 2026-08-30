@@ -80,28 +80,42 @@ export function storyWordForm(count) {
 // Що диктор каже на вступі. Число лишаємо цифрами: перед синтезом tts.js сам
 // розгортає його в слово з правильним наголосом.
 //
-// Спроба писати вступ моделлю під кожну добірку провалилася: замість гачка
-// виходив то анонс одного об'єкта з п'яти, то запитання, на яке легко
-// відповісти «ні», то порожня обіцянка «далі покажемо ще більше». Власник
-// попросив просту загадкову фразу — і має рацію: заставка й так показує назву
-// добірки, вступ мусить лише пообіцяти кількість і настрій.
-//
-// Варіанти чергуються, щоб добірки не зливалися в одну. Кожен синтезується
-// РАЗ на кількість фактів і далі береться з банку — жодних витрат на ElevenLabs
-// і жодної затримки в монтажі.
-export const INTRO_VARIANTS = [
-  (n, w) => `Чи знав ти таку Україну? ${n} ${w}, яких ти, можливо, не чув.`,
-  (n, w) => `Україна, якої ти не знав. ${n} ${w} в одному відео.`,
-  (n, w) => `${n} ${w} про Україну, яких немає в підручниках.`,
-  (n, w) => `Україна зблизька. ${n} ${w}, у які важко повірити.`,
-  (n, w) => `${n} ${w} про Україну — і кожну легко проґавити.`,
+// Фраза складається з двох частин. Початок — сталий і задає настрій; хвіст
+// пише модель під конкретний набір, бо саме він робить вступ про ЦЮ добірку,
+// а не про будь-яку. Спроба віддати моделі всю фразу провалилася чотири рази
+// поспіль (то анонс одного об'єкта, то запитання, то порожня обіцянка), а
+// коли їй лишається два-шість слів на «5 історій, …» — схибити майже нема де.
+export const INTRO_OPENERS = [
+  'Чи знав ти таку Україну?',
+  'Україна, якої ти не знав.',
+  'Україна зблизька.',
 ];
 
-export function introLine(count, variant = 0) {
+// Хвости на випадок, коли модель не дала свого або дала невдалий. Свідомо
+// загальні: під будь-який набір фактів вони підходять і збрехати ними не можна.
+export const DEFAULT_TAILS = [
+  'яких ти, можливо, не чув',
+  'яких немає в підручниках',
+  'у які важко повірити',
+];
+
+function wrap(value, length) {
+  const n = Math.trunc(Number(value) || 0);
+  return ((n % length) + length) % length;
+}
+
+// Кома перед хвостом потрібна підрядному («яких немає в підручниках»), але не
+// прийменниковому звороту: «5 історій, про людей…» — це вже помилка, і диктор
+// зробить на ній паузу.
+const TAIL_NO_COMMA = /^(про|з|із|зі|від|у|в|на|за|під|між|крізь)\s/i;
+
+export function introLine(count, variant = 0, tail = '') {
   const n = Math.trunc(Number(count) || 0);
-  const at = ((Math.trunc(Number(variant) || 0) % INTRO_VARIANTS.length) + INTRO_VARIANTS.length)
-    % INTRO_VARIANTS.length;
-  return INTRO_VARIANTS[at](n, storyWordForm(n));
+  const opener = INTRO_OPENERS[wrap(variant, INTRO_OPENERS.length)];
+  const end = String(tail || '').trim().replace(/[.!?…]+$/, '')
+    || DEFAULT_TAILS[wrap(variant, DEFAULT_TAILS.length)];
+  const glue = TAIL_NO_COMMA.test(end) ? ' ' : ', ';
+  return `${opener} ${n} ${storyWordForm(n)}${glue}${end}.`;
 }
 
 // Оголошення перед сюжетом. Без назви — «Факт третій»; із назвою —
@@ -147,7 +161,7 @@ export function factKey(number, label = '') {
 export function bankPlan({ maxFacts = 20, minFacts = 2, facts = false } = {}) {
   const plan = [];
   for (let n = minFacts; n <= maxFacts; n++) {
-    INTRO_VARIANTS.forEach((_, variant) => {
+    INTRO_OPENERS.forEach((_, variant) => {
       const text = introLine(n, variant);
       plan.push({ key: introKey(n, text), text });
     });
