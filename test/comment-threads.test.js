@@ -302,3 +302,58 @@ test('глибокий обхід не ходить нескінченно', asy
   assert.ok(calls <= 4, `забагато звернень: ${calls}`);
   delete process.env.META_COMMENTS_DEEP_MAX;
 });
+
+// --- Темп у бою --------------------------------------------------------------
+import { checkPlatform } from '../src/comment-flow.js';
+
+function busyAdapter(n, log, { failWith = null } = {}) {
+  const comments = Array.from({ length: n }, (_, i) => ({
+    id: `c${i}`, text: 'Дякую!', author: 'Іван', postId: 'p1',
+  }));
+  return {
+    key: 'fb',
+    label: 'Facebook',
+    icon: '💬',
+    enabled: () => true,
+    fetch: async () => comments,
+    reply: async (id) => { log.push(id); if (failWith) throw new Error(failWith); },
+    like: async (id) => { log.push(`like:${id}`); if (failWith) throw new Error(failWith); },
+    link: () => '',
+  };
+}
+
+test('скарга Facebook на темп зупиняє прохід і мовчить наступний', async () => {
+  const log = [];
+  const state = { seen: {}, drafts: {} };
+  const first = await checkPlatform(busyAdapter(5, log, { failWith: '(#32) Page request limit reached' }), {
+    state, postIndex: [], notifyFn: async () => ({ message_id: 1 }), chatId: 1,
+  });
+  assert.ok(first.throttled, 'прохід має позначити зупинку');
+  assert.ok(state.budget?.pausedUntil > Date.now(), 'пауза записана у стан');
+
+  const before = log.length;
+  const second = await checkPlatform(busyAdapter(5, log, {}), {
+    state, postIndex: [], notifyFn: async () => ({ message_id: 1 }), chatId: 1,
+  });
+  assert.equal(second.paused, true);
+  assert.equal(log.length, before, 'у паузу до Facebook не звертаємось узагалі');
+});
+
+test('вичерпана годинна норма спиняє дії, а не сипле помилками', async () => {
+  const log = [];
+  // Норму вибрано наперед — жодної дії бути не має.
+  const state = {
+    seen: {},
+    drafts: {},
+    budget: {
+      hour: new Date().toISOString().slice(0, 13),
+      day: new Date().toISOString().slice(0, 10),
+      inHour: 10_000,
+      inDay: 10_000,
+    },
+  };
+  await checkPlatform(busyAdapter(3, log), {
+    state, postIndex: [], notifyFn: async () => ({ message_id: 1 }), chatId: 1,
+  });
+  assert.equal(log.length, 0, 'жодного звернення до Facebook понад норму');
+});

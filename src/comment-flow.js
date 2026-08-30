@@ -12,6 +12,7 @@ import { listVideoFiles, setVideoAppProperties } from './videos.js';
 import { readAllItems } from './sheets.js';
 import { parseSlideLines } from './queue-prompt.js';
 import { isShortAppreciation, thanksReply } from './comment-thanks.js';
+import { canAct, spend, pause, isPaused, isRateLimit, nextPauseMs } from './comment-budget.js';
 
 const FILE_NAME = 'comments.json';
 // Скільки рішень тримаємо в пам'яті. Було 400 — вистачало, поки бот дивився
@@ -440,8 +441,17 @@ function card(adapter, comment, draft, { auto = false, post = null } = {}) {
 
 // --- Один прохід -------------------------------------------------------------
 
+const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
 export async function checkPlatform(adapter, options = {}) {
   const state = options.state || await readState();
+
+  // Facebook уже просив зупинитися — мовчимо, доки не мине пауза. Пробувати
+  // «ще разочок» саме тут і перетворює тимчасове обмеження на постійне.
+  if (isPaused(state.budget)) {
+    return { platform: adapter.key, checked: 0, fresh: 0, asked: 0, flagged: 0, paused: true };
+  }
+
   const comments = await adapter.fetch(options);
   const fresh = comments.filter((c) => !state.seen[`${adapter.key}:${c.id}`]);
   const result = { platform: adapter.key, checked: comments.length, fresh: fresh.length, asked: 0, flagged: 0 };
@@ -475,18 +485,40 @@ export async function checkPlatform(adapter, options = {}) {
   // прочитали, має кожен.
   state.liked = state.liked || {};
   let likes = 0;
+  // Кожна дія у Facebook — лайк чи відповідь — проходить через один вентиль:
+  // стеля на годину й добу, пауза між діями, зупинка на скаргу про темп.
+  let acted = 0;
+  const act = async (what, run) => {
+    if (!canAct(state.budget)) { result.throttled = true; return false; }
+    // Паузу тримаємо ПЕРЕД дією й лише між ними: двадцять дій за десять
+    // секунд — упізнаваний слід бота, навіть коли їх мало.
+    if (acted > 0) await sleep(nextPauseMs());
+    try {
+      await run();
+      state.budget = spend(state.budget);
+      acted += 1;
+      return true;
+    } catch (error) {
+      if (isRateLimit(error.message)) {
+        state.budget = pause(state.budget);
+        result.throttled = true;
+        console.error(`[comments:${adapter.key}] Facebook попросив зупинитися — пауза`);
+        return false;
+      }
+      console.error(`[comments:${adapter.key}] ${what}:`, error.message);
+      return false;
+    }
+  };
+
   const like = async (comment) => {
     if (!AUTO_LIKE || !adapter.like || likes >= LIKE_PER_RUN) return;
     const key = `${adapter.key}:${comment.id}`;
     if (state.liked[key]) return;
-    try {
-      await adapter.like(comment.id, options);
-      state.liked[key] = 1;
-      likes += 1;
-      result.liked = (result.liked || 0) + 1;
-    } catch (error) {
-      console.error(`[comments:${adapter.key}] лайк:`, error.message);
-    }
+    const ok = await act('лайк', () => adapter.like(comment.id, options));
+    if (!ok) return;
+    state.liked[key] = 1;
+    likes += 1;
+    result.liked = (result.liked || 0) + 1;
   };
 
   const auto = [];
@@ -504,19 +536,16 @@ export async function checkPlatform(adapter, options = {}) {
   }
 
   for (const comment of auto.slice(0, AUTO_PER_RUN)) {
+    if (!canAct(state.budget)) { result.throttled = true; break; }
     const key = `${adapter.key}:${comment.id}`;
     const under = String(comment.postId || comment.videoId || comment.mediaId || '');
     const recent = state.thanks[under] || [];
     const text = thanksReply(comment, { recent });
-    try {
-      await like(comment);
-      await adapter.reply(comment.replyTo || comment.id, text, options);
-    } catch (error) {
-      // Не вдалося — лишаємо коментар нерозібраним: наступний прохід або
-      // відповість, або віддасть його власникові.
-      console.error(`[comments:${adapter.key}] автовідповідь:`, error.message);
-      continue;
-    }
+    await like(comment);
+    // Не вдалося — лишаємо коментар нерозібраним: наступний прохід або
+    // відповість, або віддасть його власникові.
+    const sent = await act('автовідповідь', () => adapter.reply(comment.replyTo || comment.id, text, options));
+    if (!sent) continue;
     state.seen[key] = 'auto';
     // Пам'ятаємо, що вже стоїть під цим дописом: два однакові рядки під одним
     // постом видають автовідповідь найдужче.
