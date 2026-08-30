@@ -13,7 +13,12 @@
 import { Readable } from 'node:stream';
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { stat } from 'node:fs/promises';
 import { drive } from './drive.js';
+
+const run = promisify(execFile);
 
 // Два різні файли, і плутати їх не можна:
 //   video   — вертикаль 9:16, стає першим кадром самої добірки (він же те, що
@@ -42,7 +47,7 @@ function folderId() {
 async function findFile(kind) {
   const res = await drive().files.list({
     q: `'${folderId()}' in parents and name = '${nameFor(kind)}' and trashed = false`,
-    fields: 'files(id, name, size, modifiedTime)',
+    fields: 'files(id, name, size, mimeType, modifiedTime)',
     pageSize: 1,
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
@@ -58,6 +63,7 @@ export async function previewInfo(kind = 'video') {
     kind,
     exists: true,
     bytes: Number(file.size) || 0,
+    mimeType: file.mimeType || null,
     updatedAt: file.modifiedTime || null,
   };
 }
@@ -99,6 +105,31 @@ export async function fetchPreview(destPath, kind = 'video') {
   );
   await pipeline(res.data, createWriteStream(destPath));
   return destPath;
+}
+
+// YouTube приймає обкладинку не будь-яку: рівно JPEG або PNG і не більше двох
+// мегабайтів. Перша ж заливка добірки на це й наштрикнулася — «The provided
+// image content is invalid»: ChatGPT віддає PNG, мінідодаток кладе його на
+// Drive як є (ім'я .jpg нічого не змінює), а заливка каже, що це JPEG.
+//
+// Тому перед заливкою картинку завжди переганяємо: 1280×720, JPEG, і тиснемо,
+// доки не влізе в ліміт. Це дешевше за будь-яку перевірку типів — на виході
+// гарантовано те, що YouTube візьме.
+export const THUMB_MAX_BYTES = 2 * 1024 * 1024;
+const THUMB_QUALITY = [3, 5, 7, 10, 15];
+
+export async function normalizeThumbnail(srcPath, destPath) {
+  let last = null;
+  for (const q of THUMB_QUALITY) {
+    await run('ffmpeg', ['-y', '-v', 'error', '-i', srcPath,
+      '-vf', 'scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720',
+      '-q:v', String(q), '-f', 'mjpeg', destPath]);
+    last = (await stat(destPath)).size;
+    if (last <= THUMB_MAX_BYTES) return { path: destPath, bytes: last, quality: q };
+  }
+  // Навіть на найгіршій якості не влізло — віддаємо як є: хай краще заливка
+  // скаже правду про відмову, ніж ми мовчки не поставимо обкладинку.
+  return { path: destPath, bytes: last, quality: THUMB_QUALITY.at(-1) };
 }
 
 export async function removePreview(kind = 'video') {

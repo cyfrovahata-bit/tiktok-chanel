@@ -20,9 +20,9 @@ import {
 } from './videos.js';
 import { chatOnce } from './openai.js';
 import { sendMessage, ownerChatId } from './telegram.js';
-import { fetchPreview, removePreview } from './preview.js';
+import { fetchPreview, removePreview, normalizeThumbnail } from './preview.js';
 import { compileLong, orderEpisodes } from './compile-long.js';
-import { publishYouTubeLong } from './youtube.js';
+import { publishYouTubeLong, setYouTubeThumbnail } from './youtube.js';
 import {
   candidates, plannedSize, buildThemePrompt, parseThemeSet, buildTitlePrompt,
   parseTitleAnswer, neutralTitle, cleanLabel, DEFAULTS,
@@ -468,6 +468,33 @@ async function download(fileId) {
   return Buffer.concat(chunks);
 }
 
+// Обкладинка для YouTube. Її ЗАВЖДИ переганяємо в JPEG 1280×720 під два
+// мегабайти: ChatGPT віддає PNG, на Drive він лягає з іменем .jpg, і саме на
+// цьому перша заливка добірки дістала «The provided image content is invalid».
+async function readThumbnail(date) {
+  try {
+    const at = await fetchPreview(path.join(os.tmpdir(), `long-thumb-${date}.jpg`), 'youtube');
+    if (!at) return null;
+    const ready = await normalizeThumbnail(at, path.join(os.tmpdir(), `long-thumb-${date}-ready.jpg`));
+    return readFile(ready.path);
+  } catch (error) {
+    console.error('[long-day] обкладинка:', error.message);
+    return null;
+  }
+}
+
+// Доставити обкладинку на вже залите відео. Потрібно, коли заливка пройшла, а
+// картинка — ні: перезаливати відео заради неї безглуздо.
+export async function retryThumbnail({ now = new Date(), setThumb = setYouTubeThumbnail } = {}) {
+  const date = kyivToday(now);
+  const plan = await readPlan(date);
+  if (!plan?.youtubeId) throw new Error('Добірка ще не на YouTube');
+  const buffer = await readThumbnail(date);
+  if (!buffer) throw new Error('Обкладинки 16:9 немає — завантаж її в мінідодатку');
+  await setThumb(plan.youtubeId, buffer);
+  return writePlan({ ...plan, thumbnail: 'поставлено' });
+}
+
 export async function publishDay({ now = new Date(), notifyFn = notify, upload = publishYouTubeLong } = {}) {
   const date = kyivToday(now);
   const plan = await readPlan(date);
@@ -476,13 +503,7 @@ export async function publishDay({ now = new Date(), notifyFn = notify, upload =
   const videoBuffer = await download(plan.videoFileId);
   // Обкладинки може не бути — заливаємо без неї: відео о 18:00 важливіше за
   // картинку, а поставити її потім можна руками.
-  let thumbnailBuffer = null;
-  try {
-    const at = await fetchPreview(path.join(os.tmpdir(), `long-thumb-${date}.jpg`), 'youtube');
-    if (at) thumbnailBuffer = await readFile(at);
-  } catch (error) {
-    console.error('[long-day] обкладинка:', error.message);
-  }
+  const thumbnailBuffer = await readThumbnail(date);
 
   const out = await upload({
     videoBuffer,

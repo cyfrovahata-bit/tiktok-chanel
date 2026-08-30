@@ -145,10 +145,7 @@ export async function publishYouTubeLong(
   let thumbnail = 'не задано';
   if (thumbnailBuffer?.length) {
     try {
-      await client.thumbnails.set({
-        videoId: id,
-        media: { mimeType: 'image/jpeg', body: Readable.from(thumbnailBuffer) },
-      });
+      await setYouTubeThumbnail(id, thumbnailBuffer, { client });
       thumbnail = 'поставлено';
     } catch (error) {
       thumbnail = `не вдалося: ${String(error.message).split('\n')[0]}`;
@@ -164,6 +161,19 @@ export async function publishYouTubeLong(
     forcedPrivate: requestedPrivacy !== 'private' && privacyStatus === 'private',
     thumbnail,
   };
+}
+
+// Обкладинка окремим викликом — і окремою функцією, бо ставити її доводиться
+// й на вже залите відео: перша ж добірка пішла без обкладинки (PNG замість
+// JPEG), і перезаливати ціле відео заради картинки було б безглуздо.
+export async function setYouTubeThumbnail(videoId, buffer, options = {}) {
+  if (!buffer?.length) throw new Error('YouTube: порожня обкладинка');
+  const client = options.client || youtube();
+  await client.thumbnails.set({
+    videoId: String(videoId),
+    media: { mimeType: 'image/jpeg', body: Readable.from(buffer) },
+  });
+  return true;
 }
 
 // Назва довгого відео: та сама межа в сто символів, але без #Shorts.

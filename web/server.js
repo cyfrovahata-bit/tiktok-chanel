@@ -25,7 +25,7 @@ import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { compileLong, orderEpisodes } from '../src/compile-long.js';
 import { savePreview, previewState, removePreview, fetchPreview } from '../src/preview.js';
-import { readPlan, buildDay, planDay, resetDay, rehookDay, rebuildDay } from '../src/long-day.js';
+import { readPlan, buildDay, planDay, resetDay, rehookDay, rebuildDay, retryThumbnail } from '../src/long-day.js';
 import { plannedSize } from '../src/long-plan.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
@@ -555,6 +555,20 @@ const server = http.createServer(async (req, res) => {
         const plan = await rehookDay();
         if (!plan) return json(res, 400, { error: 'Добірку на сьогодні ще не підібрано' });
         return json(res, 200, { ok: true, hook: plan.hook });
+      } catch (error) {
+        return json(res, 400, { error: error.message });
+      }
+    }
+
+    // «Поставити обкладинку» — коли відео вже на YouTube, а картинка не стала.
+    if (req.method === 'POST' && pathname === '/api/long/thumbnail') {
+      const body = JSON.parse(await readBody(req));
+      const check = verifyInitData(body.initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Може лише власник каналу' });
+      try {
+        const plan = await retryThumbnail();
+        return json(res, 200, { ok: true, thumbnail: plan.thumbnail });
       } catch (error) {
         return json(res, 400, { error: error.message });
       }

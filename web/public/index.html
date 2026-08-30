@@ -1063,6 +1063,28 @@
         actions.appendChild(run);
       }
 
+      // Обкладинка ставиться окремим викликом до YouTube і може не стати, коли
+      // відео вже залито (перший раз — через PNG замість JPEG). Перезаливати
+      // відео заради картинки безглуздо, тож кнопка доставляє саме її.
+      if (plan.youtubeId && plan.thumbnail !== 'поставлено') {
+        const thumb = el('button', 'btn secondary', '🖼 Поставити обкладинку');
+        thumb.addEventListener('click', async () => {
+          if (!initData) { toast('Відкрий через Telegram'); return; }
+          thumb.disabled = true; thumb.textContent = 'Ставлю…';
+          try {
+            const r = await fetch('/api/long/thumbnail', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ initData }),
+            }).then((x) => x.json());
+            toast(r.error || 'Обкладинка на місці');
+          } catch (e) {
+            toast(e.message);
+          }
+          cutTodayLoad();
+        });
+        actions.appendChild(thumb);
+      }
+
       // Вступ = сталий початок + хвіст, написаний під цю добірку. Кнопка міняє
       // і те, і те: якщо власник її тисне, його не влаштував увесь вступ.
       // Найчастіше це потрібно вже ПІСЛЯ монтажу, тож і показуємо її там теж:
