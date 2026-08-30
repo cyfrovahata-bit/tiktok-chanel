@@ -225,3 +225,77 @@ test('епізод без MP4 у папці до відбору не потра�
   const out = candidates(withVideo, { today: TODAY });
   assert.deepEqual(out.map((r) => r.id), ['Є-ВІДЕО']);
 });
+
+// --- Чесна назва -------------------------------------------------------------
+import {
+  buildTitlePrompt, parseTitleAnswer, neutralTitle, NEUTRAL_TITLES, cleanLabel,
+} from '../src/long-plan.js';
+
+const FIVE = [
+  { id: 'A1', title: 'Хотинська фортеця: замок, який ти бачив у десятках фільмів' },
+  { id: 'A2', title: 'Паланок: фортеця, яку здолали не гармати' },
+  { id: 'A3', title: 'Замок тамплієрів на Закарпатті, якого не було' },
+  { id: 'A4', title: 'Софія Київська: що ховається під бароковими стінами' },
+  { id: 'A5', title: 'Як кормова культура перетворилася на інвазію' },
+];
+const IDS = FIVE.map((it) => it.id);
+
+test('промт назви показує весь набір і вимагає перелічити накриті ID', () => {
+  const p = buildTitlePrompt(FIVE);
+  for (const it of FIVE) assert.match(p, new RegExp(it.id));
+  assert.match(p, /covers/);
+  assert.match(p, /5 сюжетів/);
+});
+
+test('назва, що накрила всі сюжети, приймається', () => {
+  const out = parseTitleAnswer(
+    JSON.stringify({ title: 'Кам\'яна Україна', theme: 'спадщина', covers: IDS }),
+    IDS,
+  );
+  assert.equal(out.honest, true);
+  assert.equal(out.title, 'Кам\'яна Україна');
+  assert.deepEqual(out.missed, []);
+});
+
+test('«5 замків» на трьох замках не проходить — накрито не всіх', () => {
+  const out = parseTitleAnswer(
+    JSON.stringify({ title: '5 замків України', covers: ['A1', 'A2', 'A3'] }),
+    IDS,
+  );
+  assert.equal(out.honest, false);
+  assert.deepEqual(out.missed, ['A4', 'A5']);
+});
+
+test('вигаданий ID у covers не рахується за накритий', () => {
+  const out = parseTitleAnswer(
+    JSON.stringify({ title: 'Щось', covers: [...IDS.slice(0, 4), 'ВИГАДАНИЙ'] }),
+    IDS,
+  );
+  assert.equal(out.honest, false);
+  assert.deepEqual(out.missed, ['A5']);
+});
+
+test('порожня чи крива відповідь не валить розбір і не вважається чесною', () => {
+  for (const bad of ['', 'не знаю', '{зламаний']) {
+    const out = parseTitleAnswer(bad, IDS);
+    assert.equal(out.honest, false);
+    assert.equal(out.title, '');
+  }
+});
+
+test('запасна назва не повторює вчорашню', () => {
+  const first = NEUTRAL_TITLES[0];
+  assert.equal(neutralTitle(5, []), first);
+  assert.notEqual(neutralTitle(5, [first]), first);
+  // Усі варіанти вичерпані — назва все одно є.
+  assert.match(neutralTitle(5, NEUTRAL_TITLES), /5 фактів/);
+});
+
+test('підпис-огризок диктор не отримує', () => {
+  assert.equal(cleanLabel('Як кормова культура перетворилася'), '');
+  assert.equal(cleanLabel('Чому міст назвали турецьким'), '');
+  assert.equal(cleanLabel('Хотинська фортеця'), 'Хотинська фортеця');
+  assert.equal(cleanLabel('«Паланок».'), 'Паланок');
+  assert.equal(cleanLabel('Замок тамплієрів на Закарпатті'), 'Замок тамплієрів на Закарпатті');
+  assert.equal(cleanLabel(''), '');
+});

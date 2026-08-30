@@ -14,15 +14,21 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { drive } from './drive.js';
 import { readAllItems } from './sheets.js';
-import { listVideoFiles, videoProps, uploadVideo, markCompiled, streamVideo, videoName } from './videos.js';
+import {
+  listVideoFiles, videoProps, uploadVideo, markCompiled, streamVideo, videoName,
+  setVideoAppProperties,
+} from './videos.js';
 import { chatOnce } from './openai.js';
 import { sendMessage, ownerChatId } from './telegram.js';
-import { fetchPreview } from './preview.js';
+import { fetchPreview, removePreview } from './preview.js';
 import { compileLong, orderEpisodes } from './compile-long.js';
 import { publishYouTubeLong } from './youtube.js';
-import { candidates, plannedSize, buildThemePrompt, parseThemeSet, DEFAULTS } from './long-plan.js';
 import {
-  metaPrompt, parseMeta, youtubeDescription, facebookPost, hookPrompt,
+  candidates, plannedSize, buildThemePrompt, parseThemeSet, buildTitlePrompt,
+  parseTitleAnswer, neutralTitle, cleanLabel, DEFAULTS,
+} from './long-plan.js';
+import {
+  metaPrompt, parseMeta, youtubeDescription, facebookPost, hookPrompt, hookWeakness,
   previewPromptVideo, previewPromptYouTube,
 } from './long-copy.js';
 import { kyivToday, kyivMinutes } from './kyiv.js';
@@ -118,6 +124,58 @@ async function notify(text) {
   }
 }
 
+// --- Скид дня ----------------------------------------------------------------
+// «Переробити з нуля»: коли добірка зібралася не такою, як треба (тема
+// збрехала, вступ порожній, прев'ю не про те), латати її по частинах немає
+// сенсу — усе одно перемонтовувати. Тому скидаємо день до стану «нічого не
+// було»: прибираємо змонтований файл, знімаємо з епізодів мітку «вже в
+// добірці» (інакше карантин на три тижні викинув би їх із нового підбору) і
+// видаляємо прев'ю, бо на ньому стоїть стара назва.
+export async function resetDay({ now = new Date(), previews = true } = {}) {
+  const date = kyivToday(now);
+  const plan = await readPlan(date).catch(() => null);
+  const removed = { video: false, marks: [], previews: [], plan: false };
+  if (!plan) return removed;
+
+  if (plan.videoFileId) {
+    try {
+      await drive().files.delete({ fileId: plan.videoFileId, supportsAllDrives: true });
+      removed.video = true;
+    } catch (error) {
+      console.error('[long-day] змонтоване відео не видалив:', error.message);
+    }
+  }
+
+  const files = await listVideoFiles().catch(() => new Map());
+  for (const id of plan.ids || []) {
+    const file = files.get(videoName(id));
+    if (!file?.appProperties?.compiledAt) continue;
+    try {
+      await setVideoAppProperties(file.id, { compiledAt: null });
+      removed.marks.push(id);
+    } catch (error) {
+      console.error(`[long-day] мітку з ${id} не зняв:`, error.message);
+    }
+  }
+
+  if (previews) {
+    for (const kind of ['video', 'youtube']) {
+      try {
+        if (await removePreview(kind)) removed.previews.push(kind);
+      } catch (error) {
+        console.error(`[long-day] прев'ю ${kind} не прибрав:`, error.message);
+      }
+    }
+  }
+
+  const file = await findPlanFile(date);
+  if (file) {
+    await drive().files.delete({ fileId: file.id, supportsAllDrives: true });
+    removed.plan = true;
+  }
+  return removed;
+}
+
 // --- Крок 1: підбір ----------------------------------------------------------
 
 export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = notify } = {}) {
@@ -145,8 +203,9 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
     return writePlan({ date, size, cancelled: true, reason: 'мало придатних сюжетів' });
   }
 
+  const avoidTitles = await recentTitles(date);
   const loose = size >= 15;
-  const prompt = buildThemePrompt(pool, size, { loose, avoidTitles: await recentTitles(date) });
+  const prompt = buildThemePrompt(pool, size, { loose, avoidTitles });
   let answer = '';
   try {
     answer = await ask(prompt);
@@ -156,29 +215,75 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
   const set = parseThemeSet(answer, pool, size);
   const chosen = pool.filter((it) => set.ids.includes(String(it.id)));
 
+  // Назву перепитуємо ОКРЕМО і вже по фактичному набору. Той самий запит, що
+  // обирає сюжети, назву дає невідповідну: не набравши п'яти замків, модель
+  // добирає до них собор і бур'ян, а назву «5 замків України» лишає. Тут вона
+  // мусить перелічити ID, які назва накриває, — і назва, що накрила не всіх,
+  // не проходить.
+  let named = { title: '', theme: set.theme, honest: false, missed: [] };
+  for (const attempt of [1, 2]) {
+    let extra = '';
+    if (attempt === 2) {
+      // Друга спроба з конкретикою: називаємо ті сюжети, повз які назва
+      // промахнулась. Без цього модель здебільшого повторює ту саму.
+      const missed = chosen.filter((it) => named.missed.includes(String(it.id)));
+      extra = `\n\nНАЗВА «${named.title}» НЕ ПІДІЙШЛА: вона не про ці сюжети:\n`
+        + `${missed.map((it) => `• ${it.title || it.theme}`).join('\n')}\n`
+        + 'Дай ширшу назву, під яку підпадають і вони теж.';
+    }
+    try {
+      named = parseTitleAnswer(
+        await ask(buildTitlePrompt(chosen, { avoidTitles }) + extra),
+        set.ids,
+      );
+    } catch (error) {
+      console.error('[long-day] назву не перевірено:', error.message);
+      break;
+    }
+    if (named.honest) break;
+    console.error(
+      `[long-day] назва «${named.title}» не накриває ${named.missed.length} сюжетів`,
+    );
+  }
+  const title = named.honest ? named.title : neutralTitle(size, avoidTitles);
+  const theme = named.theme || set.theme || '';
+
   // Хук диктора: окремий запит, бо він вимагає іншого тону, ніж підбір теми.
+  // Модель регулярно зривається в абстракцію («історія перетворює руїни на
+  // легенди») — такий вступ не тримає нікого, тож перевіряємо й перепитуємо.
   let hook = '';
-  try {
-    hook = String(await ask(hookPrompt({ title: set.title, theme: set.theme, items: chosen }))).trim();
-  } catch (error) {
-    console.error('[long-day] хук не згенеровано:', error.message);
+  for (const retry of [false, true]) {
+    try {
+      hook = String(await ask(hookPrompt({ title, theme, items: chosen }, { retry }))).trim()
+        .replace(/^["«]|["»]$/g, '').trim();
+    } catch (error) {
+      console.error('[long-day] хук не згенеровано:', error.message);
+      break;
+    }
+    const weak = hookWeakness(hook, chosen);
+    if (!weak) break;
+    console.error(`[long-day] вступ слабкий (${weak}) — перепитую`);
+    if (retry) hook = '';   // і друга спроба слабка: краще без хука, ніж порожні слова
   }
 
   const plan = {
     date,
     size,
-    title: set.title || `${size} фактів про Україну`,
-    theme: set.theme || '',
-    hook: hook.replace(/^["«]|["»]$/g, '').trim(),
+    title,
+    theme,
+    hook,
     ids: set.ids,
-    labels: set.labels,
+    // Підпис-огризок («Як кормова культура перетворилася») диктор прочитає як
+    // обірвану думку — краще сам номер факту.
+    labels: set.labels.map(cleanLabel),
     toppedUp: set.toppedUp,
+    titleHonest: named.honest,
     plannedAt: new Date().toISOString(),
     // Промти складаємо одразу й кладемо в план: мінідодаток має віддати їх
     // кнопкою миттєво, а не збирати заново на кожне відкриття.
     prompts: {
-      video: previewPromptVideo({ title: set.title, theme: set.theme, items: chosen }),
-      youtube: previewPromptYouTube({ title: set.title, theme: set.theme, items: chosen }),
+      video: previewPromptVideo({ title, theme, items: chosen }),
+      youtube: previewPromptYouTube({ title, theme, items: chosen }),
     },
   };
   await writePlan(plan);

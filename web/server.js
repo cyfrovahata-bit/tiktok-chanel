@@ -25,7 +25,7 @@ import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { compileLong, orderEpisodes } from '../src/compile-long.js';
 import { savePreview, previewState, removePreview, fetchPreview } from '../src/preview.js';
-import { readPlan, buildDay, planDay } from '../src/long-day.js';
+import { readPlan, buildDay, planDay, resetDay } from '../src/long-day.js';
 import { plannedSize } from '../src/long-plan.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
@@ -528,10 +528,16 @@ const server = http.createServer(async (req, res) => {
       if (!isOwner(check.user)) return json(res, 403, { error: 'Може лише власник каналу' });
       if (longBuild.running) return json(res, 409, { error: 'Монтаж триває — зачекай' });
       try {
+        // reset — це «переробити з нуля»: змонтоване відео йде в кошик, мітки
+        // «вже в добірці» знімаються (щоб епізоди повернулись у пул), прев'ю
+        // видаляється разом зі старою назвою на ньому.
+        const wiped = body.reset ? await resetDay() : null;
         const plan = await planDay();
         if (!plan) return json(res, 400, { error: 'Сьогодні добірки за розкладом немає' });
         longBuild = { running: false, log: [] };
-        return json(res, 200, { ok: true, title: plan.title, cancelled: Boolean(plan.cancelled) });
+        return json(res, 200, {
+          ok: true, title: plan.title, cancelled: Boolean(plan.cancelled), wiped,
+        });
       } catch (error) {
         return json(res, 400, { error: error.message });
       }
