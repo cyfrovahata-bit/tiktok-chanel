@@ -183,10 +183,18 @@ export async function remindFacebookOnce({
   setProperties = setVideoAppProperties,
   notifyFn = sendMessage,
   publicUrl = PUBLIC_URL,
+  compilationOn = null,
 } = {}) {
   if (process.env.ENABLE_FB_REMINDER !== '1') return null;
   const slot = slotFor(platformHours('facebook'), now);
   if (!slot) return null;
+
+  // Увечері дня збірки Facebook отримує саме її, а не шортс. Мітку
+  // facebookSkipped ставить заявка на слот — але вона робиться ПІСЛЯ цього
+  // нагадування, у тому ж тіку. Тому питаємо розклад напряму: інакше рівно о
+  // 18:00 власник дістав би «опублікуй цей ролик у Facebook» на ролик, який
+  // туди не піде ніколи.
+  if (shortDisplacedByLong('facebook', slot.label.slice(0, 2), now, compilationOn)) return null;
 
   const [items, files] = await Promise.all([listItems(), listFiles()]);
 

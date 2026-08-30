@@ -110,3 +110,49 @@ test('добірка в силі — слот лишається за нею', a
   assert.ok(!h.posts.some((p) => p.platform === 'youtube'));
   assert.ok(h.files.get('AUTO-20260801-0900.mp4').appProperties.youtubeSkipped);
 });
+
+// Нагадування про Facebook увечері дня збірки. Мітку facebookSkipped ставить
+// заявка на слот, але вона робиться ПІСЛЯ нагадування, у тому ж тіку. Без
+// окремої перевірки власник рівно о 18:00 діставав би «опублікуй цей ролик у
+// Facebook» на ролик, який туди не піде ніколи.
+import { remindFacebookOnce } from '../src/autopublish.js';
+
+const KYIV_18 = new Date('2026-08-30T15:10:00Z');   // 18:10 у Києві, неділя
+const KYIV_12 = new Date('2026-08-30T09:10:00Z');   // 12:10 у Києві
+
+function stubs() {
+  const sent = [];
+  return {
+    sent,
+    listItems: async () => [{
+      id: 'AUTO-1', title: 'Ролик', description: 'Опис', archive: 'zip', status: 'DONE',
+    }],
+    listFiles: async () => new Map([['AUTO-1.mp4', { id: 'f1', appProperties: {} }]]),
+    setProperties: async () => {},
+    notifyFn: async (chat, text) => { sent.push(text); },
+  };
+}
+
+test('увечері дня збірки нагадування про Facebook не йде', async () => {
+  process.env.ENABLE_FB_REMINDER = '1';
+  const s = stubs();
+  const out = await remindFacebookOnce({ ...s, now: KYIV_18, compilationOn: true });
+  assert.equal(out, null);
+  assert.deepEqual(s.sent, []);
+});
+
+test('коли добірку скасовано, вечірнє нагадування повертається', async () => {
+  process.env.ENABLE_FB_REMINDER = '1';
+  const s = stubs();
+  const out = await remindFacebookOnce({ ...s, now: KYIV_18, compilationOn: false });
+  assert.equal(out?.itemId, 'AUTO-1');
+  assert.equal(s.sent.length, 1);
+});
+
+test('удень нагадування працює як завжди', async () => {
+  process.env.ENABLE_FB_REMINDER = '1';
+  const s = stubs();
+  const out = await remindFacebookOnce({ ...s, now: KYIV_12, compilationOn: true });
+  assert.equal(out?.itemId, 'AUTO-1');
+  assert.equal(s.sent.length, 1);
+});
