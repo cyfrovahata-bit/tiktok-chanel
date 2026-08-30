@@ -1010,7 +1010,7 @@
       }
       const plan = data.plan;
       if (!plan) {
-        box.appendChild(el('p', 'own-hint', `Добірку на ${data.size} сюжетів ще не підібрано — це стається о 08:00.`));
+        box.appendChild(el('p', 'own-hint', `Добірку на ${data.size} фактів ще не підібрано — це стається о 08:00.`));
         return;
       }
       if (plan.cancelled) {
@@ -1018,7 +1018,7 @@
         return;
       }
       box.appendChild(el('p', 'own-hint',
-        `${esc(plan.title)} — ${plan.size} сюжетів${plan.builtAt ? ', змонтовано' : ''}${plan.youtubeId ? ', опубліковано' : ''}.`));
+        `${esc(plan.title)} — ${plan.size} фактів${plan.builtAt ? ', змонтовано' : ''}${plan.youtubeId ? ', опубліковано' : ''}.`));
       if (plan.labels?.length) {
         box.appendChild(el('p', 'own-hint', plan.labels.map((l, i) => `${i + 1}. ${esc(l)}`).join(' · ')));
       }
@@ -1064,7 +1064,7 @@
         again.addEventListener('click', async () => {
           if (!initData) { toast('Відкрий через Telegram'); return; }
           if (reset && !window.confirm(
-            'Видалити змонтовану добірку й прев\'ю та підібрати сюжети заново?',
+            'Видалити змонтовану добірку й прев\'ю та підібрати факти заново?',
           )) return;
           again.disabled = true; again.textContent = 'Підбираю…';
           try {

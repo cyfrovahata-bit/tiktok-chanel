@@ -199,8 +199,8 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
   });
 
   if (pool.length < size) {
-    await notifyFn(`⚠️ Добірка на ${size} сюжетів не збирається: придатних лише ${pool.length}.`);
-    return writePlan({ date, size, cancelled: true, reason: 'мало придатних сюжетів' });
+    await notifyFn(`⚠️ Добірка на ${size} фактів не збирається: придатних лише ${pool.length}.`);
+    return writePlan({ date, size, cancelled: true, reason: 'мало придатних фактів' });
   }
 
   const avoidTitles = await recentTitles(date);
@@ -227,7 +227,7 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
       // Друга спроба з конкретикою: називаємо ті сюжети, повз які назва
       // промахнулась. Без цього модель здебільшого повторює ту саму.
       const missed = chosen.filter((it) => named.missed.includes(String(it.id)));
-      extra = `\n\nНАЗВА «${named.title}» НЕ ПІДІЙШЛА: вона не про ці сюжети:\n`
+      extra = `\n\nНАЗВА «${named.title}» НЕ ПІДІЙШЛА: вона не про ці факти:\n`
         + `${missed.map((it) => `• ${it.title || it.theme}`).join('\n')}\n`
         + 'Дай ширшу назву, під яку підпадають і вони теж.';
     }
@@ -242,7 +242,7 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
     }
     if (named.honest) break;
     console.error(
-      `[long-day] назва «${named.title}» не накриває ${named.missed.length} сюжетів`,
+      `[long-day] назва «${named.title}» не накриває ${named.missed.length} фактів`,
     );
   }
   const title = named.honest ? named.title : neutralTitle(size, avoidTitles);
@@ -289,7 +289,7 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
   await writePlan(plan);
 
   await notifyFn(
-    `🎬 Підібрано ${size} сюжетів на сьогодні.\n\n`
+    `🎬 Підібрано ${size} фактів на сьогодні.\n\n`
     + `Тема: ${plan.title}\n${plan.theme ? `${plan.theme}\n` : ''}\n`
     + `${chosen.map((it, i) => `${i + 1}. ${plan.labels[i] || it.title}`).join('\n')}\n\n`
     + 'Промти на прев\'ю — у мінідодатку, кнопками «скопіювати».\n'

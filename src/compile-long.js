@@ -264,15 +264,93 @@ async function makeIntro(workDir, { count, big, small, top, spoken, previewPath 
 export const ANNOUNCE_LEAD = 0.45;  // скільки звучить перехід до першого слова
 export const ANNOUNCE_TAIL = 0.55;  // скільки картка висить після слова
 
-function announceFilter(assPath, seconds, delayMs) {
-  return `[0:v]subtitles=${assPath}:fontsdir=${FONTS_DIR},`
-    + `fade=t=out:st=${(seconds - 0.35).toFixed(2)}:d=0.35[v];`
-    + `[1:a]adelay=${delayMs}|${delayMs}[voice];`
-    + '[2:a]afade=t=in:d=0.22,afade=t=out:st=0.36:d=0.09,volume=-9dB[riser];'
-    + `[3:a]afade=t=out:st=0.03:d=0.19,volume=-3dB,adelay=${Math.round(HIT_AT * 1000)}|${Math.round(HIT_AT * 1000)}[hit];`
-    + '[4:a]highpass=f=180,lowpass=f=5000,afade=t=in:d=0.15,afade=t=out:st=0.4:d=0.15,volume=-15dB[air];'
-    + '[voice][riser][hit][air]amix=inputs=4:duration=longest:normalize=0,'
-    + 'alimiter=limit=0.95,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]';
+// Звук оголошення. Перший варіант був «риверс» — синусоїда, що злітає з 250 до
+// 1950 Гц, плюс сімдесятигерцове бухання й шум. Разом воно звучало як дешевий
+// перехід із безкоштовного набору: свистить, гупає і на чотири децибели
+// голосніше за сам голос.
+//
+// Тому замість спецефекту — короткий музичний знак: дві теплі ноти вгору
+// (соль → ре, чиста квінта) з довгим хвостом і м'яким низом під ними. Він
+// відділяє факт від факту, не перетягуючи уваги: рівень навмисне тримається
+// біля рівня голосу, а не над ним.
+//
+// Кожна нота — синус із експоненційним згасанням: рівно так звучить удар по
+// металу чи дереву. Другий обертон додано тихішим і з швидшим згасанням, бо
+// саме він відрізняє дзвін від голого «біп».
+const NOTE = (hz, decay = 5.5) => `0.55*sin(2*PI*${hz}*t)*exp(-${decay}*t)`
+  + `+0.22*sin(2*PI*${hz * 2}*t)*exp(-${decay * 2}*t)`;
+
+// Низ під нотами: синус, що з\'їжджає з 62 до 40 Гц. Дає вагу удару, але не
+// гуде — на телефонному динаміку його майже не чути, на навушниках відчутно.
+const SUB = "0.9*sin(2*PI*(62-22*t)*t)*exp(-7*t)";
+
+// Кожен варіант описує три речі: які додаткові входи ffmpeg відкрити, як їх
+// обробити і які доріжки потім змішати з голосом. Останнє окремо, бо amix
+// мусить точно знати кількість входів.
+export const STINGS = {
+  // Дві ноти вгору. Стандартний варіант.
+  chime: (seconds, at) => ({
+    inputs: [
+      `aevalsrc=exprs='${NOTE(784)}':d=2.2:s=48000`,
+      `aevalsrc=exprs='${NOTE(1175, 5)}':d=2.2:s=48000`,
+      `aevalsrc=exprs='${SUB}':d=1.2:s=48000`,
+    ],
+    chain: `[${at}:a]volume=-8dB[n1];`
+      + `[${at + 1}:a]adelay=150|150,volume=-11dB[n2];`
+      + `[${at + 2}:a]volume=-10dB[sub];`,
+    tracks: ['n1', 'n2', 'sub'],
+  }),
+  // Те саме плюс тихий подих повітря, який заводить у голос.
+  'chime-air': (seconds, at) => ({
+    inputs: [
+      `aevalsrc=exprs='${NOTE(784)}':d=2.2:s=48000`,
+      `aevalsrc=exprs='${NOTE(1175, 5)}':d=2.2:s=48000`,
+      `aevalsrc=exprs='${SUB}':d=1.2:s=48000`,
+      `anoisesrc=d=${seconds}:c=pink:a=0.8:r=48000`,
+    ],
+    chain: `[${at}:a]volume=-8dB[n1];`
+      + `[${at + 1}:a]adelay=150|150,volume=-11dB[n2];`
+      + `[${at + 2}:a]volume=-10dB[sub];`
+      + `[${at + 3}:a]highpass=f=500,lowpass=f=6500,afade=t=in:d=0.28,`
+      + 'afade=t=out:st=0.4:d=0.3,volume=-18dB[air];',
+    tracks: ['n1', 'n2', 'sub', 'air'],
+  }),
+  // Без нот: тільки подих і м'який низ. Найспокійніший варіант.
+  air: (seconds, at) => ({
+    inputs: [
+      `anoisesrc=d=${seconds}:c=pink:a=0.8:r=48000`,
+      `aevalsrc=exprs='0.9*sin(2*PI*(55-18*t)*t)*exp(-6*t)':d=1.2:s=48000`,
+    ],
+    chain: `[${at}:a]highpass=f=400,lowpass=f=7000,afade=t=in:d=0.3,`
+      + 'afade=t=out:st=0.42:d=0.35,volume=-13dB[air];'
+      + `[${at + 1}:a]volume=-9dB[sub];`,
+    tracks: ['air', 'sub'],
+  }),
+  // Сама пауза перед голосом.
+  none: () => ({ inputs: [], chain: '', tracks: [] }),
+};
+
+export function stingName() {
+  const name = String(process.env.ANNOUNCE_STING || 'chime').trim();
+  return Object.hasOwn(STINGS, name) ? name : 'chime';
+}
+
+// Складає filter_complex оголошення. Вхід 0 — чорна картка, вхід 1 — голос,
+// далі йдуть входи самого звуку, тож їхні номери рахуються від двійки.
+export function announceFilter(assPath, seconds, delayMs, sting = stingName()) {
+  const { inputs, chain, tracks } = STINGS[sting](seconds, 2);
+  // amix з одним входом ffmpeg не приймає, тож без звуку лишається сам голос.
+  const join = tracks.length
+    ? `[voice]${tracks.map((t) => `[${t}]`).join('')}amix=inputs=${tracks.length + 1}:duration=longest:normalize=0,`
+    : '[voice]anull,';
+  return {
+    inputs,
+    filter: `[0:v]subtitles=${assPath}:fontsdir=${FONTS_DIR},`
+      + `fade=t=out:st=${(seconds - 0.35).toFixed(2)}:d=0.35[v];`
+      + `[1:a]adelay=${delayMs}|${delayMs}[voice];`
+      + `${chain}${join}`
+      + 'alimiter=limit=0.95,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]',
+  };
 }
 
 async function makeAnnounce(workDir, { number, total, label = '' }, onProgress = () => {}) {
@@ -307,17 +385,15 @@ async function makeAnnounce(workDir, { number, total, label = '' }, onProgress =
   let built = false;
   if (voicePath) {
     try {
-      await run('ffmpeg', [
-        '-y',
+      const { inputs, filter } = announceFilter(assPath, seconds, Math.round(ANNOUNCE_LEAD * 1000));
+      const args = ['-y',
         '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${seconds}`,
-        '-i', voicePath,
-        '-f', 'lavfi', '-i', 'aevalsrc=exprs=sin(2*PI*t*(250+1700*t)):d=0.45:s=48000',
-        '-f', 'lavfi', '-i', 'sine=frequency=70:duration=0.22:sample_rate=48000',
-        '-f', 'lavfi', '-i', `anoisesrc=d=${seconds}:c=brown:a=0.6:r=48000`,
-        '-filter_complex', announceFilter(assPath, seconds, Math.round(ANNOUNCE_LEAD * 1000)),
+        '-i', voicePath];
+      for (const input of inputs) args.push('-f', 'lavfi', '-i', input);
+      args.push('-filter_complex', filter,
         '-map', '[v]', '-map', '[a]', '-t', String(seconds),
-        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', raw,
-      ]);
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', raw);
+      await run('ffmpeg', args);
       built = true;
     } catch (error) {
       // Складений фільтр міг не зайти на конкретній збірці ffmpeg. Тоді
@@ -558,7 +634,7 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     for (const card of cards) leads.push(await durationSeconds(card));
     sequence = parts.flatMap((part, i) => [cards[i], part]);
   } else if (separators && parts.length > 1) {
-    onProgress('роблю роздільники між сюжетами');
+    onProgress('роблю роздільники між фактами');
     const seps = [];
     for (let i = 0; i < parts.length - 1; i++) seps.push(await makeSeparator(workDir, i + 1, onProgress));
     sequence = interleave(parts, seps);

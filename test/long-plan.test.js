@@ -119,7 +119,7 @@ const POOL = rows(6).map((r, i) => ({ ...r, title: `Замок ${i + 1}` }));
 
 test('промт несе всі кандидати й потрібну кількість', () => {
   const p = buildThemePrompt(POOL, 5);
-  assert.match(p, /рівно з 5 сюжетів/);
+  assert.match(p, /рівно з 5 фактів/);
   assert.match(p, /ID-01 \| Замок 1/);
   assert.match(p, /ID-06 \| Замок 6/);
 });
@@ -244,7 +244,7 @@ test('промт назви показує весь набір і вимагає
   const p = buildTitlePrompt(FIVE);
   for (const it of FIVE) assert.match(p, new RegExp(it.id));
   assert.match(p, /covers/);
-  assert.match(p, /5 сюжетів/);
+  assert.match(p, /5 фактів/);
 });
 
 test('назва, що накрила всі сюжети, приймається', () => {
