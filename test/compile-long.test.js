@@ -158,3 +158,47 @@ test('дубль ID у таблиці не подвоює епізод у доб
   const { items } = orderEpisodes(withDupe, ['B', 'C']);
   assert.deepEqual(items.map((it) => it.title), ['середній', 'свіжий']);
 });
+
+// --- Звук оголошення ---------------------------------------------------------
+// Звук чути лише в готовій добірці, через годину після монтажу, тож усе, що
+// можна перевірити тут, перевіряємо тут: і вибір варіанта, і те, що фільтр
+// складається коректно (крива кількість входів amix валить увесь монтаж).
+import { announceFilter, stingName, STINGS, DEFAULT_STING } from '../src/compile-long.js';
+
+test('стандартний звук оголошення — дзвіночок із подихом', () => {
+  delete process.env.ANNOUNCE_STING;
+  assert.equal(DEFAULT_STING, 'chime-air');
+  assert.equal(stingName(), 'chime-air');
+});
+
+test('ANNOUNCE_STING перемикає варіант, а сміття відкочується на стандартний', () => {
+  process.env.ANNOUNCE_STING = 'air';
+  assert.equal(stingName(), 'air');
+  process.env.ANNOUNCE_STING = 'нема-такого';
+  assert.equal(stingName(), DEFAULT_STING);
+  delete process.env.ANNOUNCE_STING;
+});
+
+test('кожен варіант оголошує рівно стільки входів amix, скільки відкриває', () => {
+  for (const name of Object.keys(STINGS)) {
+    const { inputs, filter } = announceFilter('/tmp/a.ass', 3.5, 450, name);
+    const mix = /amix=inputs=(\d+)/.exec(filter);
+    if (!inputs.length) {
+      assert.equal(mix, null, `${name}: без звуку amix не потрібен`);
+      assert.match(filter, /\[voice\]anull/);
+      continue;
+    }
+    // Голос плюс усі доріжки звуку.
+    assert.equal(Number(mix[1]), inputs.length + 1, `${name}: не збігається з входами`);
+    // Кожен відкритий вхід має бути використаний: номери йдуть від двійки.
+    for (let i = 0; i < inputs.length; i++) {
+      assert.match(filter, new RegExp(`\\[${i + 2}:a\\]`), `${name}: вхід ${i + 2} загублено`);
+    }
+  }
+});
+
+test('фільтр оголошення завжди віддає доріжки [v] і [a]', () => {
+  const { filter } = announceFilter('/tmp/a.ass', 3.5, 450, 'chime-air');
+  assert.match(filter, /\[v\];/);
+  assert.match(filter, /\[a\]$/);
+});

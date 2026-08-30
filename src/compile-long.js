@@ -277,8 +277,12 @@ export const ANNOUNCE_TAIL = 0.55;  // скільки картка висить 
 // Кожна нота — синус із експоненційним згасанням: рівно так звучить удар по
 // металу чи дереву. Другий обертон додано тихішим і з швидшим згасанням, бо
 // саме він відрізняє дзвін від голого «біп».
-const NOTE = (hz, decay = 5.5) => `0.55*sin(2*PI*${hz}*t)*exp(-${decay}*t)`
-  + `+0.22*sin(2*PI*${hz * 2}*t)*exp(-${decay * 2}*t)`;
+// Друга нота трохи тихіша за першу — так вона чується відповіддю, а не
+// повтором. Числа саме ті, які власник обрав на слух серед варіантів.
+const NOTE = (hz, decay, base, over) => `${base}*sin(2*PI*${hz}*t)*exp(-${decay}*t)`
+  + `+${over}*sin(2*PI*${hz * 2}*t)*exp(-${decay * 2}*t)`;
+const NOTE_LOW = NOTE(784, 5.5, 0.55, 0.22);
+const NOTE_HIGH = NOTE(1175, 5, 0.5, 0.18);
 
 // Низ під нотами: синус, що з\'їжджає з 62 до 40 Гц. Дає вагу удару, але не
 // гуде — на телефонному динаміку його майже не чути, на навушниках відчутно.
@@ -288,11 +292,11 @@ const SUB = "0.9*sin(2*PI*(62-22*t)*t)*exp(-7*t)";
 // обробити і які доріжки потім змішати з голосом. Останнє окремо, бо amix
 // мусить точно знати кількість входів.
 export const STINGS = {
-  // Дві ноти вгору. Стандартний варіант.
+  // Самі дві ноти, без повітря.
   chime: (seconds, at) => ({
     inputs: [
-      `aevalsrc=exprs='${NOTE(784)}':d=2.2:s=48000`,
-      `aevalsrc=exprs='${NOTE(1175, 5)}':d=2.2:s=48000`,
+      `aevalsrc=exprs='${NOTE_LOW}':d=2.2:s=48000`,
+      `aevalsrc=exprs='${NOTE_HIGH}':d=2.2:s=48000`,
       `aevalsrc=exprs='${SUB}':d=1.2:s=48000`,
     ],
     chain: `[${at}:a]volume=-8dB[n1];`
@@ -300,11 +304,11 @@ export const STINGS = {
       + `[${at + 2}:a]volume=-10dB[sub];`,
     tracks: ['n1', 'n2', 'sub'],
   }),
-  // Те саме плюс тихий подих повітря, який заводить у голос.
+  // Те саме плюс тихий подих повітря, який заводить у голос. Стандартний.
   'chime-air': (seconds, at) => ({
     inputs: [
-      `aevalsrc=exprs='${NOTE(784)}':d=2.2:s=48000`,
-      `aevalsrc=exprs='${NOTE(1175, 5)}':d=2.2:s=48000`,
+      `aevalsrc=exprs='${NOTE_LOW}':d=2.2:s=48000`,
+      `aevalsrc=exprs='${NOTE_HIGH}':d=2.2:s=48000`,
       `aevalsrc=exprs='${SUB}':d=1.2:s=48000`,
       `anoisesrc=d=${seconds}:c=pink:a=0.8:r=48000`,
     ],
@@ -330,9 +334,12 @@ export const STINGS = {
   none: () => ({ inputs: [], chain: '', tracks: [] }),
 };
 
+// Стандартний варіант вибрав власник, послухавши всі чотири.
+export const DEFAULT_STING = 'chime-air';
+
 export function stingName() {
-  const name = String(process.env.ANNOUNCE_STING || 'chime').trim();
-  return Object.hasOwn(STINGS, name) ? name : 'chime';
+  const name = String(process.env.ANNOUNCE_STING || DEFAULT_STING).trim();
+  return Object.hasOwn(STINGS, name) ? name : DEFAULT_STING;
 }
 
 // Складає filter_complex оголошення. Вхід 0 — чорна картка, вхід 1 — голос,
