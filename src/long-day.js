@@ -126,7 +126,12 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
   if (!size) return null;
 
   const [items, files] = await Promise.all([readAllItems(), listVideoFiles()]);
-  const published = items.filter((it) => it.status === 'PUBLISHED');
+  const published = items
+    .filter((it) => it.status === 'PUBLISHED')
+    // Без готового MP4 у папці добірку не зібрати: монтаж бере саме файл, а не
+    // рядок таблиці. Старі ролики з Drive іноді прибирають — і такий епізод
+    // валив увесь монтаж уже на першому кроці.
+    .filter((it) => files.has(videoName(it.id)));
   const pool = candidates(published, {
     today: date,
     // П'ятнадцять на тиждень із карантином не набереться — там повтори
@@ -214,16 +219,35 @@ export async function buildDay({ now = new Date(), ask = chatOnce, notifyFn = no
   });
 
   onProgress(`монтую «${plan.title}»`);
-  const result = await compileLong(items, {
-    previewPath,
-    labels,
-    introBig: plan.title.toUpperCase(),
-    introSpoken: plan.hook || undefined,
-    onProgress,
-  });
-
+  let result;
+  let fileId;
   const name = `compilation-${date}`;
-  const fileId = await uploadVideo(name, result.path);
+  try {
+    result = await compileLong(items, {
+      previewPath,
+      labels,
+      introBig: plan.title.toUpperCase(),
+      introSpoken: plan.hook || undefined,
+      onProgress,
+    });
+    fileId = await uploadVideo(name, result.path);
+  } catch (error) {
+    // Тік ходить щохвилини, тож без лічильника невдалий монтаж бився б у ту
+    // саму стіну до кінця доби. Три спроби — і день закривається, а вечірній
+    // слот повертається шортсу.
+    const failures = (plan.failures || 0) + 1;
+    const next = { ...plan, failures, lastError: error.message };
+    if (failures >= 3) {
+      next.cancelled = true;
+      next.reason = `монтаж не вдався тричі: ${error.message}`;
+      await notifyFn(
+        `🚫 Добірка «${plan.title}» не збирається: ${error.message}\n`
+        + 'Спробував тричі. О 18:00 вийде звичайний шортс.',
+      );
+    }
+    await writePlan(next);
+    throw error;
+  }
   await markCompiled(plan.ids).catch((error) => console.error('[long-day] мітки:', error.message));
 
   // Назва й опис — після монтажу: лише тепер відомі справжні таймкоди.

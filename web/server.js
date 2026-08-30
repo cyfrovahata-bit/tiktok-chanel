@@ -25,7 +25,7 @@ import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { compileLong, orderEpisodes } from '../src/compile-long.js';
 import { savePreview, previewState, removePreview, fetchPreview } from '../src/preview.js';
-import { readPlan, buildDay } from '../src/long-day.js';
+import { readPlan, buildDay, planDay } from '../src/long-day.js';
 import { plannedSize } from '../src/long-plan.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
@@ -516,6 +516,24 @@ const server = http.createServer(async (req, res) => {
         });
       } catch (error) {
         return json(res, 200, { day: today, planned: true, size, error: error.message });
+      }
+    }
+
+    // «Підібрати заново» — коли набір не склався: у ньому епізод без відео,
+    // тема невдала або просто хочеться інший. Старий план перезаписується.
+    if (req.method === 'POST' && pathname === '/api/long/replan') {
+      const body = JSON.parse(await readBody(req));
+      const check = verifyInitData(body.initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Може лише власник каналу' });
+      if (longBuild.running) return json(res, 409, { error: 'Монтаж триває — зачекай' });
+      try {
+        const plan = await planDay();
+        if (!plan) return json(res, 400, { error: 'Сьогодні добірки за розкладом немає' });
+        longBuild = { running: false, log: [] };
+        return json(res, 200, { ok: true, title: plan.title, cancelled: Boolean(plan.cancelled) });
+      } catch (error) {
+        return json(res, 400, { error: error.message });
       }
     }
 
