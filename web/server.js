@@ -25,7 +25,7 @@ import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { compileLong, orderEpisodes } from '../src/compile-long.js';
 import { savePreview, previewState, removePreview, fetchPreview } from '../src/preview.js';
-import { readPlan } from '../src/long-day.js';
+import { readPlan, buildDay } from '../src/long-day.js';
 import { plannedSize } from '../src/long-plan.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
@@ -43,6 +43,9 @@ import { startTelegramLoop } from '../src/telegram-loop.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
+
+// Ручний монтаж сьогоднішньої добірки: чи триває й що встиг зробити.
+let longBuild = { running: false, log: [] };
 
 // Довга добірка з готових епізодів. Тримаємо РІВНО ОДНЕ завдання за раз:
 // збірка перекодовує відео й синтезує озвучку наново, тож два паралельні
@@ -508,10 +511,41 @@ const server = http.createServer(async (req, res) => {
       if (!size) return json(res, 200, { day: today, planned: false });
       try {
         const plan = await readPlan(today);
-        return json(res, 200, { day: today, planned: true, size, plan: plan || null });
+        return json(res, 200, {
+          day: today, planned: true, size, plan: plan || null, build: longBuild,
+        });
       } catch (error) {
         return json(res, 200, { day: today, planned: true, size, error: error.message });
       }
+    }
+
+    // «Зібрати зараз» — не чекати 16:00. Потрібно, коли прев'ю вже готове й
+    // хочеться подивитися результат раніше, ніж за розкладом. Публікація при
+    // цьому лишається на 18:00: змонтоване відео просто чекає свого часу.
+    if (req.method === 'POST' && pathname === '/api/long/build') {
+      const body = JSON.parse(await readBody(req));
+      const check = verifyInitData(body.initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Може лише власник каналу' });
+      if (longBuild.running) return json(res, 409, { error: 'Монтаж уже триває' });
+
+      const today = kyivToday();
+      const plan = await readPlan(today).catch(() => null);
+      if (!plan) return json(res, 400, { error: 'Добірку на сьогодні ще не підібрано' });
+      if (plan.cancelled) return json(res, 400, { error: `Сьогодні скасовано: ${plan.reason || ''}` });
+      if (plan.builtAt) return json(res, 400, { error: 'Сьогоднішня добірка вже змонтована' });
+
+      // Монтаж триває хвилини — HTTP-запит стільки не живе, тож відповідаємо
+      // одразу, а хід роботи власник бачить у журналі й у Telegram.
+      longBuild = { running: true, log: [], startedAt: Date.now() };
+      buildDay({ onProgress: (text) => longBuild.log.push(text) })
+        .then(() => { longBuild.running = false; })
+        .catch((error) => {
+          longBuild.running = false;
+          longBuild.error = error.message;
+          console.error('[long-day] ручний монтаж:', error.message);
+        });
+      return json(res, 200, { ok: true, title: plan.title, size: plan.size });
     }
 
     // Прев'ю добірки: картинка, яку власник намалював у ChatGPT. Лягає на Drive

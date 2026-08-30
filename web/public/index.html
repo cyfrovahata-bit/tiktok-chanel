@@ -1030,10 +1030,39 @@
         btn.addEventListener('click', () => copyToClipboard(text, okMessage));
         actions.appendChild(btn);
       };
+
+      // «Зібрати зараз» — коли прев'ю вже готове й чекати 16:00 немає сенсу.
+      // Публікація при цьому лишається на 18:00.
+      if (!plan.builtAt && !plan.youtubeId) {
+        const run = el('button', 'btn primary', data.build?.running ? 'Монтую…' : '▶️ Зібрати зараз');
+        run.disabled = Boolean(data.build?.running);
+        run.addEventListener('click', async () => {
+          if (!initData) { toast('Відкрий через Telegram'); return; }
+          run.disabled = true; run.textContent = 'Монтую…';
+          try {
+            const r = await fetch('/api/long/build', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ initData }),
+            }).then((x) => x.json());
+            toast(r.error || `Монтую «${r.title}» — це кілька хвилин`);
+          } catch (e) {
+            toast(e.message);
+          }
+          setTimeout(cutTodayLoad, 3000);
+        });
+        actions.appendChild(run);
+      }
       add('📋 Промт прев\'ю для відео', plan.prompts?.video, 'Промт скопійовано');
       add('📋 Промт обкладинки YouTube', plan.prompts?.youtube, 'Промт скопійовано');
       add('📋 Текст для Facebook', plan.meta?.facebook, 'Текст скопійовано');
       box.appendChild(actions);
+
+      // Хід ручного монтажу: останні рядки журналу, щоб було видно, що воно живе.
+      if (data.build?.running || data.build?.error) {
+        const lines = (data.build.log || []).slice(-4).join('\n');
+        box.appendChild(el('p', 'own-hint',
+          data.build.error ? `Монтаж не вдався: ${esc(data.build.error)}` : esc(lines || 'Монтую…')));
+      }
 
       if (plan.youtubeId) {
         const link = el('p', 'own-hint', '');
