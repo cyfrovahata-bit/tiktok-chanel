@@ -228,12 +228,11 @@ async function makeIntro(workDir, { count, big, small, top, spoken, previewPath 
   const silent = path.join(workDir, 'intro-silent.mp4');
   const fade = `fade=t=out:st=${(seconds - 0.4).toFixed(2)}:d=0.4`;
   if (previewPath) {
-    // Картинка може прийти будь-якого розміру й співвідношення, тож спершу
-    // накриваємо нею весь кадр і зрізаємо зайве по центру. Притемнена смуга
-    // під написами — щоб білий текст читався й на світлому небі.
+    // Прев'ю приходить УЖЕ З ЗАГОЛОВКОМ — його малює той самий генератор, що
+    // й саму картинку. Свій напис поверх не кладемо: вийшло б два заголовки
+    // один на одному. Картинку лише накриваємо на весь кадр і зрізаємо зайве.
     await run('ffmpeg', ['-y', '-loop', '1', '-t', String(seconds), '-i', previewPath,
-      '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,'
-        + `${INTRO_SCRIM},subtitles=${assPath}:fontsdir=${FONTS_DIR},${fade}`,
+      '-vf', `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,${fade}`,
       '-r', '30', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', silent]);
   } else {
     await run('ffmpeg', ['-y', '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${seconds}`,
