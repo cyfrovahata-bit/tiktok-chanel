@@ -290,7 +290,7 @@
     <div class="cut-opts-title">Налаштування</div>
     <label class="cut-wide"><input type="checkbox" id="cutWide" /> формат 16:9 для YouTube</label>
     <label class="cut-wide"><input type="checkbox" id="cutRebuild" /> перезібрати з новою озвучкою (платно)</label>
-    <label class="cut-wide"><input type="checkbox" id="cutAnnounce" checked /> оголошувати «Факт перший», «Факт другий»…</label>
+    <label class="cut-wide"><input type="checkbox" id="cutAnnounce" checked /> картка «ФАКТ 1» перед кожним фактом (без голосу)</label>
     <div class="own-actions">
       <button class="btn primary" id="cutStart">Зібрати добірку</button>
     </div>
@@ -1020,8 +1020,13 @@
       box.appendChild(el('p', 'own-hint',
         `${esc(plan.title)} — ${plan.size} фактів${plan.builtAt ? ', змонтовано' : ''}${plan.youtubeId ? ', опубліковано' : ''}.`));
       if (plan.labels?.length) {
-        box.appendChild(el('p', 'own-hint', plan.labels.map((l, i) => `${i + 1}. ${esc(l)}`).join(' · ')));
+        box.appendChild(el('p', 'own-hint', plan.labels
+          .map((l, i) => `${i + 1}. ${esc(l || '—')}`).join(' · ')));
       }
+      // Вступ — єдине, що диктор скаже своїми словами, тож він має бути на очах.
+      box.appendChild(el('p', 'own-hint', plan.hook
+        ? `🎙 «${esc(plan.hook)}»`
+        : '🎙 вступ звичайний: «Чи знав ти таку Україну?»'));
 
       const actions = el('div', 'own-actions');
       const add = (label, text, okMessage) => {
@@ -1052,6 +1057,27 @@
         });
         actions.appendChild(run);
 
+      }
+
+      // Вступ видно й чути лише в готовому відео, тож найчастіша правка — саме
+      // він. Окрема кнопка переписує його, не чіпаючи ні набору, ні прев'ю.
+      if (!plan.builtAt && !plan.youtubeId) {
+        const rehook = el('button', 'btn secondary', '🎙 Новий вступ');
+        rehook.addEventListener('click', async () => {
+          if (!initData) { toast('Відкрий через Telegram'); return; }
+          rehook.disabled = true; rehook.textContent = 'Пишу…';
+          try {
+            const r = await fetch('/api/long/rehook', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ initData }),
+            }).then((x) => x.json());
+            toast(r.error || (r.hook ? 'Новий вступ готовий' : 'Вступу не буде — піде звичайна репліка'));
+          } catch (e) {
+            toast(e.message);
+          }
+          cutTodayLoad();
+        });
+        actions.appendChild(rehook);
       }
 
       // Перебрати набір. До монтажу це просто новий підбір; після монтажу —

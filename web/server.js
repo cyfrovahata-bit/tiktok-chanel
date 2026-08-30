@@ -25,7 +25,7 @@ import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { compileLong, orderEpisodes } from '../src/compile-long.js';
 import { savePreview, previewState, removePreview, fetchPreview } from '../src/preview.js';
-import { readPlan, buildDay, planDay, resetDay } from '../src/long-day.js';
+import { readPlan, buildDay, planDay, resetDay, rehookDay } from '../src/long-day.js';
 import { plannedSize } from '../src/long-plan.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
@@ -538,6 +538,23 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, {
           ok: true, title: plan.title, cancelled: Boolean(plan.cancelled), wiped,
         });
+      } catch (error) {
+        return json(res, 400, { error: error.message });
+      }
+    }
+
+    // «Новий вступ» — переписати сам текст, який диктор читає на заставці, не
+    // чіпаючи ні набору, ні назви, ні вже намальованого прев'ю.
+    if (req.method === 'POST' && pathname === '/api/long/rehook') {
+      const body = JSON.parse(await readBody(req));
+      const check = verifyInitData(body.initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Може лише власник каналу' });
+      if (longBuild.running) return json(res, 409, { error: 'Монтаж триває — зачекай' });
+      try {
+        const plan = await rehookDay();
+        if (!plan) return json(res, 400, { error: 'Добірку на сьогодні ще не підібрано' });
+        return json(res, 200, { ok: true, hook: plan.hook });
       } catch (error) {
         return json(res, 400, { error: error.message });
       }

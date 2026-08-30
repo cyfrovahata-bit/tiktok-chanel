@@ -255,14 +255,25 @@ async function makeIntro(workDir, { count, big, small, top, spoken, previewPath 
 }
 
 // --- Оголошення факту --------------------------------------------------------
-// Перед кожним сюжетом — картка «ФАКТ 3» і голос «Факт третій». Без неї довге
-// відео зливається в потік: глядач не чує, де закінчився один факт і почався
-// наступний, і не має за що зачепитися, коли повертається до відео.
+// Перед кожним фактом — коротка картка «ФАКТ 3» із назвою об'єкта. Без неї
+// довге відео зливається в потік: глядач не бачить, де закінчився один факт і
+// почався наступний, і не має за що зачепитися, коли повертається до відео.
 //
 // Оголошення заміняє собою простий роздільник: у ньому вже є той самий
 // перехідний звук, а два чорні кадри поспіль виглядали б як збій.
 export const ANNOUNCE_LEAD = 0.45;  // скільки звучить перехід до першого слова
 export const ANNOUNCE_TAIL = 0.55;  // скільки картка висить після слова
+// Скільки висить НІМА картка. Дзвіночок згасає приблизно за 1.2 с, тож
+// півтори секунди він доспівує повністю, а глядач встигає прочитати напис.
+export const ANNOUNCE_SILENT = 1.5;
+
+// Чи диктор ОГОЛОШУЄ факт голосом. За замовчуванням — ні: власник послухав
+// готову добірку й вирішив, що між фактами краще не говорити взагалі. Голос
+// щоразу повторював те, що й так написано на картці, а якщо вступ згадував
+// перший об'єкт, той звучав двічі поспіль. Лишилася сама картка з дзвіночком.
+export function announceVoice() {
+  return process.env.ANNOUNCE_VOICE === '1';
+}
 
 // Звук оголошення. Перший варіант був «риверс» — синусоїда, що злітає з 250 до
 // 1950 Гц, плюс сімдесятигерцове бухання й шум. Разом воно звучало як дешевий
@@ -356,6 +367,9 @@ export function announceFilter(assPath, seconds, delayMs, sting = stingName()) {
       + `fade=t=out:st=${(seconds - 0.35).toFixed(2)}:d=0.35[v];`
       + `[1:a]adelay=${delayMs}|${delayMs}[voice];`
       + `${chain}${join}`
+      // Дзвіночок довший за німу картку, тож без спаду він обірвався б
+      // клацанням просто перед першим кадром факту.
+      + `afade=t=out:st=${Math.max(0, seconds - 0.3).toFixed(2)}:d=0.3,`
       + 'alimiter=limit=0.95,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a]',
   };
 }
@@ -363,13 +377,17 @@ export function announceFilter(assPath, seconds, delayMs, sting = stingName()) {
 async function makeAnnounce(workDir, { number, total, label = '' }, onProgress = () => {}) {
   let voicePath = null;
   let voiceSeconds = 1.1;
-  try {
-    voicePath = await voiceClip(factKey(number, label), factLine(number, label), { onProgress });
-    voiceSeconds = await durationSeconds(voicePath);
-  } catch (error) {
-    onProgress(`   оголошення ${number} без голосу: ${String(error.message).split('\n')[0]}`);
+  if (announceVoice()) {
+    try {
+      voicePath = await voiceClip(factKey(number, label), factLine(number, label), { onProgress });
+      voiceSeconds = await durationSeconds(voicePath);
+    } catch (error) {
+      onProgress(`   оголошення ${number} без голосу: ${String(error.message).split('\n')[0]}`);
+    }
   }
-  const seconds = Number((ANNOUNCE_LEAD + voiceSeconds + ANNOUNCE_TAIL).toFixed(2));
+  const seconds = voicePath
+    ? Number((ANNOUNCE_LEAD + voiceSeconds + ANNOUNCE_TAIL).toFixed(2))
+    : ANNOUNCE_SILENT;
 
   const assPath = path.join(workDir, `announce-${number}.ass`);
   // Дрібний рядок: назва сюжету, якщо вона є, — те саме, що чути в голосі.
@@ -390,23 +408,27 @@ async function makeAnnounce(workDir, { number, total, label = '' }, onProgress =
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', card]);
 
   let built = false;
-  if (voicePath) {
-    try {
-      const { inputs, filter } = announceFilter(assPath, seconds, Math.round(ANNOUNCE_LEAD * 1000));
-      const args = ['-y',
-        '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${seconds}`,
-        '-i', voicePath];
-      for (const input of inputs) args.push('-f', 'lavfi', '-i', input);
-      args.push('-filter_complex', filter,
-        '-map', '[v]', '-map', '[a]', '-t', String(seconds),
-        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', raw);
-      await run('ffmpeg', args);
-      built = true;
-    } catch (error) {
-      // Складений фільтр міг не зайти на конкретній збірці ffmpeg. Тоді
-      // оголошення лишається з голосом, але без перехідного звуку — краще так,
-      // ніж провалена добірка.
-      onProgress(`   оголошення ${number} без переходу (${String(error.message).split('\n')[0]})`);
+  try {
+    // Голосу може не бути зовсім — тоді на його місце стає тиша тієї ж
+    // довжини. Фільтр від цього не змінюється: він і далі мікшує «голос» зі
+    // звуком переходу, просто голос німий.
+    const { inputs, filter } = announceFilter(assPath, seconds, voicePath ? Math.round(ANNOUNCE_LEAD * 1000) : 0);
+    const args = ['-y',
+      '-f', 'lavfi', '-i', `color=c=black:s=1080x1920:r=30:d=${seconds}`];
+    if (voicePath) args.push('-i', voicePath);
+    else args.push('-f', 'lavfi', '-i', `anullsrc=r=48000:cl=stereo:d=${seconds}`);
+    for (const input of inputs) args.push('-f', 'lavfi', '-i', input);
+    args.push('-filter_complex', filter,
+      '-map', '[v]', '-map', '[a]', '-t', String(seconds),
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', raw);
+    await run('ffmpeg', args);
+    built = true;
+  } catch (error) {
+    // Складений фільтр міг не зайти на конкретній збірці ffmpeg. Тоді
+    // оголошення лишається з голосом, але без перехідного звуку — краще так,
+    // ніж провалена добірка.
+    onProgress(`   оголошення ${number} без переходу (${String(error.message).split('\n')[0]})`);
+    if (voicePath) {
       await buildCard();
       await mixAudio(card, voicePath, raw);
       built = true;
@@ -625,12 +647,12 @@ export async function compileLong(items, { wide = false, keepCta = false, reuseV
     introSeconds = await durationSeconds(introPath);
   }
 
-  // Оголошення «Факт перший», «Факт другий»… — перед КОЖНИМ сюжетом, зокрема
-  // й першим. Вони ж правлять за роздільники: перехідний звук у них уже є.
+  // Картки «ФАКТ 1», «ФАКТ 2»… — перед КОЖНИМ фактом, зокрема й першим. Вони ж
+  // правлять за роздільники: перехідний звук у них уже є.
   let leads = null;
   let sequence = parts;
   if (announce) {
-    onProgress('роблю оголошення фактів');
+    onProgress('роблю картки фактів');
     const cards = [];
     for (let i = 0; i < parts.length; i++) {
       cards.push(await makeAnnounce(

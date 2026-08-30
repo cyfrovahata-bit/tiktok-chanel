@@ -176,6 +176,47 @@ export async function resetDay({ now = new Date(), previews = true } = {}) {
   return removed;
 }
 
+// Вступ диктора: окремий запит, бо він вимагає іншого тону, ніж підбір теми.
+// Модель регулярно зривається в абстракцію («історія перетворює руїни на
+// легенди») або бере дивину з першого ж факту, який глядач побачить одразу
+// після вступу. І те, й те перевіряється кодом — і перепитується.
+//
+// chosen мають бути в порядку відео: саме перший із них іде за вступом.
+async function makeHook({ ask, title, theme, chosen }) {
+  let hook = '';
+  for (const retry of [false, true]) {
+    try {
+      hook = String(await ask(hookPrompt({ title, theme, items: chosen }, { retry }))).trim()
+        .replace(/^["«]|["»]$/g, '').trim();
+    } catch (error) {
+      console.error('[long-day] вступ не згенеровано:', error.message);
+      return '';
+    }
+    const weak = hookWeakness(hook, chosen);
+    if (!weak) return hook;
+    console.error(`[long-day] вступ слабкий (${weak}) — перепитую`);
+  }
+  // І друга спроба слабка: краще без вступу, ніж порожні слова — компонувач
+  // тоді бере звичайну репліку з голосового банку.
+  return '';
+}
+
+// Перегенерувати САМ вступ, не чіпаючи набору, назви й прев'ю. Потрібно, коли
+// текст не сподобався: переробляти через повний скид означало б малювати
+// прев'ю заново.
+export async function rehookDay({ now = new Date(), ask = chatOnce } = {}) {
+  const date = kyivToday(now);
+  const plan = await readPlan(date);
+  if (!plan || plan.cancelled) return plan;
+
+  const all = await readAllItems();
+  // Той самий порядок, що й у готовому відео, — інакше «перший факт» у
+  // перевірці буде не тим, який глядач побачить першим.
+  const { items } = orderEpisodes(all, plan.ids);
+  const hook = await makeHook({ ask, title: plan.title, theme: plan.theme, chosen: items });
+  return writePlan({ ...plan, hook });
+}
+
 // --- Крок 1: підбір ----------------------------------------------------------
 
 export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = notify } = {}) {
@@ -248,23 +289,7 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
   const title = named.honest ? named.title : neutralTitle(size, avoidTitles);
   const theme = named.theme || set.theme || '';
 
-  // Хук диктора: окремий запит, бо він вимагає іншого тону, ніж підбір теми.
-  // Модель регулярно зривається в абстракцію («історія перетворює руїни на
-  // легенди») — такий вступ не тримає нікого, тож перевіряємо й перепитуємо.
-  let hook = '';
-  for (const retry of [false, true]) {
-    try {
-      hook = String(await ask(hookPrompt({ title, theme, items: chosen }, { retry }))).trim()
-        .replace(/^["«]|["»]$/g, '').trim();
-    } catch (error) {
-      console.error('[long-day] хук не згенеровано:', error.message);
-      break;
-    }
-    const weak = hookWeakness(hook, chosen);
-    if (!weak) break;
-    console.error(`[long-day] вступ слабкий (${weak}) — перепитую`);
-    if (retry) hook = '';   // і друга спроба слабка: краще без хука, ніж порожні слова
-  }
+  const hook = await makeHook({ ask, title, theme, chosen });
 
   const plan = {
     date,
