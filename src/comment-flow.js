@@ -43,6 +43,17 @@ const SKIP = 'ПРОПУСТИТИ';
 // Реєстр платформ: ключ → адаптер. Заповнюється при старті (registerPlatform).
 const platforms = new Map();
 
+// Які платформи справді зареєстровані. Потрібно для healthz: інакше єдиний
+// спосіб дізнатися, чи ввімкнено коментарі на YouTube, — чекати картку.
+export function registeredPlatforms() {
+  return [...platforms.values()].map((a) => ({
+    key: a.key,
+    label: a.label,
+    ready: a.enabled ? Boolean(a.enabled()) : true,
+    likes: Boolean(a.like),
+  }));
+}
+
 export function registerPlatform(adapter) {
   platforms.set(adapter.key, adapter);
 }
@@ -468,8 +479,10 @@ const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 export async function checkPlatform(adapter, options = {}) {
   const state = options.state || await readState();
 
-  // Facebook уже просив зупинитися — мовчимо, доки не мине пауза. Пробувати
+  // Платформа вже просила зупинитися — мовчимо, доки не мине пауза. Пробувати
   // «ще разочок» саме тут і перетворює тимчасове обмеження на постійне.
+  // Пауза спільна для всіх платформ навмисно: стеля дій на годину й добу теж
+  // спільна, і саме вона тримає канал подалі від позначки «бот».
   if (isPaused(state.budget)) {
     return { platform: adapter.key, checked: 0, fresh: 0, asked: 0, flagged: 0, paused: true };
   }
@@ -507,8 +520,9 @@ export async function checkPlatform(adapter, options = {}) {
   // прочитали, має кожен.
   state.liked = state.liked || {};
   let likes = 0;
-  // Кожна дія у Facebook — лайк чи відповідь — проходить через один вентиль:
-  // стеля на годину й добу, пауза між діями, зупинка на скаргу про темп.
+  // Кожна дія — лайк чи відповідь, байдуже на якій платформі — проходить через
+  // один вентиль: стеля на годину й добу, пауза між діями, зупинка на скаргу
+  // про темп.
   let acted = 0;
   const act = async (what, run) => {
     if (!canAct(state.budget)) { result.throttled = true; return false; }
@@ -524,7 +538,7 @@ export async function checkPlatform(adapter, options = {}) {
       if (isRateLimit(error.message)) {
         state.budget = pause(state.budget);
         result.throttled = true;
-        console.error(`[comments:${adapter.key}] Facebook попросив зупинитися — пауза`);
+        console.error(`[comments:${adapter.key}] ${adapter.label} попросив зупинитися — пауза`);
         return false;
       }
       console.error(`[comments:${adapter.key}] ${what}:`, error.message);

@@ -27,7 +27,31 @@ async function channelId(client) {
   return id;
 }
 
-// Свіжі коментарі верхнього рівня з усіх роликів каналу.
+// Скільки гілок за прохід можна догортати повністю. commentThreads віддає не
+// більше п'яти вкладених реплік; довші гілки доводиться довантажувати окремим
+// викликом. Кожен коштує одиницю квоти, тож ставимо стелю.
+const REPLY_FETCH_MAX = Number(process.env.YT_COMMENTS_REPLY_FETCH) || 5;
+
+function byTime(a, b) {
+  return String(a.snippet?.publishedAt || '').localeCompare(String(b.snippet?.publishedAt || ''));
+}
+
+async function fetchReplies(client, parentId) {
+  const res = await client.comments.list({
+    part: ['snippet'],
+    parentId,
+    maxResults: 100,
+    textFormat: 'plainText',
+  });
+  return res.data?.items || [];
+}
+
+// Свіжі коментарі з усіх роликів каналу — і верхнього рівня, і в гілках.
+//
+// Гілка дає РІВНО ОДНОГО кандидата: останню чужу репліку. Інакше на одну
+// розмову прилітало б по три картки, і канал відповідав би тричі там, де
+// досить раз. Уся розмова їде поруч контекстом, щоб відповідь трималася
+// бесіди, а не одного коментаря з її середини.
 export async function fetchComments(options = {}) {
   const client = options.client || youtube();
   const mine = options.channelId || await channelId(client);
@@ -40,23 +64,75 @@ export async function fetchComments(options = {}) {
     maxResults: Number(options.maxResults) || 20,
     textFormat: 'plainText',
   });
-  return (res.data?.items || []).map((item) => {
+
+  const out = [];
+  let expanded = 0;
+  for (const item of res.data?.items || []) {
     const top = item.snippet?.topLevelComment;
-    // Відповідь від нашого каналу в гілці означає, що питання вже закрите —
-    // байдуже, відповів бот чи власник руками з телефона. Без цієї перевірки
-    // бот пропонував би відповісти вдруге на все, що було до його ввімкнення.
-    const answered = (item.replies?.comments || [])
-      .some((r) => r.snippet?.authorChannelId?.value === mine);
-    return {
-      id: top?.id,
-      text: top?.snippet?.textOriginal || '',
-      author: top?.snippet?.authorDisplayName || '—',
-      authorChannelId: top?.snippet?.authorChannelId?.value || '',
-      videoId: item.snippet?.videoId || '',
-      publishedAt: top?.snippet?.publishedAt || '',
-      answered,
-    };
-  }).filter((c) => c.id && c.authorChannelId !== mine && !c.answered);
+    if (!top?.id) continue;
+    const videoId = item.snippet?.videoId || '';
+
+    let replies = [...(item.replies?.comments || [])];
+    const total = Number(item.snippet?.totalReplyCount) || 0;
+    if (total > replies.length && expanded < REPLY_FETCH_MAX) {
+      expanded += 1;
+      try {
+        replies = await fetchReplies(client, top.id);
+      } catch (error) {
+        console.error('[comments:yt] гілку не догорнув:', error.message);
+      }
+    }
+    // Порядок реплік API не гарантує, а нам потрібна саме ОСТАННЯ.
+    replies.sort(byTime);
+
+    const isOurs = (c) => c.snippet?.authorChannelId?.value === mine;
+    const textOf = (c) => c.snippet?.textOriginal || c.snippet?.textDisplay || '';
+    const nameOf = (c) => c.snippet?.authorDisplayName || 'Глядач';
+
+    const ours = replies.filter(isOurs);
+    const answered = ours.length > 0;
+    const lastOursAt = answered ? String(ours[ours.length - 1].snippet?.publishedAt || '') : '';
+
+    // Верхній рівень — доки канал у цій гілці не писав.
+    if (!isOurs(top) && textOf(top) && !answered) {
+      out.push({
+        id: top.id,
+        text: textOf(top),
+        author: nameOf(top),
+        videoId,
+        publishedAt: top.snippet?.publishedAt || '',
+      });
+    }
+
+    const foreign = replies.filter((r) => r.id && !isOurs(r) && textOf(r));
+    // Уже відповідали — беремо лише те, що з'явилося ПІСЛЯ нашої репліки.
+    const after = answered
+      ? foreign.filter((r) => String(r.snippet?.publishedAt || '') > lastOursAt)
+      : foreign;
+    const last = after[after.length - 1];
+    if (!last) continue;
+
+    out.push({
+      id: last.id,
+      text: textOf(last),
+      author: nameOf(last),
+      videoId,
+      publishedAt: last.snippet?.publishedAt || '',
+      parentId: top.id,
+      // YouTube, як і Facebook, має рівно два рівні: відповідь публікується на
+      // верхній коментар гілки, а до потрібної людини звертаємось на ім'я.
+      replyTo: top.id,
+      parentAuthor: nameOf(top),
+      parentText: textOf(top),
+      threadAnswered: answered,
+      thread: replies.filter((r) => textOf(r)).map((r) => ({
+        author: isOurs(r) ? 'Канал' : nameOf(r),
+        text: textOf(r),
+        ours: isOurs(r),
+      })),
+    });
+  }
+  return out;
 }
 
 export async function publishReply(commentId, text, options = {}) {

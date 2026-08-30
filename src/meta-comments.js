@@ -173,38 +173,82 @@ export function instagramEnabled() {
   return Boolean(process.env.META_IG_USER_ID && process.env.META_PAGE_ACCESS_TOKEN);
 }
 
+// Коментарі під дописами Instagram — і верхнього рівня, і в гілках.
+//
+// Гілка дає РІВНО ОДНОГО кандидата: останню чужу репліку, а вся розмова їде
+// поруч контекстом. Логіка та сама, що у Facebook, бо й обмеження ті самі:
+// два рівні вкладеності, відповідь публікується на верхній коментар.
 export async function fetchInstagramComments(options = {}) {
   const igUserId = process.env.META_IG_USER_ID;
   const data = await graphRequest(`${encodeURIComponent(igUserId)}/media`, {
     params: {
-      fields: 'id,permalink,comments.limit(25){id,text,timestamp,username,from,replies{username,from}}',
+      // caption потрібен, щоб знайти ролик за текстом, коли ID допису на файлі
+      // ще не записано; replies — щоб бачити розмову, а не окремі репліки.
+      fields: 'id,caption,permalink,comments.limit(25)'
+        + '{id,text,timestamp,username,from,replies.limit(25){id,text,timestamp,username,from}}',
       limit: options.limit || LIMIT,
     },
     token: options.token || token(),
     fetchImpl: options.fetchImpl,
   });
+
   const own = String(process.env.META_IG_USERNAME || '').toLowerCase();
+  // Instagram не завжди віддає from, тож звіряємо ще й за іменем автора.
+  const isOurs = (c) => c?.from?.id === igUserId
+    || (own && String(c?.username || '').toLowerCase() === own);
+  const nameOf = (c) => c?.username || 'глядач';
+  const byTime = (a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || ''));
+
   const out = [];
   for (const media of data.data || []) {
+    const common = {
+      mediaId: media.id || '',
+      postText: media.caption || '',
+      permalink: media.permalink || '',
+    };
     for (const c of media.comments?.data || []) {
-      if (!c.id || !c.text) continue;
-      // Instagram не завжди віддає from, тож звіряємо ще й за іменем автора.
-      if (c.from?.id === igUserId) continue;
-      if (own && String(c.username || '').toLowerCase() === own) continue;
-      // Наша відповідь у гілці означає, що питання вже закрите.
-      const answered = (c.replies?.data || []).some((r) => (
-        r.from?.id === igUserId || (own && String(r.username || '').toLowerCase() === own)
-      ));
-      if (answered) continue;
+      if (!c.id || !c.text || isOurs(c)) continue;
+
+      const replies = [...(c.replies?.data || [])].sort(byTime);
+      const ours = replies.filter(isOurs);
+      const answered = ours.length > 0;
+      const lastOursAt = answered ? String(ours[ours.length - 1].timestamp || '') : '';
+
+      if (!answered) {
+        out.push({
+          ...common,
+          id: c.id,
+          text: c.text,
+          author: nameOf(c),
+          publishedAt: c.timestamp || '',
+        });
+      }
+
+      const foreign = replies.filter((r) => r.id && r.text && !isOurs(r));
+      const after = answered
+        ? foreign.filter((r) => String(r.timestamp || '') > lastOursAt)
+        : foreign;
+      const last = after[after.length - 1];
+      if (!last) continue;
+
       out.push({
-        id: c.id,
-        text: c.text,
-        author: c.username || 'глядач',
-        // mediaId потрібен, щоб знайти рядок таблиці за appProperties відео й
-        // дати моделі контекст ролика. permalink для цього не годиться.
-        mediaId: media.id || '',
-        permalink: media.permalink || '',
-        publishedAt: c.timestamp || '',
+        ...common,
+        id: last.id,
+        text: last.text,
+        author: nameOf(last),
+        publishedAt: last.timestamp || '',
+        parentId: c.id,
+        // Рівнів два: відповідь іде на верхній коментар гілки, а до потрібної
+        // людини звертаємось на ім'я в самому тексті.
+        replyTo: c.id,
+        parentAuthor: nameOf(c),
+        parentText: c.text,
+        threadAnswered: answered,
+        thread: replies.filter((r) => r.text).map((r) => ({
+          author: isOurs(r) ? 'Канал' : nameOf(r),
+          text: r.text,
+          ours: isOurs(r),
+        })),
       });
     }
   }

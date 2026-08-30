@@ -36,7 +36,7 @@ import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
 import { metaStatus } from '../src/meta.js';
 import { googleConfigured, googleStatus, oauthConfigured, consentUrl, youtubeConsentUrl, exchangeCode, tokenScopes, youtubeTokenScopes, youtubeTokenSource } from '../src/google-auth.js';
 import { channelInfo, channelVideoStats } from '../src/youtube.js';
-import { registerPlatform, startCommentWatcher, checkAll, pendingSummary, cleanupStale, rethinkSkipped } from '../src/comment-flow.js';
+import { registerPlatform, registeredPlatforms, startCommentWatcher, checkAll, pendingSummary, cleanupStale, rethinkSkipped } from '../src/comment-flow.js';
 import { youtubeAdapter } from '../src/yt-comments.js';
 import { facebookAdapter, instagramAdapter } from '../src/meta-comments.js';
 import { startTelegramLoop } from '../src/telegram-loop.js';
@@ -1521,6 +1521,9 @@ const server = http.createServer(async (req, res) => {
         googleMode: g.mode,
         canUpload: g.canUpload,
         googleError: g.error,
+        // Які платформи слухають коментарі. Без цього єдиний спосіб дізнатися,
+        // чи ввімкнено YouTube, — чекати картку в Telegram.
+        comments: registeredPlatforms(),
         watch: watchStatus(),
         poll: pollStatus(),
         serviceAccount: g.email || null,
