@@ -1073,8 +1073,46 @@
       }
       add('📋 Промт прев\'ю для відео', plan.prompts?.video, 'Промт скопійовано');
       add('📋 Промт обкладинки YouTube', plan.prompts?.youtube, 'Промт скопійовано');
-      add('📋 Текст для Facebook', plan.meta?.facebook, 'Текст скопійовано');
+      if (!plan.builtAt) add('📋 Текст для Facebook', plan.meta?.facebook, 'Текст скопійовано');
       box.appendChild(actions);
+
+      // Готова добірка: подивитися, скопіювати тексти, забрати файл — те саме,
+      // що й для звичайних роликів, бо далі власник робить рівно те саме.
+      if (plan.builtAt && plan.videoName) {
+        const id = plan.videoName.replace(/\.mp4$/i, '');
+        const videoUrl = `/api/video/${encodeURIComponent(id)}`;
+
+        const vw = el('div', 'video-wrap');
+        const v = el('video');
+        v.controls = true; v.playsInline = true; v.preload = 'none'; v.src = videoUrl;
+        vw.appendChild(v);
+        box.appendChild(vw);
+
+        if (plan.meta?.youtubeTitle) {
+          box.appendChild(copyable({ label: 'Назва для YouTube', icon: '📌', main: plan.meta.youtubeTitle }));
+        }
+        if (plan.meta?.description) {
+          box.appendChild(copyable({ label: 'Опис + таймкоди', icon: '📝', main: plan.meta.description, isDesc: true }));
+        }
+        if (plan.meta?.facebook) {
+          box.appendChild(copyable({ label: 'Текст для Facebook', icon: '💬', main: plan.meta.facebook, isDesc: true }));
+        }
+
+        const files = el('div', 'own-actions');
+        const dl = el('button', 'btn secondary', '⬇️ Завантажити відео');
+        dl.addEventListener('click', () => downloadVideo({
+          id, videoUrl, fileName: plan.videoName,
+        }));
+        files.appendChild(dl);
+        if (plan.videoFileId) {
+          const drive = document.createElement('a');
+          drive.className = 'btn secondary';
+          drive.href = `https://drive.google.com/file/d/${plan.videoFileId}/view`;
+          drive.target = '_blank'; drive.rel = 'noopener'; drive.textContent = 'на Drive';
+          files.appendChild(drive);
+        }
+        box.appendChild(files);
+      }
 
       // Хід ручного монтажу: останні рядки журналу, щоб було видно, що воно живе.
       if (data.build?.running || data.build?.error) {
