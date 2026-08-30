@@ -87,6 +87,11 @@ export async function fetchFacebookComments(options = {}) {
         author: last.from?.name || 'Глядач',
         publishedAt: last.created_time || '',
         parentId: c.id,
+        // Facebook приймає відповідь ЛИШЕ на верхній коментар: рівнів у нього
+        // два, і POST на ID вкладеної репліки повертає «Unsupported post
+        // request». Тому відповідаємо в гілку через її верхній коментар, а до
+        // потрібної людини звертаємось на ім'я в самому тексті.
+        replyTo: c.id,
         parentAuthor: c.from?.name || 'Глядач',
         parentText: c.message || '',
         threadAnswered: answered,

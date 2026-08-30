@@ -135,3 +135,72 @@ test('у звичайному коментарі правил гілки нем�
   const p = draftPrompt({ author: 'Іван', text: 'дякую' }, 'Facebook', null);
   assert.doesNotMatch(p, /ЦЕ ВІДПОВІДЬ У ГІЛЦІ/);
 });
+
+// --- Куди саме йде відповідь -------------------------------------------------
+// Facebook приймає відповідь ЛИШЕ на верхній коментар. POST на ID вкладеної
+// репліки повертає «Unsupported post request» — на цьому й спіткнулась перша
+// спроба відповісти в гілці.
+import { registerPlatform, handleCallback } from '../src/comment-flow.js';
+
+test('вкладена репліка несе ID верхнього коментаря', async () => {
+  const list = await fetchFacebookComments({
+    fetchImpl: pageWith([{
+      id: 'CM_TOP',
+      message: 'А хто його будував?',
+      from: { id: 'U1', name: 'Оксана' },
+      comments: {
+        data: [{ id: 'CM_REPLY', message: 'Турки', from: { id: 'U2', name: 'Петро' }, created_time: '2026-08-01T10:00:00+0000' }],
+      },
+    }]),
+  });
+  const inThread = list.find((c) => c.parentId);
+  assert.equal(inThread.id, 'CM_REPLY', 'відповідаємо саме на цю репліку за змістом');
+  assert.equal(inThread.replyTo, 'CM_TOP', 'а публікуємо у верхній коментар');
+});
+
+test('надсилання з Telegram шле у верхній коментар, а не у вкладену репліку', async () => {
+  const sent = [];
+  registerPlatform({
+    key: 'fbtest',
+    label: 'FB',
+    icon: '💬',
+    enabled: () => true,
+    fetch: async () => [],
+    reply: async (id, text) => { sent.push({ id, text }); },
+    link: () => '',
+  });
+
+  process.env.TELEGRAM_CHAT_ID = '77';
+  const state = {
+    seen: {},
+    drafts: { 'fbtest:CM_REPLY': { text: 'Петре, дякуємо!', messageId: 5, replyTo: 'CM_TOP' } },
+  };
+  // Далі за публікацією йдуть Drive і Telegram, яких у тесті немає — їхнє
+  // падіння нас не цікавить, важливо КУДИ пішла відповідь.
+  await handleCallback(
+    { id: 'q1', data: 'c:s:fbtest:CM_REPLY', from: { id: 77 }, message: { message_id: 5 } },
+    { state },
+  ).catch(() => {});
+
+  assert.deepEqual(sent, [{ id: 'CM_TOP', text: 'Петре, дякуємо!' }]);
+});
+
+// --- Зрозумілі помилки -------------------------------------------------------
+import { humanError } from '../src/comment-flow.js';
+
+test('зникнення коментаря пояснюється по-людськи', () => {
+  // Саме це побачив власник: «Unsupported post request. Object with ID…».
+  assert.equal(
+    humanError("Unsupported post request. Object with ID '122109' does not exist, cannot be loaded due to missing permissions"),
+    'коментар уже видалено або сховано',
+  );
+});
+
+test('обмеження й доступи теж називаються словами', () => {
+  assert.match(humanError('(#4) Application request limit reached'), /обмежив дії Сторінки/);
+  assert.match(humanError('Invalid OAuth access token'), /перевір токен/);
+});
+
+test('незнайому помилку не ховаємо', () => {
+  assert.equal(humanError('щось геть нове'), 'щось геть нове');
+});

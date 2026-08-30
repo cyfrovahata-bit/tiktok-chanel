@@ -507,7 +507,7 @@ export async function checkPlatform(adapter, options = {}) {
     const text = thanksReply(comment, { recent });
     try {
       await like(comment);
-      await adapter.reply(comment.id, text, options);
+      await adapter.reply(comment.replyTo || comment.id, text, options);
     } catch (error) {
       // Не вдалося — лишаємо коментар нерозібраним: наступний прохід або
       // відповість, або віддасть його власникові.
@@ -564,7 +564,13 @@ export async function checkPlatform(adapter, options = {}) {
       keyboard(adapter.key, comment.id, Boolean(draft)),
     );
     state.seen[key] = 'pending';
-    state.drafts[key] = { text: draft || null, messageId: message?.message_id ?? null };
+    state.drafts[key] = {
+      text: draft || null,
+      messageId: message?.message_id ?? null,
+      // Для гілки це ID верхнього коментаря: на вкладену репліку Facebook
+      // відповідь не приймає.
+      replyTo: comment.replyTo || null,
+    };
     if (draft) result.asked += 1; else result.flagged += 1;
   }
 
@@ -610,6 +616,23 @@ export function parseCallbackData(data) {
   return null;
 }
 
+// Facebook на зниклий об'єкт відповідає довгою англійською фразою, з якої
+// власникові нічого не зрозуміло. Найчастіша причина буденна: поки картка
+// чекала рішення, коментар видалили або сховали.
+export function humanError(message) {
+  const text = String(message || '');
+  if (/does not exist|cannot be loaded|Unsupported post request/i.test(text)) {
+    return 'коментар уже видалено або сховано';
+  }
+  if (/rate limit|too many|#4\b|#17\b/i.test(text)) {
+    return 'Facebook тимчасово обмежив дії Сторінки — спробуй за годину';
+  }
+  if (/permission|OAuth|access token/i.test(text)) {
+    return 'бракує доступу: перевір токен Сторінки';
+  }
+  return text;
+}
+
 export async function handleCallback(callbackQuery, options = {}) {
   const parsed = parseCallbackData(callbackQuery?.data);
   if (!parsed) return false;
@@ -650,11 +673,11 @@ export async function handleCallback(callbackQuery, options = {}) {
       return true;
     }
     try {
-      await adapter.reply(commentId, draft.text, options);
+      await adapter.reply(draft.replyTo || commentId, draft.text, options);
       state.seen[key] = 'sent';
       await finish('Опубліковано ✅');
     } catch (error) {
-      await answerCallbackQuery(callbackQuery.id, `Не вдалося: ${error.message}`.slice(0, 190));
+      await answerCallbackQuery(callbackQuery.id, `Не вдалося: ${humanError(error.message)}`.slice(0, 190));
     }
     return true;
   }
@@ -670,21 +693,21 @@ export async function handleMessage(message, options = {}) {
   const state = options.state || await readState();
   const entry = Object.entries(state.drafts).find(([, d]) => d.messageId === replyTo);
   if (!entry) return false;
-  const [key] = entry;
+  const [key, draft] = entry;
   const [platformKey, ...rest] = key.split(':');
   const adapter = platforms.get(platformKey);
   if (!adapter) return false;
 
   const notify = options.notifyFn || sendMessage;
   try {
-    await adapter.reply(rest.join(':'), text, options);
+    await adapter.reply(draft.replyTo || rest.join(':'), text, options);
     state.seen[key] = 'sent';
     delete state.drafts[key];
     await writeState(state);
     await editMessageReplyMarkup(ownerChatId(), replyTo).catch(() => {});
     await notify(ownerChatId(), `✅ Твою відповідь опубліковано (${adapter.label}).`);
   } catch (error) {
-    await notify(ownerChatId(), `⚠️ Не вдалося опублікувати відповідь: ${error.message}`);
+    await notify(ownerChatId(), `⚠️ Не вдалося опублікувати відповідь: ${humanError(error.message)}`);
   }
   return true;
 }
