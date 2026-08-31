@@ -42,6 +42,14 @@ import { facebookAdapter, instagramAdapter } from '../src/meta-comments.js';
 import { startTelegramLoop } from '../src/telegram-loop.js';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
+
+// Які промти віддаємо назовні і з яких файлів. Ключ — те, що стоїть у адресі
+// (/p/tema.txt), значення — файл у prompts/. Список закритий навмисно: інакше
+// адресою можна було б витягти будь-який файл із репозиторію.
+export const PUBLIC_PROMPTS = {
+  'tema.txt': 'copy-1-tema.txt',
+  'foto.txt': 'copy-2-foto.txt',
+};
 const PORT = Number(process.env.PORT) || 3000;
 
 // Ручний монтаж сьогоднішньої добірки: чи триває й що встиг зробити.
@@ -304,6 +312,30 @@ const server = http.createServer(async (req, res) => {
       const html = await readFile(path.join(DIR, `public${pathname}.html`), 'utf8');
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(html);
+      return;
+    }
+
+    // Промти для відкладених завдань ChatGPT. Раніше їхній текст жив УСЕРЕДИНІ
+    // завдання: щоб щось виправити, треба було відкрити ChatGPT і вставити
+    // новий текст руками, а історії змін не лишалося взагалі. Тепер текст
+    // лежить у репозиторії, а завдання щоразу читає його звідси свіжим.
+    //
+    // Віддаємо рівно вміст файлу, без жодного рядка від себе: усе зайве
+    // модель прочитає як частину інструкції. І без кешу — правка має діяти
+    // з наступного запуску, а не колись.
+    if (req.method === 'GET' && pathname.startsWith('/p/')) {
+      const file = PUBLIC_PROMPTS[pathname.slice(3)];
+      if (!file) {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end('Такого промту немає');
+        return;
+      }
+      const text = await readFile(path.join(DIR, '..', 'prompts', file), 'utf8');
+      res.writeHead(200, {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'no-store',
+      });
+      res.end(text);
       return;
     }
 
