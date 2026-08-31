@@ -210,6 +210,32 @@ export async function splitDuplicateIds(items, { rename = renameRowId } = {}) {
   return { renamed, kept };
 }
 
+// Пам'ять оголошених статусів чистимо за змістом, а не за довжиною: лишаємо
+// рядки, які ще є в таблиці, і викидаємо ті, яких уже немає.
+//
+// Обрізати «останні N» не можна. Таблиця переросла ту межу, кожен прохід
+// відрізав початок файлу, забуті рядки поверталися в кінець і зсували решту —
+// і рядок зі статусом NEW рано чи пізно опинявся серед забутих. Тоді монітор
+// вважав його щойно побаченим і слав «Тема на сьогодні» знову. І знову.
+//
+// Ключі fail: та dupe: живуть за тим самим ID, тож ідуть слідом за рядком.
+export function pruneNotices(seen, keys) {
+  const alive = new Set(keys);
+  // Ключ рядка може бути «ID» або «ID#рядок» — для попереджень порівнюємо саме
+  // ID, інакше попередження про дублікат зникало б після кожного зсуву рядків.
+  const ids = new Set([...alive].map((k) => String(k).split('#')[0]));
+  const out = {};
+  for (const [key, value] of Object.entries(seen || {})) {
+    const warn = /^(fail|dupe):(.*)$/.exec(key);
+    if (warn) {
+      if (ids.has(warn[2].split('#')[0])) out[key] = value;
+      continue;
+    }
+    if (alive.has(key)) out[key] = value;
+  }
+  return out;
+}
+
 // Один прохід спостерігача: оголошує нові NEW і ERROR. Перехід у DONE
 // оголошує сам конвеєр монтажу («знайшов тему» → «відео згенеровано»),
 // тому тут DONE лише запам'ятовуємо, щоб не сказати про нього двічі.
@@ -271,7 +297,12 @@ export async function watchStages() {
     if (text) { await notify(text); announced++; }
   }
 
-  if (changed) await writeNotices(seen);
+  // Рядки, яких у таблиці вже немає, з пам'яті прибираємо — інакше файл росте
+  // без кінця, а межа довжини колись знову з'їсть щось потрібне.
+  const live = pruneNotices(seen, items.filter((it) => it.id).map(keyOf));
+  if (changed || Object.keys(live).length !== Object.keys(seen).length) {
+    await writeNotices(live);
+  }
   watchState = { ...watchState, lastError: null, announced };
   return announced;
 }
