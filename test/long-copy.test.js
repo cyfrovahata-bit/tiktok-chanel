@@ -211,18 +211,27 @@ import {
   CAPTION_MAX_WORDS, CAPTION_MAX_CHARS,
 } from '../src/long-copy.js';
 
-test('промт напису показує межі й учить на прикладах', () => {
+test('промт напису вимагає писати про всю добірку, а не про один факт', () => {
   const p = captionPrompt({ title: 'Серед кам\'яних свідків', theme: 'камінь', items: FIVE });
   assert.match(p, new RegExp(`${CAPTION_MAX_WORDS} слова`));
   assert.match(p, new RegExp(`${CAPTION_MAX_CHARS} літер`));
+  assert.match(p, /напис про ВСЮ добірку/);
   assert.match(p, /✅/);
   assert.match(p, /❌/);
 });
 
-test('короткий ударний напис проходить', () => {
-  for (const good of ['ЗНАЙШЛИ МАГНІТОМ', 'ПІД ЗЕМЛЕЮ', 'КАМІНЬ І ЧАС']) {
-    assert.equal(captionWeakness(good), '', good);
+test('короткий напис про набір проходить', () => {
+  for (const good of ['ІНША УКРАЇНА', 'ПІД ЗЕМЛЕЮ', 'КАМІНЬ І ЧАС']) {
+    assert.equal(captionWeakness(good, { items: FIVE }), '', good);
   }
+});
+
+test('напис про ОДИН факт не проходить — усередині ціла добірка', () => {
+  // Саме ця помилка й трапилась: назву відео («Місто, яке знайшли магнітом»)
+  // взяли за тему добірки, і напис пообіцяв би одне місто замість п'ятнадцяти
+  // різних фактів.
+  assert.match(captionWeakness('ХОТИНСЬКА ФОРТЕЦЯ', { items: FIVE }), /один факт/);
+  assert.match(captionWeakness('ПРО ПАЛАНОК', { items: FIVE }), /один факт/);
 });
 
 test('довгий напис, число й запитання не проходять', () => {
@@ -234,7 +243,7 @@ test('довгий напис, число й запитання не прохо�
 });
 
 test('відповідь моделі чиститься й піднімається в капс', () => {
-  assert.equal(parseCaption('«знайшли магнітом».'), 'ЗНАЙШЛИ МАГНІТОМ');
+  assert.equal(parseCaption('«інша україна».'), 'ІНША УКРАЇНА');
   assert.equal(parseCaption('- під землею\nще щось'), 'ПІД ЗЕМЛЕЮ');
 });
 
@@ -252,5 +261,13 @@ test('запасний напис завжди вкладається у вла�
   ]) {
     const caption = captionFromTitle(title);
     assert.equal(captionWeakness(caption), '', `${title} → ${caption}`);
+  }
+});
+
+test('без списку фактів промти не лишають порожніх розділів', () => {
+  const bare = { title: 'Інша Україна', theme: 'факти про Україну', items: [] };
+  for (const p of [previewPromptYouTube(bare), captionPrompt(bare)]) {
+    assert.doesNotMatch(p, /ФАКТИ ВСЕРЕДИНІ/);
+    assert.doesNotMatch(p, /undefined|\$\{/);
   }
 });

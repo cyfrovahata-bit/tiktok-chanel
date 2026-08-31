@@ -248,7 +248,7 @@ async function makeCaption({ ask, title, theme, chosen }) {
       console.error('[long-day] напис обкладинки не згенеровано:', error.message);
       break;
     }
-    const weak = captionWeakness(caption);
+    const weak = captionWeakness(caption, { items: chosen });
     if (!weak) return caption;
     console.error(`[long-day] напис «${caption}» не підійшов (${weak})`);
   }
