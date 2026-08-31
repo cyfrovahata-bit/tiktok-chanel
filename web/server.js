@@ -44,13 +44,46 @@ import { startTelegramLoop } from '../src/telegram-loop.js';
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 
 // Які промти віддаємо назовні і з яких файлів. Ключ — те, що стоїть у адресі
-// (/p/tema.txt), значення — файл у prompts/. Список закритий навмисно: інакше
+// після /p/, значення — файл у prompts/. Список закритий навмисно: інакше
 // адресою можна було б витягти будь-який файл із репозиторію.
+//
+// Каналів два, і промти в них свої, тож адреси названі за каналом. Короткі
+// назви без каналу лишаються як синоніми для «Чи Ви Знали?»: перше завдання
+// вже переведене на них, і ламати його переїздом не варто.
+//
+// Кожен промт доступний двома адресами: з .txt — чистий текст, без — сторінка
+// з тим самим текстом усередині <pre>. Обидві потрібні, бо різні читачі
+// поводяться по-різному: чиясь качалка може не любити text/plain.
 export const PUBLIC_PROMPTS = {
-  'tema.txt': 'copy-1-tema.txt',
-  'foto.txt': 'copy-2-foto.txt',
+  'znaly/tema': 'copy-1-tema.txt',
+  'znaly/foto': 'copy-2-foto.txt',
+  // Синоніми без назви каналу.
+  tema: 'copy-1-tema.txt',
+  foto: 'copy-2-foto.txt',
 };
-const PORT = Number(process.env.PORT) || 3000;
+
+// Людські назви для сторінки-переліку.
+export const PROMPT_TITLES = {
+  'znaly/tema': '«Чи Ви Знали?» — тема і сюжет (08:00, 17:00)',
+  'znaly/foto': '«Чи Ви Знали?» — фото і архів (15:00, 20:00)',
+};
+
+// Промт іде всередину <pre>, тож кутові дужки з нього треба знешкодити:
+// інакше «<код і назва>» з примітки браузер прийме за тег і з'їсть.
+export function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// Розбирає шлях після /p/. Повертає { file, raw } або null.
+export function promptRoute(rest) {
+  const raw = rest.endsWith('.txt');
+  const key = raw ? rest.slice(0, -4) : rest;
+  const file = PUBLIC_PROMPTS[key];
+  return file ? { key, file, raw } : null;
+}const PORT = Number(process.env.PORT) || 3000;
 
 // Ручний монтаж сьогоднішньої добірки: чи триває й що встиг зробити.
 let longBuild = { running: false, log: [] };
@@ -315,27 +348,58 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Пошуковим і чат-ботам тут можна все: інакше ChatGPT, який читає промт
+    // за посиланням, спершу спитає robots.txt, дістане 404 і може вирішити,
+    // що заходити не варто.
+    if (pathname === '/robots.txt') {
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end(req.method === 'HEAD' ? undefined : 'User-agent: *\nAllow: /\n');
+      return;
+    }
+
     // Промти для відкладених завдань ChatGPT. Раніше їхній текст жив УСЕРЕДИНІ
     // завдання: щоб щось виправити, треба було відкрити ChatGPT і вставити
     // новий текст руками, а історії змін не лишалося взагалі. Тепер текст
     // лежить у репозиторії, а завдання щоразу читає його звідси свіжим.
     //
-    // Віддаємо рівно вміст файлу, без жодного рядка від себе: усе зайве
-    // модель прочитає як частину інструкції. І без кешу — правка має діяти
-    // з наступного запуску, а не колись.
-    if (req.method === 'GET' && pathname.startsWith('/p/')) {
-      const file = PUBLIC_PROMPTS[pathname.slice(3)];
-      if (!file) {
-        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-        res.end('Такого промту немає');
+    // HEAD обробляємо нарівні з GET. Спершу він відповідав 404 — качалки
+    // перевіряють ним, чи сторінка існує, і на 404 просто не йдуть по неї.
+    // Саме через це ChatGPT сорок секунд «не міг відкрити сторінку».
+    if ((req.method === 'GET' || req.method === 'HEAD') && pathname.startsWith('/p/')) {
+      const rest = pathname.slice(3);
+
+      // Перелік доступних промтів — щоб не тримати адреси в голові.
+      if (!rest) {
+        const items = Object.keys(PROMPT_TITLES)
+          .map((key) => `<li><a href="/p/${key}.txt">${key}.txt</a> — ${escapeHtml(PROMPT_TITLES[key])}</li>`)
+          .join('\n');
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end(req.method === 'HEAD' ? undefined
+          : `<!doctype html><meta charset="utf-8"><title>Промти</title><ul>${items}</ul>`);
         return;
       }
-      const text = await readFile(path.join(DIR, '..', 'prompts', file), 'utf8');
+
+      const route = promptRoute(rest);
+      if (!route) {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end(req.method === 'HEAD' ? undefined : 'Такого промту немає');
+        return;
+      }
+
+      const text = await readFile(path.join(DIR, '..', 'prompts', route.file), 'utf8');
+      // Віддаємо рівно вміст файлу, без жодного рядка від себе: усе зайве
+      // модель прочитає як частину інструкції. І без кешу — правка має діяти
+      // з наступного запуску, а не колись.
+      const body = route.raw
+        ? text
+        : `<!doctype html><meta charset="utf-8"><title>${escapeHtml(route.key)}</title>`
+          + `<pre style="white-space:pre-wrap;font:14px/1.5 system-ui">${escapeHtml(text)}</pre>`;
       res.writeHead(200, {
-        'content-type': 'text/plain; charset=utf-8',
+        'content-type': route.raw ? 'text/plain; charset=utf-8' : 'text/html; charset=utf-8',
+        'content-length': Buffer.byteLength(body),
         'cache-control': 'no-store',
       });
-      res.end(text);
+      res.end(req.method === 'HEAD' ? undefined : body);
       return;
     }
 
