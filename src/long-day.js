@@ -30,6 +30,7 @@ import {
 import {
   metaPrompt, parseMeta, youtubeDescription, facebookPost,
   previewPromptVideo, previewPromptYouTube, unitePrompt, parseTail, tailWeakness,
+  captionPrompt, parseCaption, captionWeakness, captionFromTitle,
 } from './long-copy.js';
 import { INTRO_OPENERS, introLine } from './voice-bank.js';
 import { kyivToday, kyivMinutes } from './kyiv.js';
@@ -235,6 +236,25 @@ export async function rehookDay({ now = new Date(), ask = chatOnce } = {}) {
   });
 }
 
+// Напис на обкладинці YouTube — 2–3 слова, які глядач побачить завбільшки з
+// нігтик. Просимо їх окремо від назви: перша ж добірка зібрала 25 тисяч показів
+// і 0,6% кліків, тобто впиралася саме в обкладинку, а не в зміст.
+async function makeCaption({ ask, title, theme, chosen }) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let caption = '';
+    try {
+      caption = parseCaption(await ask(captionPrompt({ title, theme, items: chosen }), COPY));
+    } catch (error) {
+      console.error('[long-day] напис обкладинки не згенеровано:', error.message);
+      break;
+    }
+    const weak = captionWeakness(caption);
+    if (!weak) return caption;
+    console.error(`[long-day] напис «${caption}» не підійшов (${weak})`);
+  }
+  return captionFromTitle(title);
+}
+
 // Перезібрати вже змонтоване. Скид (resetDay) для цього завеликий: він
 // перебирає набір і викидає прев'ю, яке власник малював пів години. Тут же
 // набір, назва, вступ і прев'ю лишаються, а зникає лише саме відео — щоб
@@ -337,6 +357,7 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
   const introVariant = introVariantFor(date);
   const introTail = await makeTail({ ask, title, theme, chosen, size });
   const hook = introLine(size, introVariant, introTail);
+  const thumbCaption = await makeCaption({ ask, title, theme, chosen });
 
   const plan = {
     date,
@@ -346,6 +367,7 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
     hook,
     introVariant,
     introTail,
+    thumbCaption,
     ids: set.ids,
     // Підпис-огризок («Як кормова культура перетворилася») диктор прочитає як
     // обірвану думку — краще сам номер факту.
@@ -357,7 +379,7 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
     // кнопкою миттєво, а не збирати заново на кожне відкриття.
     prompts: {
       video: previewPromptVideo({ title, theme, items: chosen }),
-      youtube: previewPromptYouTube({ title, theme, items: chosen }),
+      youtube: previewPromptYouTube({ title, theme, items: chosen, caption: thumbCaption }),
     },
   };
   await writePlan(plan);

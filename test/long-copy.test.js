@@ -125,11 +125,26 @@ test('вертикальне прев\'ю теж несе заголовок, я
   assert.doesNotMatch(p, /ЖОДНОГО ТЕКСТУ/);
 });
 
-test('промти прев\'ю вимагають ефектного світла й недомовленості', () => {
-  for (const p of [previewPromptVideo(SET), previewPromptYouTube(SET)]) {
-    assert.match(p, /золот/i);
-    assert.match(p, /НЕДОГОВОРЕНИМ/);
-  }
+test('вертикальне прев\'ю просить ефектного світла й недомовленості', () => {
+  const p = previewPromptVideo(SET);
+  assert.match(p, /золот/i);
+  assert.match(p, /НЕДОГОВОРЕНИМ/);
+});
+
+test('обкладинка YouTube просить одного героя, а не колаж', () => {
+  const p = previewPromptYouTube(SET);
+  assert.match(p, /ОДИН ГЕРОЙ/);
+  assert.doesNotMatch(p, /КОЛАЖ/);
+  assert.match(p, /золот/i);
+  assert.match(p, /ПЕРЕВІРКА НА МІНІАТЮРУ/);
+  assert.match(p, /третину висоти/);
+});
+
+test('напис на обкладинці підставляється замість назви', () => {
+  const withCaption = previewPromptYouTube({ ...SET, caption: 'кам\'яний слід' });
+  assert.match(withCaption, /КАМ'ЯНИЙ СЛІД/);
+  // Без напису лишається назва добірки — обкладинка не буває без тексту.
+  assert.match(previewPromptYouTube(SET), /5 ЗАМКІВ УКРАЇНИ/);
 });
 
 
@@ -185,4 +200,57 @@ test('відповідь моделі чиститься від лапок, ти
   assert.equal(parseTail('- вибитих у камені\nще щось'), 'вибитих у камені');
   assert.equal(parseTail('  вибитих у камені  '), 'вибитих у камені');
   assert.equal(parseTail(''), '');
+});
+
+// --- Напис на обкладинці -----------------------------------------------------
+// Обкладинка з 25 тисячами показів зібрала 0,6% кліків — тобто впиралася саме
+// в неї, а не в зміст. Назва добірки на мініатюрі не читається: там треба два
+// слова, а не п'ять.
+import {
+  captionPrompt, parseCaption, captionWeakness, captionFromTitle,
+  CAPTION_MAX_WORDS, CAPTION_MAX_CHARS,
+} from '../src/long-copy.js';
+
+test('промт напису показує межі й учить на прикладах', () => {
+  const p = captionPrompt({ title: 'Серед кам\'яних свідків', theme: 'камінь', items: FIVE });
+  assert.match(p, new RegExp(`${CAPTION_MAX_WORDS} слова`));
+  assert.match(p, new RegExp(`${CAPTION_MAX_CHARS} літер`));
+  assert.match(p, /✅/);
+  assert.match(p, /❌/);
+});
+
+test('короткий ударний напис проходить', () => {
+  for (const good of ['ЗНАЙШЛИ МАГНІТОМ', 'ПІД ЗЕМЛЕЮ', 'КАМІНЬ І ЧАС']) {
+    assert.equal(captionWeakness(good), '', good);
+  }
+});
+
+test('довгий напис, число й запитання не проходять', () => {
+  assert.match(captionWeakness('Україна, якої ти не знав'), /слів замість/);
+  assert.match(captionWeakness('15 ФАКТІВ'), /число/);
+  assert.match(captionWeakness('ЧИ ЗНАЛИ ВИ?'), /запитання/);
+  assert.match(captionWeakness('НЕЙМОВІРНА КАМ\'ЯНА СПАДЩИНА'), /літер замість/);
+  assert.equal(captionWeakness(''), 'порожній');
+});
+
+test('відповідь моделі чиститься й піднімається в капс', () => {
+  assert.equal(parseCaption('«знайшли магнітом».'), 'ЗНАЙШЛИ МАГНІТОМ');
+  assert.equal(parseCaption('- під землею\nще щось'), 'ПІД ЗЕМЛЕЮ');
+});
+
+test('запасний напис береться зі значущих слів назви', () => {
+  assert.equal(captionFromTitle('Серед кам\'яних свідків'), 'КАМ\'ЯНИХ СВІДКІВ');
+  // Прийменники й займенники не тягнемо: «УКРАЇНА ЯКОЇ ТИ» виглядає як помилка.
+  assert.equal(captionFromTitle('Україна, якої ти не знав'), 'УКРАЇНА');
+  assert.equal(captionFromTitle('Підземна Україна'), 'ПІДЗЕМНА УКРАЇНА');
+});
+
+test('запасний напис завжди вкладається у власні межі', () => {
+  for (const title of [
+    'Серед кам\'яних свідків', 'Україна, якої ти не знав', 'Підземна Україна',
+    'Неймовірна спадщина українського степу', 'Місто, яке знайшли магнітом',
+  ]) {
+    const caption = captionFromTitle(title);
+    assert.equal(captionWeakness(caption), '', `${title} → ${caption}`);
+  }
 });
