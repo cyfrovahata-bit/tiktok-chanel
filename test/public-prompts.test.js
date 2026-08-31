@@ -37,9 +37,20 @@ test('адресою не можна витягти сторонній файл'
 
 test('промт теми справді про тему, а промт фото — про фото', async () => {
   // Переплутати файли місцями легко, а наслідок — цілий день без роликів.
+  // Тримаємось ролей на початку кожного промту: вони не міняються, навіть
+  // коли решту тексту власник переписує повністю.
   const tema = await readFile(path.join(ROOT, 'prompts', PUBLIC_PROMPTS['tema.txt']), 'utf8');
   const foto = await readFile(path.join(ROOT, 'prompts', PUBLIC_PROMPTS['foto.txt']), 'utf8');
-  assert.match(tema, /сценарист/i);
-  assert.match(foto, /художник/i);
+  assert.match(tema, /Малювати не треба/i, 'промт теми нічого не малює');
+  assert.match(foto, /художник/i, 'промт фото малює');
+  assert.doesNotMatch(tema, /Ти — художник/i, 'схоже, файли переплутано місцями');
   assert.notEqual(tema, foto);
+});
+
+test('промт теми несе те, без чого пайплайн не працює', async () => {
+  const tema = await readFile(path.join(ROOT, 'prompts', PUBLIC_PROMPTS['tema.txt']), 'utf8');
+  // ID таблиці й колонка G — дві речі, без яких другий етап не отримає нічого.
+  assert.match(tema, /1-cH52PtmicqEWc-6BegDpgO6bbbOwjB8W3rPrr4boHA/);
+  assert.match(tema, /КОЛОНКА G/);
+  assert.match(tema, /OWN-/, 'має лишатися пріоритет власних сюжетів');
 });
