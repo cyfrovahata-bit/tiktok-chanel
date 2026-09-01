@@ -551,8 +551,43 @@
       }
     }
 
+    // Telegram приймає в діалозі щонайбільше 256 символів. Довший текст діалог
+    // просто не відкриває — і зворотний виклик не приходить НІКОЛИ. Обіцянка
+    // лишається невиконаною, а кнопка мовчить: ані дії, ані помилки.
+    //
+    // Саме так і сталося з рядком, де ChatGPT зсунув колонки: у назву теми
+    // потрапив увесь сценарій, і питання «Прибрати «…»?» вийшло на півтори
+    // тисячі символів. Тому текст ріжемо, а обіцянку доводимо до кінця за
+    // будь-якого розкладу.
+    const CONFIRM_LIMIT = 240;
+    const CONFIRM_STUCK_MS = 60 * 1000;
+
     function askConfirm(msg) {
-      return new Promise((res) => { if (tg?.showConfirm) tg.showConfirm(msg, (ok) => res(ok)); else res(confirm(msg)); });
+      const text = String(msg).replace(/\s+/g, ' ').trim();
+      const short = text.length > CONFIRM_LIMIT ? `${text.slice(0, CONFIRM_LIMIT - 1)}…` : text;
+      return new Promise((res) => {
+        if (!tg?.showConfirm) { res(window.confirm(short)); return; }
+        let answered = false;
+        const finish = (ok) => { if (!answered) { answered = true; res(ok); } };
+        // Загублена відповідь не має вішати кнопку назавжди.
+        const stuck = setTimeout(() => finish(false), CONFIRM_STUCK_MS);
+        try {
+          tg.showConfirm(short, (ok) => { clearTimeout(stuck); finish(Boolean(ok)); });
+        } catch (error) {
+          // Попередній діалог ще висить або текст не сподобався — питаємо
+          // звичайним вікном браузера, аби не лишити власника без відповіді.
+          clearTimeout(stuck);
+          finish(window.confirm(short));
+        }
+      });
+    }
+
+    // Заголовок картки — перший рядок і не довше за рядок екрана. Той самий
+    // зсунутий рядок інакше розгортає на пів сторінки весь сценарій.
+    const HEAD_LIMIT = 80;
+    function headline(text) {
+      const line = String(text || '').split('\n')[0].trim();
+      return line.length > HEAD_LIMIT ? `${line.slice(0, HEAD_LIMIT - 1)}…` : line;
     }
 
     async function regenerate(item, card, btn) {
@@ -609,7 +644,7 @@
       const box = el('div', 'card');
       const head = el('div', 'card-head');
       head.appendChild(el('span', 'dot problem'));
-      head.appendChild(el('div', 'head-title', esc(item.theme || item.id)));
+      head.appendChild(el('div', 'head-title', esc(headline(item.theme || item.id))));
       head.appendChild(el('span', 'chev', '▶'));
       box.appendChild(head);
 
@@ -640,7 +675,7 @@
       const drop = el('button', 'btn secondary', '✖️ Відхилити');
       drop.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!await askConfirm(`Прибрати «${item.theme || item.id}» з таблиці?`)) return;
+        if (!await askConfirm(`Прибрати «${headline(item.theme || item.id)}» з таблиці?`)) return;
         drop.disabled = true;
         try {
           const r = await fetch('/api/pending/reject', {
