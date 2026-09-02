@@ -36,6 +36,15 @@ const MODEL = process.env.COMMENTS_MODEL || 'gpt-4o';
 // Лайки коментарів. Вмикати їх безпечніше за автовідповіді: лайк не можна
 // сформулювати невдало, а глядач бачить, що його прочитали. Не ставимо лише
 // там, де модель радить промовчати — уподобаний випад виглядав би згодою.
+// Скільки картка чекає на рішення. Не дочекалась — забуваємо про неї зовсім,
+// і коментар повертається у звичайний пошук. Сенс саме в поверненні: якщо
+// власник тим часом відповів руками, збирач цього коментаря вже не віддасть
+// (`!answered` у src/meta-comments.js), а якщо не відповів ніхто — картка
+// прийде ще раз замість того, щоб загубитися в чаті назавжди.
+const PENDING_TTL_MS = Number(process.env.COMMENTS_PENDING_TTL_MS) || 12 * 60 * 60 * 1000;
+// Скільки разів картка може повернутися. Без стелі коментар, на який власник
+// ніколи не відповість, ходив би по колу кожні дванадцять годин вічно.
+const PENDING_TRIES = Number(process.env.COMMENTS_PENDING_TRIES) || 3;
 const AUTO_LIKE = process.env.COMMENTS_AUTO_LIKE !== '0';
 const LIKE_PER_RUN = Number(process.env.COMMENTS_LIKE_PER_RUN) || 15;
 const SKIP = 'ПРОПУСТИТИ';
@@ -104,15 +113,29 @@ export async function readState() {
   }
   try {
     const data = await readJson(id);
-    return { seen: data?.seen || {}, drafts: data?.drafts || {} };
+    return { seen: data?.seen || {}, drafts: data?.drafts || {}, tries: data?.tries || {} };
   } catch {
     return { seen: {}, drafts: {} };
   }
 }
 
+// Що саме лягає у файл на Drive. Винесено окремо, бо тут є неочевидність:
+// лічильник показів картки ОБРІЗАЄТЬСЯ за тією ж стелею, що й рішення, але
+// НЕ прив'язується до наявності ключа в seen. Коли картка знімається з черги,
+// рішення про коментар зникає навмисно — саме це й повертає його в пошук, —
+// а пам'ять про те, що ми його вже показували, має лишитися. Інакше стеля на
+// кількість повернень не спрацювала б жодного разу.
+export function stateDoc(state, keep = KEEP) {
+  return {
+    seen: Object.fromEntries(Object.entries(state.seen || {}).slice(-keep)),
+    tries: Object.fromEntries(Object.entries(state.tries || {}).slice(-keep)),
+    drafts: state.drafts || {},
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export async function writeState(state) {
-  const seen = Object.fromEntries(Object.entries(state.seen || {}).slice(-KEEP));
-  const doc = { seen, drafts: state.drafts || {}, updatedAt: new Date().toISOString() };
+  const doc = stateDoc(state);
   const media = { mimeType: 'application/json', body: JSON.stringify(doc, null, 2) };
   const existing = await findFile();
   if (existing) await drive().files.update({ fileId: existing, media, supportsAllDrives: true });
@@ -635,10 +658,17 @@ export async function checkPlatform(adapter, options = {}) {
     state.drafts[key] = {
       text: draft || null,
       messageId: message?.message_id ?? null,
+      // Коли картку надіслано — за цим рахується прострочення.
+      at: new Date().toISOString(),
+      // Котрий це раз. Лічильник живе окремо від картки, бо саму картку ми
+      // видаляємо, а пам'ять про спроби має пережити повернення в чергу.
+      tries: (state.tries?.[key] || 0) + 1,
       // Для гілки це ID верхнього коментаря: на вкладену репліку Facebook
       // відповідь не приймає.
       replyTo: comment.replyTo || null,
     };
+    state.tries = state.tries || {};
+    state.tries[key] = state.drafts[key].tries;
     if (draft) result.asked += 1; else result.flagged += 1;
   }
 
@@ -653,8 +683,44 @@ export async function checkPlatform(adapter, options = {}) {
   return result;
 }
 
+// Знімає з черги картки, які провисіли довше за PENDING_TTL_MS. Чиста функція
+// над станом: міняє переданий об'єкт і повертає, що саме прибрала, — тож
+// поведінку видно тестами без Telegram і Facebook.
+//
+// Картку, яку показували вже PENDING_TRIES разів, не повертаємо в чергу, а
+// закриваємо як пропущену: власник її бачив і щоразу не став відповідати.
+export function expirePending(state, now = Date.now(), ttlMs = PENDING_TTL_MS, maxTries = PENDING_TRIES) {
+  const seen = state.seen || {};
+  const drafts = state.drafts || {};
+  const tries = state.tries || {};
+  const dropped = [];
+  const closed = [];
+  for (const [key, verdict] of Object.entries(seen)) {
+    if (verdict !== 'pending') continue;
+    const at = Date.parse(drafts[key]?.at || '');
+    // Картки, надіслані до появи цього правила, дати не мають — і саме вони
+    // висять найдовше, тож вважаємо їх простроченими одразу.
+    if (Number.isFinite(at) && now - at < ttlMs) continue;
+    delete drafts[key];
+    if ((tries[key] || 0) >= maxTries) {
+      seen[key] = 'skipped';
+      closed.push(key);
+      continue;
+    }
+    delete seen[key];
+    dropped.push(key);
+  }
+  return { dropped, closed };
+}
+
 export async function checkAll(options = {}) {
   const state = options.state || await readState();
+  // Прострочені картки знімаємо ПЕРЕД обходом: інакше коментар лишався б у
+  // стані «pending» і збирач цього ж проходу його б не побачив.
+  const expired = expirePending(state, options.now ?? Date.now());
+  if (expired.dropped.length || expired.closed.length) {
+    console.log(`[comments] прострочені картки: ${expired.dropped.length} повернуто в чергу, ${expired.closed.length} закрито`);
+  }
   // Час глибокого обходу вирішуємо тут, один раз на прохід — щоб усі платформи
   // в одному проході працювали однаково.
   const lastDeep = Date.parse(state.deepAt || '') || 0;
@@ -763,9 +829,12 @@ export async function handleCallback(callbackQuery, options = {}) {
   }
   if (action === 's') {
     if (!draft?.text) {
+      const gone = state.seen[key] === 'sent'
+        ? 'Уже відповіли'
+        : 'Картка застаріла — коментар повернувся в чергу';
       await answerCallbackQuery(callbackQuery.id, draft
         ? 'Чернетки немає — напиши свій текст відповіддю на повідомлення'
-        : 'Чернетку вже використано');
+        : gone);
       return true;
     }
     try {
