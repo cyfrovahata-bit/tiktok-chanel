@@ -131,6 +131,47 @@ export async function markPublished(id, when = new Date()) {
   return { rowNumber: item.rowNumber, date, duplicates };
 }
 
+// Повертає рядок PUBLISHED → DONE: чистить дату публікації (кол. D) і статус
+// (кол. E). Це протилежність markPublished і потрібна в одному випадку —
+// матеріал вийшов не на всі платформи, а рядок уже позначено опублікованим.
+// Автопублікація такі рядки не бере взагалі (`candidate.status !== 'PUBLISHED'`
+// у src/autopublish.js), тож платформа, яка ролика не отримала, лишалася б без
+// нього назавжди.
+//
+// Саму позначку про те, що ролик уже десь вийшов, НЕ чіпаємо: вона живе в
+// appProperties файла на Drive, і завдяки їй повторної публікації туди, де
+// матеріал уже є, не станеться.
+// Пошук рядка для повернення винесено окремо: сама перевірка нічого не пише,
+// тож її видно тестами без доступу до Sheets.
+export function requeueTarget(items, id) {
+  const matches = items.filter((it) => it.id === id);
+  if (!matches.length) throw new Error(`ID ${id} не знайдено в таблиці`);
+  // Серед однойменних беремо саме опублікований — його ж і повертаємо.
+  const item = matches.find((it) => it.status === 'PUBLISHED') || matches[0];
+  if (item.status === 'DONE') return { rowNumber: item.rowNumber, alreadyQueued: true };
+  if (item.status !== 'PUBLISHED') {
+    throw new Error(`ID ${id} у статусі ${item.status}, а не PUBLISHED — не повертаю`);
+  }
+  // Рядок без архіву/назви/опису не пройде isReady, і в черзі його не побачить
+  // ані монітор, ані мінідодаток — вийшов би тихий провал замість повернення.
+  if (!isReady({ ...item, status: 'DONE' })) {
+    throw new Error(`ID ${id}: у рядку бракує архіву, назви чи опису — у черзі він був би невидимим`);
+  }
+  return { rowNumber: item.rowNumber };
+}
+
+export async function returnToQueue(id) {
+  const item = requeueTarget(await readAllItems(), id);
+  if (item.alreadyQueued) return item;
+  await api().spreadsheets.values.update({
+    spreadsheetId: SHEET_ID,
+    range: `${TAB}!D${item.rowNumber}:E${item.rowNumber}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [['', 'DONE']] },
+  });
+  return { rowNumber: item.rowNumber };
+}
+
 // Переписує ID у колонці A конкретного рядка. Потрібно лише для розведення
 // дублікатів: ChatGPT будує ID із часу створення, і два паралельні запуски в
 // ту саму хвилину дають однаковий. Небезпечно це тим, що за ID зветься MP4 на

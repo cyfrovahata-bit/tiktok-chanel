@@ -158,6 +158,7 @@
     .published-item .pi-text { min-width: 0; }
     .published-item .pi-title { font-size: 14px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .published-item .pi-date { font-size: 12px; color: var(--muted); }
+    .published-item .pi-back { margin-left: auto; flex: 0 0 auto; padding: 4px 10px; font-size: 13px; }
 
     /* Чернетка сценарію (тема на перевірку) */
     .draft { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 15px; margin-bottom: 14px; box-shadow: var(--shadow); }
@@ -632,6 +633,32 @@
       t.appendChild(el('div', 'pi-title', esc(it.title || it.theme)));
       if (it.pubDate) t.appendChild(el('div', 'pi-date', esc(it.pubDate)));
       row.appendChild(t);
+      // «Повернути в чергу»: ролик вийшов не всюди (вечір дня збірки віддає
+      // шортс лише TikTok та Instagram), а рядок уже позначено опублікованим —
+      // і платформа, яка його не отримала, більше ніколи не отримає.
+      if (it.id) {
+        const back = el('button', 'btn secondary pi-back', '↩️');
+        back.title = 'Повернути в чергу';
+        back.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const ok = await askConfirm(`Повернути в чергу: ${headline(it.title || it.theme || it.id)}?`);
+          if (!ok) return;
+          back.disabled = true; back.textContent = '…';
+          try {
+            const r = await fetch('/api/requeue', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ initData, id: it.id }),
+            });
+            const data = await r.json();
+            if (!r.ok || data.error) throw new Error(data.error || 'Помилка');
+            notify('success');
+            toast(`Повернуто в чергу — чекає на ${(data.pending || []).join(', ')}`);
+            load();
+          } catch (err) { notify('error'); toast(err.message); back.textContent = '↩️'; }
+          finally { back.disabled = false; }
+        });
+        row.appendChild(back);
+      }
       return row;
     }
 

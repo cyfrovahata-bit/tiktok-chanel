@@ -131,6 +131,13 @@ function platformSettled(props, platform) {
   return Boolean(props?.[platformIdProperty(platform)] || props?.[platformSkipProperty(platform)]);
 }
 
+// Платформи, на які ролик ще НЕ вийшов: немає ID допису. Мітку пропуску тут
+// свідомо не враховуємо — саме вона й знімається, коли власник повертає рядок
+// у чергу, а ID допису лишається єдиним доказом «тут матеріал уже є».
+export function unpublishedPlatforms(props, platforms) {
+  return platforms.filter((platform) => !props?.[platformIdProperty(platform)]);
+}
+
 // Мітка «цей ролик узято в роботу для цієї платформи в цьому вікні». Раніше
 // мітка була одна на всі платформи (autoPostSlot), але з роздільним розкладом
 // YouTube може публікуватися ввечері, а TikTok опівдні — і спільна мітка

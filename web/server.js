@@ -14,7 +14,7 @@ import { createReadStream } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { listDoneItems, listPublishedItems, markPublished, readAllItems, readRawRows, isReady, listNewItems, listErrorItems, updateRowPrompt, deleteQueueRow, appendRejectedTheme, listRejectedThemes } from '../src/sheets.js';
+import { listDoneItems, listPublishedItems, markPublished, returnToQueue, readAllItems, readRawRows, isReady, listNewItems, listErrorItems, updateRowPrompt, deleteQueueRow, appendRejectedTheme, listRejectedThemes } from '../src/sheets.js';
 import { parseSlideLines, parseTheme, applySlideLines } from '../src/queue-prompt.js';
 import { listVideos, listVideoFiles, setVideoAppProperties, streamVideo, videoName, videoProps, videoFolderId, deleteVideo, remuxVideoToSpec, uploadVideo, markCompiled } from '../src/videos.js';
 import { startMonitor, pollOnce, forget, watchStages, watchStatus, pollStatus } from '../src/monitor.js';
@@ -29,7 +29,7 @@ import { readPlan, buildDay, planDay, resetDay, rehookDay, rebuildDay, retryThum
 import { plannedSize } from '../src/long-plan.js';
 import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
-import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty } from '../src/autopublish.js';
+import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty, unpublishedPlatforms } from '../src/autopublish.js';
 import { availablePlatforms } from '../src/publish.js';
 import { tiktokConfigured, consentUrl as tiktokConsentUrl, exchangeCode as tiktokExchangeCode, redirectUri as tiktokRedirectUri, accessToken as tiktokAccessToken, creatorInfo as tiktokCreatorInfo } from '../src/tiktok.js';
 import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
@@ -1241,6 +1241,41 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // «Повернути в чергу»: рядок уже позначено опублікованим, але ролик вийшов
+    // не на всі платформи. Найчастіше це вечір дня збірки — тоді шортс іде лише
+    // в TikTok та Instagram, а YouTube і Facebook дістають саму збірку, і на
+    // файлі лишаються мітки youtubeSkipped / facebookSkipped.
+    //
+    // Повертаємо рядок у DONE і знімаємо мітку пропуску ЛИШЕ з тих платформ,
+    // де допису справді немає. Реальні ID публікацій не чіпаємо — інакше
+    // матеріал вийшов би вдруге там, де вже стоїть.
+    if (req.method === 'POST' && pathname === '/api/requeue') {
+      const body = JSON.parse(await readBody(req));
+      const check = verifyInitData(body.initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Може лише власник каналу' });
+      try {
+        const id = String(body.id || '');
+        const files = await listVideoFiles();
+        const file = files.get(videoName(id));
+        if (!file) throw new Error(`Відео для ${id} не знайдено в Drive — повертати в чергу нічого`);
+        const props = file.appProperties || {};
+        const pending = unpublishedPlatforms(props, PLATFORM_KEYS);
+        if (!pending.length) throw new Error('Ролик уже вийшов на всі платформи');
+        const patch = { autoPostDone: null, autoPostNotified: null };
+        for (const platform of pending) {
+          patch[`${platform}Skipped`] = null;
+          patch[`${claimProperty(platform)}Notified`] = null;
+        }
+        await setVideoAppProperties(file.id, patch);
+        const row = await returnToQueue(id);
+        cache.at = 0;
+        return json(res, 200, { ok: true, id, row: row.rowNumber, pending });
+      } catch (error) {
+        return json(res, 400, { error: error.message });
+      }
+    }
+
     // «Вважати неопублікованим»: знімає з відео всі мітки автопублікації, щоб
     // воно знову стало в чергу. Потрібно, коли пост у соцмережі видалили
     // руками або він вийшов помилково. Поточне вікно при цьому закриваємо —
@@ -1268,6 +1303,11 @@ const server = http.createServer(async (req, res) => {
           perPlatform[`${key}At`] = null;
           perPlatform[`${platform}PostId`] = null;
           perPlatform[`${platform}PublishedAt`] = null;
+          // Мітка «цій платформі ролик не призначався» (вечір дня збірки —
+          // YouTube і Facebook його не отримують). Без її зняття «Вважати
+          // неопублікованим» лишало ролик поза чергою назавжди: ID допису вже
+          // прибрано, але platformSettled() однаково повертав true.
+          perPlatform[`${platform}Skipped`] = null;
         }
         const cleared = await setVideoAppProperties(file.id, {
           ...perPlatform,
