@@ -27,6 +27,30 @@ export function autoPostMarkerName(id) {
 
 // Мапа {ім'я файлу → { id, name, appProperties }}. appProperties зберігають
 // технічний стан автопублікації; Google Sheet при цьому не змінюється.
+// Чи доступна тека, у яку кладемо відео. Один дешевий запит замість здогадок.
+//
+// Навіщо окремо. Заливка — ОСТАННІЙ крок конвеєра: спершу монтаж, потім
+// озвучка, і аж тоді files.create. Коли теки немає, падає саме заливка — а
+// озвучку ми на той момент уже оплатили. Так за одну ніч згоріло дванадцять
+// начиток поспіль. Тому питаємо ДО монтажу.
+//
+// Тека в кошику — окремий випадок: вона ще існує й віддає метадані, але
+// створити в ній файл Drive уже не дає. Тож перевіряємо не лише наявність.
+export async function videoFolderStatus() {
+  if (!FOLDER_ID) return { ok: false, reason: 'VIDEO_FOLDER_ID не задано' };
+  try {
+    const res = await drive().files.get({
+      fileId: FOLDER_ID,
+      fields: 'id, trashed',
+      supportsAllDrives: true,
+    });
+    if (res.data.trashed) return { ok: false, reason: 'теку з відео перемістили в кошик' };
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: error.message };
+  }
+}
+
 export async function listVideoFiles() {
   if (!FOLDER_ID) return new Map();
   const map = new Map();

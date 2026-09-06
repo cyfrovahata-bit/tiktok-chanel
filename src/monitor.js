@@ -25,7 +25,7 @@ import path from 'node:path';
 import { listDoneItems, readAllItems, renameRowId } from './sheets.js';
 import { downloadArchive } from './drive.js';
 import { readNotices, writeNotices } from './notices.js';
-import { listVideos, uploadVideo, videoName, videoFolderId } from './videos.js';
+import { listVideos, uploadVideo, videoName, videoFolderStatus } from './videos.js';
 import { extractPhotoArchive } from './archive.js';
 import { assembleVideo } from './pipeline.js';
 import { sendMessage, ownerChatId } from './telegram.js';
@@ -310,10 +310,38 @@ export async function watchStages() {
 // Один прохід черги. Лок, щоб паралельні виклики (таймер + ручний тригер) не
 // накладались і не робили подвійну генерацію.
 let polling = false;
+
+// Останній стан теки, про який уже попереджали. Потрібен, щоб не слати те саме
+// повідомлення кожні три хвилини: тека може бути недоступна годинами.
+let folderAlarm = null;
+
+// Пропускати прохід чи ні — і чи попереджати власника. Винесено окремо, бо
+// саме тут легко схибити в один із двох боків: або спамити щотри хвилини, або
+// змовчати про поломку, через яку конвеєр стоїть.
+export function folderGate(status, warned) {
+  if (status.ok) return { skip: false, notify: null, warned: null };
+  return {
+    skip: true,
+    notify: warned === status.reason ? null : status.reason,
+    warned: status.reason,
+  };
+}
+
 export async function pollOnce() {
   if (polling) return 0;
-  if (!videoFolderId()) {
-    console.warn('[monitor] VIDEO_FOLDER_ID не задано — пропускаю прохід (нема куди класти відео).');
+  // Ворота перед монтажем: без доступної теки прохід не має сенсу — озвучка
+  // згорить, а покласти результат буде нікуди.
+  const gate = folderGate(await videoFolderStatus(), folderAlarm);
+  folderAlarm = gate.warned;
+  if (gate.skip) {
+    if (gate.notify) {
+      console.error(`[monitor] тека з відео недоступна: ${gate.notify}`);
+      await notify(
+        `⚠️ Тека з відео на Drive недоступна:\n${gate.notify}\n\n`
+        + 'Монтаж зупинив, щоб не палити озвучку даремно. '
+        + 'Перевір VIDEO_FOLDER_ID і кошик Drive.',
+      );
+    }
     return 0;
   }
   polling = true;
