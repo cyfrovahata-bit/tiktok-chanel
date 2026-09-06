@@ -27,7 +27,7 @@ import { compileLong, orderEpisodes } from '../src/compile-long.js';
 import { savePreview, previewState, removePreview, fetchPreview } from '../src/preview.js';
 import { readPlan, buildDay, planDay, resetDay, rehookDay, rebuildDay, retryThumbnail } from '../src/long-day.js';
 import { plannedSize } from '../src/long-plan.js';
-import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory } from '../src/own.js';
+import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory, blacklistOnReject } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty, unpublishedPlatforms } from '../src/autopublish.js';
 import { availablePlatforms } from '../src/publish.js';
@@ -1345,11 +1345,14 @@ const server = http.createServer(async (req, res) => {
         if (!item) throw new Error(`Рядок ${id} не знайдено`);
 
         // Спершу стоп-лист: якщо далі щось впаде, тема принаймні не повернеться.
-        await appendRejectedTheme({
-          theme: item.theme,
-          id,
-          reason: String(body.reason || 'відхилено власником у мінідодатку'),
-        });
+        // Власні сюжети до нього не потрапляють — див. blacklistOnReject.
+        if (blacklistOnReject(id)) {
+          await appendRejectedTheme({
+            theme: item.theme,
+            id,
+            reason: String(body.reason || 'відхилено власником у мінідодатку'),
+          });
+        }
         await deleteQueueRow(id);
         // Супутнє: змонтоване відео, папка з фото власника, пам'ять сповіщень.
         const cleanup = await Promise.allSettled([

@@ -773,6 +773,36 @@
           copyBtn.disabled = false;
         });
         actions.appendChild(copyBtn);
+
+        // Видалити свій сюжет, поки його ще ніхто не розбивав. Найчастіша
+        // причина — власник надіслав текст і згадав, що забув фото: тоді
+        // простіше прибрати рядок і подати наново, ніж доганяти його правками.
+        const drop = el('button', 'btn secondary', '🗑 Видалити');
+        drop.title = 'Видалити цей сюжет';
+        drop.style.flex = '0 0 auto';
+        drop.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const ok = await askConfirm(
+            `Видалити сюжет «${headline(item.theme || item.id)}»? Рядок і фото зникнуть.`,
+          );
+          if (!ok) return;
+          const old = drop.textContent;
+          drop.disabled = true; drop.textContent = '…';
+          try {
+            const r = await fetch('/api/pending/reject', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ initData, id: item.id, reason: 'власник видалив свій сюжет' }),
+            });
+            const data = await r.json();
+            if (!r.ok || data.error) throw new Error(data.error || 'Помилка');
+            notify('success'); toast('Сюжет видалено — можна надсилати наново');
+            box.remove();
+            load();
+          } catch (err) { notify('error'); toast(err.message); }
+          finally { drop.disabled = false; drop.textContent = old; }
+        });
+        actions.appendChild(drop);
+
         body.appendChild(actions);
         wrap.appendChild(body);
         box.appendChild(wrap);
