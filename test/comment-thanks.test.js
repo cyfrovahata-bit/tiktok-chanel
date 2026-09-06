@@ -137,13 +137,17 @@ function fakeAdapter(comments, posted) {
   };
 }
 
-test('без вмикання нічого не публікується — усе йде карткою', async () => {
+test('подяка словами без вмикання йде карткою, а реакція — публікується', async () => {
+  // COMMENTS_AUTO_THANKS вимкнений, тож «Дякую!» власник має побачити сам.
+  // А реакція без слів — стікер чи сама емодзі — розбору не потребує: зміст
+  // у неї завжди один, тож відповідь іде одразу (COMMENTS_AUTO_REACTION).
   const posted = [];
   const cards = [];
   const state = { seen: {}, drafts: {} };
   const result = await checkPlatform(fakeAdapter([
     { id: 'c1', text: 'Дякую!', author: 'Іван', postId: 'p1' },
     { id: 'c2', text: '❤️', author: 'Оля', postId: 'p1' },
+    { id: 'c3', text: '', sticker: true, author: 'Ганна', postId: 'p1' },
   ], posted), {
     state,
     postIndex: [],
@@ -151,9 +155,16 @@ test('без вмикання нічого не публікується — у�
     chatId: 1,
   });
 
-  assert.equal(posted.length, 0, 'у режимі перевірки бот не має постити сам');
-  assert.equal(result.auto ?? 0, 0);
+  assert.deepEqual(posted.map((p) => p.id).sort(), ['c2', 'c3']);
+  assert.equal(result.auto, 2);
+  // Дві повідомки: картка на «Дякую!» і підсумковий рядок про автовідповіді.
+  // Підсумок навмисно один на прохід — читати картку на кожен стікер власнику
+  // нема потреби.
   assert.equal(cards.length, 2);
+  assert.match(cards[0], /Дякую!/);
+  assert.match(cards[1], /сам відповів на реакції та короткі подяки — 2/);
+  // Дві реакції під одним дописом не дістають однакового тексту.
+  assert.notEqual(posted[0].text, posted[1].text);
 });
 
 test('картка короткої подяки несе готовий текст і позначку', async () => {

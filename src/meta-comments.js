@@ -58,13 +58,26 @@ function fetchPostsPage(pageId, { pageSize, after, options }) {
       // message самого допису потрібен, щоб знайти ролик: ID допису на файл
       // ніхто не записує (Facebook публікується вручну), а текст власник
       // копіює з мінідодатка — отже назва рядка стоїть у ньому дослівно.
+      // attachment у коментарях — заради стікерів і картинок. Такий коментар
+      // приходить із порожнім message, і без цього поля він для нас просто не
+      // існував: ані картки, ані відповіді. А під дописами їх багато.
       fields: 'id,message,created_time,comments.limit(25)'
-        + '{id,message,created_time,from,comments.limit(15){id,message,created_time,from}}',
+        + '{id,message,created_time,from,attachment,comments.limit(15)'
+        + '{id,message,created_time,from,attachment}}',
       limit: pageSize,
     },
     token: options.token || token(),
     fetchImpl: options.fetchImpl,
   });
+}
+
+// Коментар-реакція: тексту немає, але є вкладення — стікер, гіф або картинка.
+// Facebook віддає їх однаково, з типом усередині attachment. Розрізняти типи
+// нам ні до чого: зміст усіх однаковий — «мені сподобалось».
+export function isSticker(comment) {
+  if (String(comment?.message || '').trim()) return false;
+  const a = comment?.attachment;
+  return Boolean(a && (a.type || a.url || a.media || a.target));
 }
 
 // Розбирає одну сторінку дописів у список коментарів. Повертає, скільки
@@ -86,11 +99,14 @@ function collectFromPosts(posts, pageId, out) {
       const lastOursAt = answered ? ours[ours.length - 1].created_time || '' : '';
 
       // Верхній рівень: як і раніше — доки Сторінка тут не писала.
-      if (c.message && !answered) {
+      // Коментар без тексту, але зі стікером чи картинкою, теж беремо: це
+      // реакція, і відповідь на неї потрібна така сама проста.
+      if ((c.message || isSticker(c)) && !answered) {
         out.push({
           ...common,
           id: c.id,
-          text: c.message,
+          text: c.message || '',
+          sticker: !c.message && isSticker(c),
           author: c.from?.name || 'Глядач',
           publishedAt: c.created_time || '',
         });
@@ -99,7 +115,7 @@ function collectFromPosts(posts, pageId, out) {
       // Гілка. Беремо ОДНОГО кандидата на гілку — останню чужу репліку, — а
       // всю розмову передаємо контекстом. Інакше на одну гілку прилітало б по
       // три картки, і бот відповідав би тричі там, де досить раз.
-      const foreign = replies.filter((r) => r.from?.id !== pageId && r.message);
+      const foreign = replies.filter((r) => r.from?.id !== pageId && (r.message || isSticker(r)));
       const after = answered
         // Ми вже писали в цю гілку. Далі втручаємось, лише якщо звертаються до
         // каналу — це вирішує модель, тож підсовуємо їй тільки нове.
@@ -111,7 +127,8 @@ function collectFromPosts(posts, pageId, out) {
       out.push({
         ...common,
         id: last.id,
-        text: last.message,
+        text: last.message || '',
+        sticker: !last.message && isSticker(last),
         author: last.from?.name || 'Глядач',
         publishedAt: last.created_time || '',
         parentId: c.id,

@@ -172,9 +172,16 @@ export function isEmojiOnly(text) {
   return Boolean(raw.trim()) && bare(raw) === '';
 }
 
+// Реакція без жодного слова: стікер, гіф чи картинка (прапорець ставить
+// збирач) або сама лише емодзі. Відповідь на них потрібна однакова — подяка
+// за реакцію, а не за думку.
+export function isReaction(comment) {
+  return Boolean(comment?.sticker) || isEmojiOnly(comment?.text);
+}
+
 export function thanksReply(comment, { recent = [] } = {}) {
   const seed = String(comment?.id || comment?.text || '');
-  const openers = isEmojiOnly(comment?.text) ? EMOJI_THANKS : THANKS;
+  const openers = isReaction(comment) ? EMOJI_THANKS : THANKS;
   const used = new Set(recent.map((t) => String(t).toLowerCase().trim()));
   for (let shift = 0; shift < openers.length; shift++) {
     const text = `${pick(openers, seed, shift)} — ${pick(INVITES, seed, shift + 7)}!`;

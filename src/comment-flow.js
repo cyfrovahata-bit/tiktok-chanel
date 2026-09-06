@@ -11,7 +11,7 @@ import { chatOnce } from './openai.js';
 import { listVideoFiles, setVideoAppProperties } from './videos.js';
 import { readAllItems } from './sheets.js';
 import { parseSlideLines } from './queue-prompt.js';
-import { isShortAppreciation, thanksReply } from './comment-thanks.js';
+import { isShortAppreciation, isReaction, thanksReply } from './comment-thanks.js';
 import { canAct, spend, pause, isPaused, isRateLimit, nextPauseMs } from './comment-budget.js';
 
 const FILE_NAME = 'comments.json';
@@ -27,6 +27,12 @@ const AUTO_PER_RUN = Number(process.env.COMMENTS_AUTO_PER_RUN) || 5;
 // автовідповіді — щоб власник побачив, що саме бот постив би, і оцінив це на
 // живих коментарях. Вмикається одним COMMENTS_AUTO_THANKS=1.
 const AUTO_THANKS = process.env.COMMENTS_AUTO_THANKS === '1';
+// Реакції — стікер, гіф, картинка чи сама емодзі — відповідаємо САМІ, не
+// питаючи. На відміну від подяк словами, тут нема чого розбирати: зміст завжди
+// один і той самий, модель не потрібна, а помилитися нічим. Саме такі
+// коментарі й лишалися без відповіді найдовше. Вимикається
+// COMMENTS_AUTO_REACTION=0.
+const AUTO_REACTION = process.env.COMMENTS_AUTO_REACTION !== '0';
 // Чернетки відповідей пише окрема, сильніша модель. Решта проєкту живе на
 // gpt-4o-mini, і для описів цього досить, а от у коментарях потрібен нюанс:
 // відрізнити доповнення від закиду, стриматися там, де хочеться сперечатись,
@@ -584,6 +590,9 @@ export async function checkPlatform(adapter, options = {}) {
   const rest = [];
   state.thanks = state.thanks || {};
   for (const comment of ordered) {
+    // Реакції — перед усіма іншими правилами, гілки включно: подяка за стікер
+    // доречна будь-де й нічого не може зіпсувати.
+    if (AUTO_REACTION && isReaction(comment)) { auto.push(comment); continue; }
     // Гілки — завжди на схвалення, хай там хоч саме «дякую»: відповідь у чужій
     // розмові читається інакше, ніж окремий коментар під дописом.
     if (comment.parentId || !isShortAppreciation(comment.text)) { rest.push(comment); continue; }
@@ -675,7 +684,9 @@ export async function checkPlatform(adapter, options = {}) {
   // Один рядок замість десятка карток: власник має знати, що бот відповів,
   // але читати кожну подяку йому нема потреби.
   if (result.auto) {
-    await notify(chatId, `🤝 ${adapter.label}: відповів сам на ${result.auto} коротких подяк.`)
+    // Кількість ставимо після тире, щоб не узгоджувати число з іменником:
+    // «на 2 реакцій» було б помилкою, а «на 5 реакції» — теж.
+    await notify(chatId, `🤝 ${adapter.label}: сам відповів на реакції та короткі подяки — ${result.auto}.`)
       .catch(() => {});
   }
 
