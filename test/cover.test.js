@@ -63,12 +63,12 @@ async function haveFfmpeg() {
   try { await run('ffmpeg', ['-version']); return true; } catch { return false; }
 }
 
-test('PNG будь-якого розміру стає JPEG 1280×720 під лімітом YouTube', async (t) => {
+test('PNG будь-якого розміру стає JPEG 1080×1920 під лімітом YouTube', async (t) => {
   if (!await haveFfmpeg()) return t.skip('ffmpeg недоступний');
   const dir = await mkdtemp(path.join(os.tmpdir(), 'thumb-'));
   try {
     const src = path.join(dir, 'src.png');
-    // 16:9, але не той розмір, і саме PNG — як віддає генератор.
+    // Горизонталь і саме PNG — як віддає генератор, якщо промт не дочитали.
     await run('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=1536x864:d=1',
       '-frames:v', '1', '-c:v', 'png', src]);
 
@@ -78,23 +78,23 @@ test('PNG будь-якого розміру стає JPEG 1280×720 під лі
 
     const probe = await run('ffprobe', ['-v', 'error', '-show_entries',
       'stream=codec_name,width,height', '-of', 'csv=p=0', out.path]);
-    assert.equal(probe.stdout.trim(), 'mjpeg,1280,720');
+    assert.equal(probe.stdout.trim(), 'mjpeg,1080,1920');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('вертикальна картинка кадрується, а не розтягується', async (t) => {
+test('горизонтальна картинка кадрується, а не розтягується', async (t) => {
   if (!await haveFfmpeg()) return t.skip('ffmpeg недоступний');
   const dir = await mkdtemp(path.join(os.tmpdir(), 'thumb-'));
   try {
-    const src = path.join(dir, 'tall.png');
-    await run('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=1080x1920:d=1',
+    const src = path.join(dir, 'wide.png');
+    await run('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=1920x1080:d=1',
       '-frames:v', '1', '-c:v', 'png', src]);
     const out = await normalizeThumbnail(src, path.join(dir, 'ready.jpg'));
     const probe = await run('ffprobe', ['-v', 'error', '-show_entries',
       'stream=width,height', '-of', 'csv=p=0', out.path]);
-    assert.equal(probe.stdout.trim(), '1280,720');
+    assert.equal(probe.stdout.trim(), '1080,1920');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

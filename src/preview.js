@@ -23,8 +23,10 @@ const run = promisify(execFile);
 // Два різні файли, і плутати їх не можна:
 //   video   — вертикаль 9:16, стає першим кадром самої добірки (він же те, що
 //             видно у стрічці Facebook);
-//   youtube — горизонталь 16:9, обкладинка для YouTube; у відео не потрапляє
-//             взагалі, її ставить заливка окремим викликом.
+//   youtube — обкладинка для YouTube; у відео не потрапляє взагалі, її ставить
+//             заливка окремим викликом. Теж вертикаль 9:16 — добірка
+//             вертикальна, і YouTube малює їй вертикальну картку: горизонтальну
+//             обкладинку він там обрізав би до центральної третини ширини.
 const NAMES = {
   video: 'compilation-preview.jpg',
   youtube: 'compilation-thumb.jpg',
@@ -112,9 +114,15 @@ export async function fetchPreview(destPath, kind = 'video') {
 // image content is invalid»: ChatGPT віддає PNG, мінідодаток кладе його на
 // Drive як є (ім'я .jpg нічого не змінює), а заливка каже, що це JPEG.
 //
-// Тому перед заливкою картинку завжди переганяємо: 1280×720, JPEG, і тиснемо,
+// Тому перед заливкою картинку завжди переганяємо: 1080×1920, JPEG, і тиснемо,
 // доки не влізе в ліміт. Це дешевше за будь-яку перевірку типів — на виході
 // гарантовано те, що YouTube візьме.
+//
+// Саме 1080×1920, а не 1280×720: добірка — вертикальне відео, і в стрічці
+// YouTube малює їй вертикальну картку, накриваючи обкладинкою. Горизонтальну
+// картинку він при цьому ріже до центральних ~405 пікселів із 1280 — від
+// напису лишалося три літери з тринадцяти. Пікселів тут більше, ніж було, тож
+// стиснення працює більше — але межа в два мегабайти та сама.
 export const THUMB_MAX_BYTES = 2 * 1024 * 1024;
 const THUMB_QUALITY = [3, 5, 7, 10, 15];
 
@@ -122,7 +130,7 @@ export async function normalizeThumbnail(srcPath, destPath) {
   let last = null;
   for (const q of THUMB_QUALITY) {
     await run('ffmpeg', ['-y', '-v', 'error', '-i', srcPath,
-      '-vf', 'scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720',
+      '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
       '-q:v', String(q), '-f', 'mjpeg', destPath]);
     last = (await stat(destPath)).size;
     if (last <= THUMB_MAX_BYTES) return { path: destPath, bytes: last, quality: q };
