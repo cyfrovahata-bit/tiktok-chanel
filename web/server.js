@@ -27,7 +27,10 @@ import { compileLong, orderEpisodes } from '../src/compile-long.js';
 import { savePreview, previewState, removePreview, fetchPreview } from '../src/preview.js';
 import { readPlan, buildDay, planDay, resetDay, rehookDay, rebuildDay, retryThumbnail } from '../src/long-day.js';
 import { plannedSize } from '../src/long-plan.js';
-import { createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory, blacklistOnReject } from '../src/own.js';
+import {
+  createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory,
+  blacklistOnReject, ensureOwnFolder, findOwnFolder, countOwnPhotos, withOwnPhotos, MAX_PHOTOS,
+} from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty, unpublishedPlatforms } from '../src/autopublish.js';
 import { availablePlatforms } from '../src/publish.js';
@@ -1417,6 +1420,35 @@ const server = http.createServer(async (req, res) => {
             + '3. Аж потім запускай промт малювання фото.',
           ).catch(() => {});
           return json(res, 200, out);
+        }
+        // Фото до вже наявного рядка. Два кроки, бо файли йдуть по одному:
+        // спершу дізнаємось папку й скільки знімків у ній уже лежить (щоб
+        // нумерація продовжилась, а не затерла попередні), потім кожне фото
+        // тим самим own/photo, і аж наприкінці — own/attach, який перепише
+        // промт. Якщо завантаження обірветься посередині, промт лишиться
+        // старим: краще недорахувати фото, ніж пообіцяти ChatGPT неіснуючі.
+        if (step === 'folder') {
+          if (!body.id) throw new Error('Немає id');
+          const folder = await ensureOwnFolder(body.id);
+          const photos = await countOwnPhotos(folder.folderId);
+          return json(res, 200, { ...folder, photos, max: MAX_PHOTOS });
+        }
+        if (step === 'attach') {
+          if (!body.id) throw new Error('Немає id');
+          const folder = await findOwnFolder(body.id);
+          if (!folder) throw new Error('Папки з фото немає — спершу завантаж хоч одне');
+          const photos = await countOwnPhotos(folder.folderId);
+          const item = (await readAllItems()).find((it) => it.id === body.id);
+          if (!item) throw new Error(`Рядок ${body.id} не знайдено`);
+          const prompt = withOwnPhotos(item.extra, { photoCount: photos, folderUrl: folder.folderUrl });
+          await updateRowPrompt(body.id, { theme: item.theme, prompt });
+          cache.at = 0;
+          await sendMessage(
+            ownerChatId(),
+            `📎 До сюжету ${body.id} додано фото — тепер їх ${photos}.\n`
+            + 'Промт у колонці G оновлено: малювання враховуватиме ці кадри.',
+          ).catch(() => {});
+          return json(res, 200, { ok: true, photos });
         }
         if (step === 'surname') {
           const out = await submitSurname({ surname: body.surname });

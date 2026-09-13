@@ -730,6 +730,84 @@
     // --- Тема на перевірку (рядок NEW у таблиці) ----------------------------
     // ChatGPT уже написав сюжет, але ще не малює. Тут його можна поправити —
     // зміни лягають назад у промт, за яким малюватимуться кадри.
+    // Докинути фото до сюжету, який уже в таблиці. Найчастіший випадок —
+    // власник надіслав текст і згадав про знімки пізніше; раніше через це
+    // доводилося видаляти рядок і подавати його наново.
+    //
+    // Файли йдуть по одному тим самим маршрутом, що й при першому надсиланні:
+    // велике тіло запиту з десятком фото з телефона впирається в ліміти
+    // проксі. Промт переписується ОДИН раз наприкінці — коли всі фото вже
+    // на Drive і їх можна порахувати.
+    function attachPhotosButton(item) {
+      const btn = el('button', 'btn secondary', '📎 Фото');
+      btn.title = 'Додати свої фото до цього сюжету';
+      btn.style.flex = '0 0 auto';
+      const input = el('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.multiple = true;
+      input.hidden = true;
+      btn.addEventListener('click', (e) => { e.stopPropagation(); input.click(); });
+
+      input.addEventListener('change', async () => {
+        const files = [...input.files];
+        input.value = '';
+        if (!files.length) return;
+        if (!initData) { toast('Відкрий через Telegram'); return; }
+        const old = btn.textContent;
+        btn.disabled = true;
+        try {
+          btn.textContent = 'Папка…';
+          const send = async (step, payload) => {
+            const r = await fetch(`/api/own/${step}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ initData, ...payload }),
+            });
+            const data = await r.json();
+            if (!r.ok || data.error) throw new Error(data.error || 'Помилка');
+            return data;
+          };
+
+          const folder = await send('folder', { id: item.id });
+          if (folder.photos + files.length > folder.max) {
+            throw new Error(
+              `Разом вийде ${folder.photos + files.length} фото, а максимум ${folder.max}`,
+            );
+          }
+
+          for (let i = 0; i < files.length; i++) {
+            btn.textContent = `Фото ${i + 1} з ${files.length}…`;
+            const file = files[i];
+            await send('photo', {
+              folderId: folder.folderId,
+              index: folder.photos + i + 1,
+              name: file.name,
+              mimeType: file.type,
+              data: await readAsBase64(file),
+            });
+          }
+
+          btn.textContent = 'Промт…';
+          const out = await send('attach', { id: item.id });
+          notify('success');
+          toast(`Готово — у сюжеті ${out.photos} фото`);
+          // Свідомо БЕЗ load(): перемальовування списку стерло б тексти
+          // слайдів, які власник саме зараз правив у цій же картці. У самій
+          // картці від докидання фото нічого не міняється — промт із фото
+          // оновлено на сервері, і «Зберегти» ляже вже поверх нього.
+        } catch (e) {
+          notify('error');
+          toast(e.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = old;
+        }
+      });
+
+      return { btn, input };
+    }
+
     function pendingCard(item) {
       const slideCount = (item.slides || []).length;
       const box = el('div', 'card');
@@ -773,6 +851,10 @@
           copyBtn.disabled = false;
         });
         actions.appendChild(copyBtn);
+
+        const attach = attachPhotosButton(item);
+        actions.appendChild(attach.btn);
+        actions.appendChild(attach.input);
 
         // Видалити свій сюжет, поки його ще ніхто не розбивав. Найчастіша
         // причина — власник надіслав текст і згадав, що забув фото: тоді
@@ -869,6 +951,10 @@
         });
       });
       actions.appendChild(drop);
+
+      const attach = attachPhotosButton(item);
+      actions.appendChild(attach.btn);
+      actions.appendChild(attach.input);
 
       const save = el('button', 'btn primary', '💾 Зберегти');
       save.addEventListener('click', async () => {

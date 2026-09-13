@@ -19,7 +19,7 @@ function parentFolderId() {
   return process.env.OWN_FOLDER_ID || promptFolderId();
 }
 
-const MAX_PHOTOS = 12;
+export const MAX_PHOTOS = 12;
 const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
 // ID рядка для власного сюжету: OWN-YYYYMMDD-HHMM (щоб не плутати з AUTO-).
@@ -54,7 +54,7 @@ export async function createSubmission(now = new Date()) {
   const id = await uniqueOwnId(now, taken);
   const res = await drive().files.create({
     requestBody: {
-      name: `${id} — матеріали власника`,
+      name: ownFolderName(id),
       mimeType: 'application/vnd.google-apps.folder',
       parents: [parentFolderId()],
     },
@@ -99,6 +99,130 @@ export function extractOwnStory(prompt) {
   return m ? m[1].trim() : '';
 }
 
+// --- Блок «фото власника» в промті -------------------------------------------
+// Фото можуть з'явитися і ПІСЛЯ того, як ChatGPT уже розписав сценарій у
+// колонці G: власник надіслав текст, а знімки знайшов пізніше. Тому блок
+// обгорнутий маркерами — щоб його можна було знайти, замінити на новий (фото
+// докинули ще раз) або прибрати зовсім, не зачепивши решту промту.
+const PHOTO_START = '——— ФОТО ВЛАСНИКА';
+const PHOTO_END = '——— кінець блоку фото ———';
+// Крапка з комою в кінці не потрібна: блок завжди закінчується своїм маркером.
+const PHOTO_BLOCK_RE = /\n*———[ \t]*ФОТО ВЛАСНИКА[\s\S]*?——— кінець блоку фото ———[ \t]*\n?/g;
+
+// Куди вставляти блок у вже написаному сценарії: перед покадровим брифом, щоб
+// ChatGPT прочитав «спершу подивись на фото» ДО опису кадрів, а не після.
+const FRAME_ANCHOR = 'ЩО МАЄ БУТИ НА КОЖНОМУ КАДРІ';
+
+export function ownPhotoBlock({ photoCount, where }) {
+  return `${PHOTO_START} (${photoCount} шт.) ———
+Лежать у папці Drive: ${where}
+Пріоритет у них: якщо кадр підходить під слайд хоч приблизно — бери його, а не
+малюй новий. Підхожі доведи до формату 1080×1920 (9:16), повна якість, БЕЗ
+тексту, верхні 40% кадру спокійні; кадруй, дотягуй світло й різкість, але не
+підміняй зміст домальованим. Чого не вистачає — домалюй у тому ж стилі
+(світло, колір, оптика як на фото власника). Якщо жодне фото не підійшло —
+напиши про це в «Примітці».
+${PHOTO_END}`;
+}
+
+// Шапка промту ПЕРШОГО етапу (розбити сюжет на слайди) окремо повідомляє, чи
+// фото взагалі є. Якщо знімки докинули до того, як ChatGPT відпрацював, шапка
+// лишалася б зі старим «фото немає» — і він чесно виконав би написане,
+// проігнорувавши папку. Тому рядок шапки тримаємо в курсі разом із блоком.
+// У готовому сценарії (другий етап) такої шапки немає — там просто нічого
+// не збігається й нічого не міняється.
+const NO_PHOTOS_LINE = 'ФОТО НЕМАЄ — усі кадри малюватимуться з нуля.';
+const PHOTO_HEADER_RE = /ФОТО ВЛАСНИКА: \d+ шт\. у папці Drive:\n[^\n]*/;
+
+function syncPhotoHeader(text, photoCount, where) {
+  const header = `ФОТО ВЛАСНИКА: ${photoCount} шт. у папці Drive:\n${where}`;
+  if (photoCount > 0) {
+    if (PHOTO_HEADER_RE.test(text)) return text.replace(PHOTO_HEADER_RE, header);
+    return text.replace(NO_PHOTOS_LINE, header);
+  }
+  return text.replace(PHOTO_HEADER_RE, NO_PHOTOS_LINE);
+}
+
+// Вставляє (або оновлює) блок фото у промті колонки G. Старий блок завжди
+// знімається першим — інакше після другого докидання фото в промті лежало б
+// два блоки з різними числами, і ChatGPT вибирав би сам, якому вірити.
+// photoCount = 0 просто прибирає блок: так само знімається згадка про фото,
+// якщо папку спорожнили.
+export function withOwnPhotos(prompt, { photoCount = 0, folderUrl = '', folderName = '' } = {}) {
+  const where = folderUrl || folderName || 'папка матеріалів власника';
+  const cleaned = syncPhotoHeader(
+    String(prompt || '').replace(PHOTO_BLOCK_RE, '\n\n'),
+    photoCount,
+    where,
+  ).trimEnd();
+  if (!(photoCount > 0)) return cleaned;
+  const block = ownPhotoBlock({ photoCount, where });
+  const at = cleaned.indexOf(FRAME_ANCHOR);
+  if (at < 0) return `${cleaned}\n\n${block}`;
+  return `${cleaned.slice(0, at).trimEnd()}\n\n${block}\n\n${cleaned.slice(at)}`;
+}
+
+// --- Папка з матеріалами -----------------------------------------------------
+// Назва папки — єдиний звʼязок між рядком таблиці й фото на Drive: ID папки
+// ніде не зберігається. Тому шукаємо за ТОЧНОЮ назвою, а не «contains»: інакше
+// OWN-20260913-0838 знаходив би й папку OWN-20260913-0838-2.
+function ownFolderName(id) {
+  return `${id} — матеріали власника`;
+}
+
+export async function findOwnFolder(id) {
+  const name = ownFolderName(id).replace(/'/g, "\\'");
+  const res = await drive().files.list({
+    q: `'${parentFolderId()}' in parents and name = '${name}' `
+      + "and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+    fields: 'files(id, webViewLink)',
+    pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  const found = (res.data.files || [])[0];
+  return found ? { folderId: found.id, folderUrl: found.webViewLink || '' } : null;
+}
+
+// Папка під фото для рядка, який її ще не має (сюжет надіслали без знімків або
+// це взагалі рядок AUTO-). Створюємо за тією ж домовленістю про назву, тож
+// далі він нічим не відрізняється від сюжету, поданого одразу з фото.
+export async function ensureOwnFolder(id) {
+  const found = await findOwnFolder(id);
+  if (found) return found;
+  const res = await drive().files.create({
+    requestBody: {
+      name: ownFolderName(id),
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentFolderId()],
+    },
+    fields: 'id, webViewLink',
+    supportsAllDrives: true,
+  });
+  return { folderId: res.data.id, folderUrl: res.data.webViewLink || '' };
+}
+
+// Скільки знімків у папці НАСПРАВДІ. Рахуємо на Drive, а не з того, що
+// надіслав браузер: інакше перерване завантаження лишило б у промті число
+// більше за кількість файлів, і ChatGPT шукав би неіснуючі кадри.
+export async function countOwnPhotos(folderId) {
+  let count = 0;
+  let pageToken;
+  do {
+    const res = await drive().files.list({
+      q: `'${folderId}' in parents and trashed = false and mimeType contains 'image/'`,
+      fields: 'nextPageToken, files(id)',
+      pageSize: 100,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    count += (res.data.files || []).length;
+    pageToken = res.data.nextPageToken;
+  } while (pageToken);
+  return count;
+}
+
 // Промт для ChatGPT під власний матеріал. Свідомо описує ВСІ три випадки —
 // текст без фото, фото без тексту, і те й те — щоб не довелося тримати три
 // різні шаблони й щоб ChatGPT не імпровізував там, де матеріал є.
@@ -132,16 +256,7 @@ export function buildOwnPrompt({ rowId, story, photoCount, folderUrl, folderName
 
   // Блок про фото власника вставляється в СЦЕНАРІЙ, а не виконується зараз:
   // малюватиме другий промт, і саме йому потрібні ці вказівки.
-  const photoBlock = hasPhotos
-    ? `
-ФОТО ВЛАСНИКА (${photoCount} шт.): ${where}
-Пріоритет у них: якщо кадр підходить під слайд хоч приблизно — бери його, а не
-малюй новий. Підхожі доведи до формату 1080×1920 (9:16), повна якість, БЕЗ
-тексту, верхні 40% кадру спокійні; кадруй, дотягуй світло й різкість, але не
-підміняй зміст домальованим. Чого не вистачає — домалюй у тому ж стилі
-(світло, колір, оптика як на фото власника). Якщо жодне фото не підійшло —
-напиши про це в «Примітці».`
-    : '';
+  const photoBlock = hasPhotos ? `\n${ownPhotoBlock({ photoCount, where })}` : '';
 
   return `ЗАВДАННЯ ВІД ВЛАСНИКА КАНАЛУ «Чи Ви Знали?».
 
