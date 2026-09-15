@@ -490,7 +490,7 @@ async function download(fileId) {
   return Buffer.concat(chunks);
 }
 
-// Обкладинка для YouTube. Її ЗАВЖДИ переганяємо в JPEG 1080×1920 під два
+// Обкладинка для YouTube. Її ЗАВЖДИ переганяємо в JPEG 1280×720 під два
 // мегабайти: ChatGPT віддає PNG, на Drive він лягає з іменем .jpg, і саме на
 // цьому перша заливка добірки дістала «The provided image content is invalid».
 async function readThumbnail(date) {

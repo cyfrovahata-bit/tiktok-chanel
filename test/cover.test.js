@@ -55,7 +55,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { normalizeThumbnail, THUMB_MAX_BYTES } from '../src/preview.js';
+import { normalizeThumbnail, thumbnailFilter, THUMB_MAX_BYTES } from '../src/preview.js';
 
 const run = promisify(execFile);
 
@@ -63,12 +63,12 @@ async function haveFfmpeg() {
   try { await run('ffmpeg', ['-version']); return true; } catch { return false; }
 }
 
-test('PNG будь-якого розміру стає JPEG 1080×1920 під лімітом YouTube', async (t) => {
+test('PNG будь-якого розміру стає JPEG 1280×720 під лімітом YouTube', async (t) => {
   if (!await haveFfmpeg()) return t.skip('ffmpeg недоступний');
   const dir = await mkdtemp(path.join(os.tmpdir(), 'thumb-'));
   try {
     const src = path.join(dir, 'src.png');
-    // Горизонталь і саме PNG — як віддає генератор, якщо промт не дочитали.
+    // 16:9, але не той розмір, і саме PNG — як віддає генератор.
     await run('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=1536x864:d=1',
       '-frames:v', '1', '-c:v', 'png', src]);
 
@@ -78,24 +78,47 @@ test('PNG будь-якого розміру стає JPEG 1080×1920 під л�
 
     const probe = await run('ffprobe', ['-v', 'error', '-show_entries',
       'stream=codec_name,width,height', '-of', 'csv=p=0', out.path]);
-    assert.equal(probe.stdout.trim(), 'mjpeg,1080,1920');
+    assert.equal(probe.stdout.trim(), 'mjpeg,1280,720');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('горизонтальна картинка кадрується, а не розтягується', async (t) => {
+test('портрет лягає на 16:9 цілим, а не обрізається', async (t) => {
   if (!await haveFfmpeg()) return t.skip('ffmpeg недоступний');
   const dir = await mkdtemp(path.join(os.tmpdir(), 'thumb-'));
   try {
-    const src = path.join(dir, 'wide.png');
-    await run('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=1920x1080:d=1',
+    // Плакат 4:5 — саме те, що просить промт обкладинки.
+    const src = path.join(dir, 'poster.png');
+    await run('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=1080x1350:d=1',
       '-frames:v', '1', '-c:v', 'png', src]);
     const out = await normalizeThumbnail(src, path.join(dir, 'ready.jpg'));
     const probe = await run('ffprobe', ['-v', 'error', '-show_entries',
       'stream=width,height', '-of', 'csv=p=0', out.path]);
-    assert.equal(probe.stdout.trim(), '1080,1920');
+    assert.equal(probe.stdout.trim(), '1280,720');
+    assert.ok(out.bytes <= THUMB_MAX_BYTES, `завелика: ${out.bytes}`);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('портрету домальовуються боки, горизонталь просто кадрується', () => {
+  // Межа саме 16:9: усе, що вужче, при кропі втратило б верх і низ — а там
+  // і стоїть напис. Це та сама помилка, через яку від «ЗАБУТІ СКАРБИ» у
+  // стрічці лишалося «УТІ СКА».
+  const poster = thumbnailFilter({ width: 1080, height: 1350 });
+  assert.match(poster, /boxblur/);
+  assert.match(poster, /overlay=\(W-w\)\/2:0/);
+  // Плакат вписується ПО ВИСОТІ — тоді 4:5 дає рівно 576 px ширини, ту саму
+  // центральну смугу, яку видно в картці 4:5 на телефоні.
+  assert.match(poster, /scale=-2:720/);
+
+  const wide = thumbnailFilter({ width: 1920, height: 1080 });
+  assert.doesNotMatch(wide, /boxblur/);
+  assert.match(wide, /crop=1280:720/);
+
+  // Рівно 16:9 — це вже горизонталь, домальовувати нічого.
+  assert.doesNotMatch(thumbnailFilter({ width: 1280, height: 720 }), /boxblur/);
+  // А 9:16 усе-таки портрет, хоч і вужчий за потрібний.
+  assert.match(thumbnailFilter({ width: 1080, height: 1920 }), /boxblur/);
 });
