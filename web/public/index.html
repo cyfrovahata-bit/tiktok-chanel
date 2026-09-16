@@ -692,6 +692,7 @@
         // Текст лягає у форму «Свій сюжет» — власник править саме те місце,
         // на яке вказала примітка, і надсилає новим рядком.
         if (item.story) $('#ownStory').value = item.story;
+        ownRetry = { id: item.id, note: item.note || '' };
         $('#ownPanel').classList.add('open');
         $('#ownStory').scrollIntoView({ behavior: 'smooth', block: 'center' });
         $('#ownStory').focus();
@@ -1455,6 +1456,10 @@
     // одному тілі запиту — це десятки мегабайт base64, що впирається в ліміти
     // проксі. По одному ще й дає чесний прогрес.
     let ownPicked = [];
+    // Слід відхиленого рядка: після чого подається цей сюжет і що саме тоді
+    // не підтвердилось. Потрібен, щоб повторна перевірка не йшла по всьому
+    // тексту заново — решту тверджень уже перевірили на першому заході.
+    let ownRetry = null;
 
     function ownRenderFiles() {
       const box = $('#ownFiles'); box.innerHTML = '';
@@ -1473,6 +1478,9 @@
 
     $('#ownToggle').addEventListener('click', () => {
       haptic();
+      // Відкрив форму сам — отже пише новий сюжет, а не править відхилений.
+      // Інакше слід від минулої помилки залип би на всіх наступних.
+      ownRetry = null;
       $('#ownPanel').classList.toggle('open');
     });
 
@@ -1579,13 +1587,14 @@
           body: JSON.stringify({
             initData, id: start.id, folderId: start.folderId,
             folderUrl: start.folderUrl, story, photoCount: ownPicked.length,
+            retryOf: ownRetry?.id || '', retryNote: ownRetry?.note || '',
           }),
         }).then((r) => r.json());
         if (out.error) throw new Error(out.error);
 
         notify('success');
         toast(`Прийнято: ${out.id}`);
-        $('#ownStory').value = ''; ownPicked = []; ownRenderFiles();
+        $('#ownStory').value = ''; ownPicked = []; ownRetry = null; ownRenderFiles();
         $('#ownPanel').classList.remove('open');
       } catch (e) {
         notify('error');

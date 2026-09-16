@@ -1407,7 +1407,16 @@ const server = http.createServer(async (req, res) => {
           const story = String(body.story || '').trim();
           const photoCount = Number(body.photoCount) || 0;
           if (!story && !photoCount) throw new Error('Порожньо: додай сюжет або хоча б одне фото');
-          const out = await submitOwn({ ...body, story, photoCount });
+          // retryOf/retryNote приходять із картки помилки: новий рядок має
+          // пам'ятати, після чого він поданий, інакше фактчек перевіряє весь
+          // текст наново — зокрема й те, що минулого разу вже підтвердив.
+          const out = await submitOwn({
+            ...body,
+            story,
+            photoCount,
+            retryOf: String(body.retryOf || '').trim().slice(0, 40),
+            retryNote: String(body.retryNote || ''),
+          });
           cache.at = 0;
           await sendMessage(
             ownerChatId(),

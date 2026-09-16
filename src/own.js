@@ -226,7 +226,14 @@ export async function countOwnPhotos(folderId) {
 // Промт для ChatGPT під власний матеріал. Свідомо описує ВСІ три випадки —
 // текст без фото, фото без тексту, і те й те — щоб не довелося тримати три
 // різні шаблони й щоб ChatGPT не імпровізував там, де матеріал є.
-export function buildOwnPrompt({ rowId, story, photoCount, folderUrl, folderName }) {
+// Скільки «Примітки» з відхиленого рядка переносити в новий промт. Вона
+// написана ChatGPT вільною формою й буває довгою; нам потрібна причина, а не
+// весь звіт про перевірку.
+const RETRY_NOTE_MAX = 600;
+
+export function buildOwnPrompt({
+  rowId, story, photoCount, folderUrl, folderName, retryOf = '', retryNote = '',
+}) {
   const hasStory = Boolean(story && story.trim());
   const hasPhotos = photoCount > 0;
   const where = folderUrl || folderName || 'папка матеріалів власника';
@@ -252,10 +259,32 @@ export function buildOwnPrompt({ rowId, story, photoCount, folderUrl, folderName
   // Бюджет пошуку тут не дрібниця: без нього фактчек одного сюжету з'їдав
   // п'ятигодинний ліміт ChatGPT — модель обходила по 60+ сайтів, перевіряючи
   // кожне слово окремо.
-  const budget = `НЕ БІЛЬШЕ П'ЯТИ пошукових запитів на весь сюжет і не більше
+  //
+  // Повторне надсилання коштує ще менше: решту тверджень уже перевіряли на
+  // першому заході, і платити за них удруге немає за що. Причина відмови
+  // лежить у «Примітці» відхиленого рядка — саме її ми сюди й переносимо,
+  // інакше новий рядок приходить без сліду, звідки взявся.
+  const isRetry = Boolean(String(retryOf || '').trim());
+  const budget = isRetry
+    ? `НЕ БІЛЬШЕ ДВОХ пошукових запитів. Перевіряй ЛИШЕ (1) те місце, яке
+   завалило минулу перевірку, і (2) твердження, яких у попередній редакції не
+   було. Решту вже перевірено — наново НЕ перевіряй.`
+    : `НЕ БІЛЬШЕ П'ЯТИ пошукових запитів на весь сюжет і не більше
    двох сторінок на запит. Групуй: один запит закриває кілька тверджень.
    Перевіряй лише те, що піде в рядки слайдів, — головну відповідь, дати,
    числа й власні назви. Загальновідоме й описове не чіпай.`;
+
+  // Текст «Примітки» написала модель, не людина, — тримаємо його в лапках як
+  // дані, а не як частину інструкції.
+  const note = String(retryNote || '').replace(/\s+/g, ' ').trim().slice(0, RETRY_NOTE_MAX);
+  const retryBlock = isRetry
+    ? `\n\nПОВТОРНЕ НАДСИЛАННЯ. Цей сюжет уже був у таблиці рядком ${retryOf} і не
+пройшов перевірку фактів. Власник його виправив і подає знову.${note ? `
+Ось що саме тоді не підтвердилось:\n«««\n${note}\n»»»` : ''}
+Отже головна робота зараз — переконатися, що виправлене місце тепер правдиве.
+Якщо воно й тепер не підтверджується — статус ERROR і пояснення в «Примітці»,
+як завжди. Якщо підтвердилось — працюй далі за звичайними правилами.`
+    : '';
 
   const step2 = hasStory
     ? `2. ПЕРЕВІР ФАКТИ веб-пошуком. ${budget}
@@ -271,7 +300,7 @@ export function buildOwnPrompt({ rowId, story, photoCount, folderUrl, folderName
 
 ${material}
 
-${photos}
+${photos}${retryBlock}
 
 ═══════════════════════════════════════
 ЗАРАЗ ТИ РОБИШ ЛИШЕ СЦЕНАРІЙ. Фото НЕ малюй, архів НЕ збирай, статус НЕ міняй
@@ -323,16 +352,22 @@ ${photoBlock}
 // Кладе рядок у таблицю. Кількість слайдів наперед невідома (її визначить
 // ChatGPT, розбиваючи сюжет), тому колонку «Слайдів» лишаємо порожньою і
 // просимо заповнити її разом зі статусом.
-export async function submitOwn({ id, story, photoCount, folderUrl, folderName, theme }) {
-  const prompt = buildOwnPrompt({ rowId: id, story, photoCount, folderUrl, folderName });
+export async function submitOwn({
+  id, story, photoCount, folderUrl, folderName, theme, retryOf = '', retryNote = '',
+}) {
+  const prompt = buildOwnPrompt({
+    rowId: id, story, photoCount, folderUrl, folderName, retryOf, retryNote,
+  });
+  const retry = String(retryOf || '').trim();
   await appendQueueRow({
     id,
     theme: theme || (story ? story.trim().slice(0, 80) : 'Сюжет власника за фото'),
     slides: '',
     prompt,
-    note: `Матеріал власника: ${photoCount} фото${story ? ' + свій сюжет' : ' без тексту'}`,
+    note: `Матеріал власника: ${photoCount} фото${story ? ' + свій сюжет' : ' без тексту'}`
+      + (retry ? `. Повторне надсилання після ${retry}` : ''),
   });
-  return { id, photoCount };
+  return { id, photoCount, retryOf: retry };
 }
 
 // Чи заносити тему до стоп-листа, коли рядок прибирають.
