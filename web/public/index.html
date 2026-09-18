@@ -696,7 +696,11 @@
         $('#ownPanel').classList.add('open');
         $('#ownStory').scrollIntoView({ behavior: 'smooth', block: 'center' });
         $('#ownStory').focus();
-        toast(item.story ? 'Текст у формі — поправ і надсилай' : 'Вихідний текст не зберігся');
+        // Фото перечіпляє сервер із папки цього ж рядка — руками їх обирати
+        // не треба, і саме цього раніше ніхто не знав: сюжет ішов із нулем.
+        toast(item.story
+          ? 'Текст у формі — поправ і надсилай. Фото перенесуться самі'
+          : 'Вихідний текст не зберігся');
       });
       actions.appendChild(again);
 
@@ -1593,7 +1597,11 @@
         if (out.error) throw new Error(out.error);
 
         notify('success');
-        toast(`Прийнято: ${out.id}`);
+        if (out.carryError) {
+          toast(`Прийнято: ${out.id}, але фото перенести не вдалося — додай кнопкою 📎`);
+        } else {
+          toast(`Прийнято: ${out.id}${out.carried ? ` · ${out.carried} фото перенесено` : ''}`);
+        }
         $('#ownStory').value = ''; ownPicked = []; ownRetry = null; ownRenderFiles();
         $('#ownPanel').classList.remove('open');
       } catch (e) {

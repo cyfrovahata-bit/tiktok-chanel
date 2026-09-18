@@ -130,3 +130,34 @@ test('прибрані фото повертають шапку в «фото н
   assert.match(out, /ФОТО НЕМАЄ/);
   assert.doesNotMatch(out, /ФОТО ВЛАСНИКА/);
 });
+
+test('промт велить перенести блок фото в колонку G дослівно', () => {
+  // Рядок про луцький «будинок-вулик» вийшов без блоку фото в колонці G —
+  // і промт малювання намалював усі кадри з нуля, хоч фото були надіслані.
+  const withPhotos = buildOwnPrompt({
+    rowId: 'OWN-1', story: 'Текст.', photoCount: 3, folderUrl: 'https://drive/x',
+  });
+  assert.match(withPhotos, /перенеси в цей сценарій ДОСЛІВНО/);
+  assert.match(withPhotos, /намалює всі кадри з нуля/);
+
+  // Без фото цієї вказівки бути не має: інакше вона посилається на блок,
+  // якого в промті немає, і модель шукатиме його даремно.
+  const noPhotos = buildOwnPrompt({ rowId: 'OWN-1', story: 'Текст.', photoCount: 0 });
+  assert.doesNotMatch(noPhotos, /перенеси в цей сценарій ДОСЛІВНО/);
+});
+
+test('повторне надсилання переносить фото, а не лишає рядок із нулем', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const server = await readFile(new URL('../web/server.js', import.meta.url), 'utf8');
+  const submit = server.slice(server.indexOf("step === 'submit'"), server.indexOf("step === 'surname'"));
+  // Фото беруться з папки відхиленого рядка й дораховуються до кількості.
+  assert.match(submit, /copyOwnPhotos\(retryOf, body\.folderId, \{ startIndex: uploaded \}\)/);
+  assert.match(submit, /const photoCount = uploaded \+ carried;/);
+  // Збій переносу не валить надсилання, але й не проходить тихо.
+  assert.match(submit, /carryError = error\.message/);
+  assert.match(submit, /перенести не вдалося/);
+
+  const html = await readFile(new URL('../web/public/index.html', import.meta.url), 'utf8');
+  assert.match(html, /Фото перенесуться самі/);
+  assert.match(html, /out\.carried/);
+});

@@ -202,6 +202,46 @@ export async function ensureOwnFolder(id) {
   return { folderId: res.data.id, folderUrl: res.data.webViewLink || '' };
 }
 
+// Переносить фото з папки ВІДХИЛЕНОГО рядка в папку нового.
+//
+// Кнопка «Надіслати заново» несла лише текст. Фото лишалися в папці старого
+// рядка, новий приходив із нулем — і другий промт малював усе з нуля, хоч
+// власник фото надсилав. Саме так вийшов сюжет про луцький «будинок-вулик».
+//
+// Копіюємо, а не переставляємо: папки лишаються 1:1 з рядками, тож видалення
+// одного сюжету не забирає матеріал іншого.
+function stripIndex(name) {
+  return String(name || '').replace(/^\d{2}-/, '');
+}
+
+export async function copyOwnPhotos(fromId, toFolderId, { startIndex = 0 } = {}) {
+  if (!fromId || !toFolderId) return 0;
+  const source = await findOwnFolder(fromId);
+  if (!source) return 0;
+  const res = await drive().files.list({
+    q: `'${source.folderId}' in parents and trashed = false and mimeType contains 'image/'`,
+    fields: 'files(id, name)',
+    orderBy: 'name',
+    pageSize: MAX_PHOTOS,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  let index = startIndex;
+  let copied = 0;
+  for (const file of res.data.files || []) {
+    if (index >= MAX_PHOTOS) break;
+    index += 1;
+    await drive().files.copy({
+      fileId: file.id,
+      requestBody: { name: safeName(stripIndex(file.name), index), parents: [toFolderId] },
+      fields: 'id',
+      supportsAllDrives: true,
+    });
+    copied += 1;
+  }
+  return copied;
+}
+
 // Скільки знімків у папці НАСПРАВДІ. Рахуємо на Drive, а не з того, що
 // надіслав браузер: інакше перерване завантаження лишило б у промті число
 // більше за кількість файлів, і ChatGPT шукав би неіснуючі кадри.
@@ -313,7 +353,10 @@ ${step2}
 3. ОНОВИ ЦЕЙ САМИЙ РЯДОК таблиці «Черга тем» (ID: ${rowId}) — НЕ створюй новий:
    • «Тема» (C) — тема, яку ти дав сюжету;
    • «Слайдів» (F) — скільки вийшло слайдів;
-   • «Додаткові вказівки» (G) — сценарій за шаблоном нижче, замість цього тексту;
+   • «Додаткові вказівки» (G) — сценарій за шаблоном нижче, замість цього тексту;${hasPhotos ? `
+     блок «——— ФОТО ВЛАСНИКА ———» перенеси в цей сценарій ДОСЛІВНО, разом із
+     посиланням на папку: без нього промт малювання не дізнається, що фото
+     взагалі є, і намалює всі кадри з нуля;` : ''}
    • «Джерела» (K) — посилання, за якими перевіряв факти, через кому;
    • «Примітка» (L) — коротко: що перевірив і що лишилось під питанням;
    • «Статус» (E) — лишається NEW. Не чіпай.

@@ -29,7 +29,8 @@ import { readPlan, buildDay, planDay, resetDay, rehookDay, rebuildDay, retryThum
 import { plannedSize } from '../src/long-plan.js';
 import {
   createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory,
-  blacklistOnReject, ensureOwnFolder, findOwnFolder, countOwnPhotos, withOwnPhotos, MAX_PHOTOS,
+  blacklistOnReject, ensureOwnFolder, findOwnFolder, countOwnPhotos, withOwnPhotos, copyOwnPhotos,
+  MAX_PHOTOS,
 } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
 import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty, unpublishedPlatforms } from '../src/autopublish.js';
@@ -1405,30 +1406,45 @@ const server = http.createServer(async (req, res) => {
         if (step === 'submit') {
           if (!body.id) throw new Error('Немає id');
           const story = String(body.story || '').trim();
-          const photoCount = Number(body.photoCount) || 0;
-          if (!story && !photoCount) throw new Error('Порожньо: додай сюжет або хоча б одне фото');
+          const uploaded = Number(body.photoCount) || 0;
           // retryOf/retryNote приходять із картки помилки: новий рядок має
           // пам'ятати, після чого він поданий, інакше фактчек перевіряє весь
           // текст наново — зокрема й те, що минулого разу вже підтвердив.
+          const retryOf = String(body.retryOf || '').trim().slice(0, 40);
+          // І переносимо фото: при повторі вони лежать у папці ВІДХИЛЕНОГО
+          // рядка, а новий приходив із нулем. Саме через це сюжет про луцький
+          // «будинок-вулик» намалювали з нуля, хоч фото були надіслані.
+          let carried = 0;
+          let carryError = '';
+          if (retryOf && body.folderId) {
+            try {
+              carried = await copyOwnPhotos(retryOf, body.folderId, { startIndex: uploaded });
+            } catch (error) {
+              // Не валимо надсилання: краще прийняти виправлений текст без
+              // фото, ніж втратити і його. Але мовчати не можна — власник
+              // інакше знову отримає кадри з нуля й не знатиме чому.
+              carryError = error.message;
+              console.error('[own] перенос фото:', error.message);
+            }
+          }
+          const photoCount = uploaded + carried;
+          if (!story && !photoCount) throw new Error('Порожньо: додай сюжет або хоча б одне фото');
           const out = await submitOwn({
-            ...body,
-            story,
-            photoCount,
-            retryOf: String(body.retryOf || '').trim().slice(0, 40),
-            retryNote: String(body.retryNote || ''),
+            ...body, story, photoCount, retryOf, retryNote: String(body.retryNote || ''),
           });
           cache.at = 0;
           await sendMessage(
             ownerChatId(),
             `✍️ Твій сюжет прийнято: ${out.id}\n`
-            + `${photoCount ? `${photoCount} фото завантажено. ` : 'Без фото. '}`
+            + `${photoCount ? `${photoCount} фото завантажено${carried ? ` (з них ${carried} перенесено з ${retryOf})` : ''}. ` : 'Без фото. '}`
+            + `${carryError ? `⚠️ Фото з ${retryOf} перенести не вдалося: ${carryError}\n` : ''}`
             + 'Рядок у таблиці зі статусом NEW.\n\n'
             + '1. Відкрий ChatGPT і встав промт із колонки G цього рядка — він '
             + 'розіб\'є текст на слайди й перевірить факти.\n'
             + '2. Перечитай і поправ тексти тут, у мінідодатку.\n'
             + '3. Аж потім запускай промт малювання фото.',
           ).catch(() => {});
-          return json(res, 200, out);
+          return json(res, 200, { ...out, carried, carryError });
         }
         // Фото до вже наявного рядка. Два кроки, бо файли йдуть по одному:
         // спершу дізнаємось папку й скільки знімків у ній уже лежить (щоб
