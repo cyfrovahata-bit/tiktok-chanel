@@ -69,7 +69,9 @@ export async function fetchFacebookComments(options = {}) {
   let scanned = 0;
   do {
     // eslint-disable-next-line no-await-in-loop
-    const page = await fetchPostsPage(pageId, { pageSize, after, options });
+    const page = options.postId
+      ? { data: [await fetchPostsPage(pageId, { pageSize, after, options })] }
+      : await fetchPostsPage(pageId, { pageSize, after, options });
     await expandThreads(page.data || [], 'comments', options);
     scanned += collectFromPosts(page.data || [], pageId, out, options);
     options.onPage?.({ count: (page.data || []).length, next: page.paging?.next ? page.paging?.cursors?.after || null : null });
@@ -79,7 +81,7 @@ export async function fetchFacebookComments(options = {}) {
 }
 
 function fetchPostsPage(pageId, { pageSize, after, options }) {
-  return graphRequest(`${encodeURIComponent(pageId)}/posts`, {
+  return graphRequest(options.postId ? encodeURIComponent(options.postId) : `${encodeURIComponent(pageId)}/posts`, {
     params: {
       ...(after ? { after } : {}),
       // Вкладені comments — це відповіді на коментар. Потрібні, щоб не
@@ -232,7 +234,7 @@ export function instagramEnabled() {
 // два рівні вкладеності, відповідь публікується на верхній коментар.
 export async function fetchInstagramComments(options = {}) {
   const igUserId = process.env.META_IG_USER_ID;
-  const data = await graphRequest(`${encodeURIComponent(igUserId)}/media`, {
+  let data = await graphRequest(options.postId ? encodeURIComponent(options.postId) : `${encodeURIComponent(igUserId)}/media`, {
     params: {
       // caption потрібен, щоб знайти ролик за текстом, коли ID допису на файлі
       // ще не записано; replies — щоб бачити розмову, а не окремі репліки.
@@ -245,6 +247,7 @@ export async function fetchInstagramComments(options = {}) {
     fetchImpl: options.fetchImpl,
   });
 
+  if (options.postId) data = { data: [data] };
   await expandThreads(data.data || [], 'replies', options);
   options.onPage?.({ count: (data.data || []).length, next: data.paging?.next ? data.paging?.cursors?.after || null : null });
 

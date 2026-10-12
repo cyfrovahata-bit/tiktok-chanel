@@ -1,3 +1,4 @@
+import { webhookMode } from './meta-webhook.js';
 import { ensureHistory, isHistorical, collectHistoryStep } from './comment-history.js';
 import { threadKey, rememberThread, withThreadMemory, rememberReply } from './comment-memory.js';
 // Спільна механіка відповідей на коментарі: знайти нові → написати чернетку →
@@ -740,6 +741,7 @@ export async function checkPlatform(adapter, options = {}) {
       .catch(() => {});
   }
 
+  result.remaining = fresh.filter(c => !state.seen[`${adapter.key}:${c.id}`]).length;
   if (!options.state) await writeState(state);
   return result;
 }
@@ -776,7 +778,10 @@ export function expirePending(state, now = Date.now(), ttlMs = PENDING_TTL_MS, m
 
 let checking = null;
 export function checkAll(options = {}) {
-  if (checking) return checking;
+  if (checking) {
+    if (options.webhookTargets) return checking.then(() => checkAll(options));
+    return checking;
+  }
   checking = runCheckAll(options).finally(() => { checking = null; });
   return checking;
 }
@@ -830,8 +835,11 @@ async function runCheckAll(options = {}) {
   const results = [];
   for (const adapter of platforms.values()) {
     if (adapter.enabled && !adapter.enabled()) continue;
+    const target = options.webhookTargets?.[adapter.key];
+    if (options.webhookTargets && !target) continue;
+    if (!options.webhookTargets && webhookMode() && ['fb', 'ig'].includes(adapter.key)) continue;
     try {
-      results.push(await checkPlatform(adapter, { ...options, state, deep }));
+      results.push(await checkPlatform(adapter, { ...options, state, deep: target ? false : deep, ...(target ? { postId: target } : {}) }));
     } catch (error) {
       results.push({ platform: adapter.key, error: error.message });
     }

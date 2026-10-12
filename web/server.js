@@ -1,3 +1,4 @@
+import { handleWebhook, webhookStatus, startWebhookWorker } from '../src/meta-webhook.js';
 // Веб-сервер мінідодатка Telegram для каналу «Чи Ви Знали?».
 // Роль: показати готові (DONE) матеріали з Google Sheet, у яких уже є
 // змонтоване відео в Drive-папці «video», дати переглянути й завантажити
@@ -341,6 +342,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const { pathname } = url;
+    if (pathname === '/webhooks/meta') return await handleWebhook(req, res, url);
 
     // Публічні сторінки для аудиту YouTube API: рецензент має побачити, що це
     // за клієнт і як він поводиться з даними. Кореневий шлях для цього не
@@ -1720,6 +1722,7 @@ const server = http.createServer(async (req, res) => {
         // Які платформи слухають коментарі. Без цього єдиний спосіб дізнатися,
         // чи ввімкнено YouTube, — чекати картку в Telegram.
         comments: registeredPlatforms(),
+        metaWebhook: webhookStatus(),
         watch: watchStatus(),
         poll: pollStatus(),
         serviceAccount: g.email || null,
@@ -1775,6 +1778,10 @@ if (process.env.ENABLE_WEB === '1' && import.meta.url === pathToFileURL(process.
       || process.env.ENABLE_IG_COMMENTS === '1') {
       startTelegramLoop();
       startCommentWatcher();
+      startWebhookWorker(async job => {
+        const results = await checkAll({ webhookTargets: { [job.platform]: job.postId } });
+        return results.find(r => r.platform === job.platform) || { error: 'Платформа коментарів не ввімкнена' };
+      });
     }
   } else {
     console.warn('GOOGLE_SERVICE_ACCOUNT_JSON не задано — монітор черги вимкнено (немає доступу до таблиці).');
