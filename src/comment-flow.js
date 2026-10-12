@@ -545,6 +545,10 @@ export async function checkPlatform(adapter, options = {}) {
   // прохід. Якщо Drive чи таблиця недоступні — не валимо весь прохід:
   // відповідь без контексту гірша, але краща за відсутність відповіді.
   let index = options.postIndex ?? null;
+  const postCacheKey = c => ['fb', 'ig'].includes(adapter.key)
+    ? `${adapter.key}:${c.postId || c.mediaId || ''}` : null;
+  const needsIndex = fresh.some(c => !state.posts?.[postCacheKey(c)]);
+  if (!index && !needsIndex) index = [];
   if (!index) {
     try {
       index = await loadPostIndex(options);
@@ -650,8 +654,14 @@ export async function checkPlatform(adapter, options = {}) {
     const memory = state.threads?.[memoryKey];
     let post = null;
     try {
+      const cached = state.posts?.[postCacheKey(comment)];
       const saved = memory?.rowId && index.find(p => p.item.id === memory.rowId);
-      post = saved ? { ...contextFrom(saved.item), matchedBy: 'saved-row' } : findPost(index, adapter.key, comment);
+      post = cached || (saved ? { ...contextFrom(saved.item), matchedBy: 'saved-row' } : findPost(index, adapter.key, comment));
+      if (postCacheKey(comment) && post && post.matchedBy !== 'weak') {
+        state.posts ||= {};
+        const { bind, ...snapshot } = post;
+        state.posts[postCacheKey(comment)] = snapshot;
+      }
       if (post?.rowId && post.matchedBy !== 'weak' && memory) memory.rowId = post.rowId;
       // Знайшли за текстом допису — записуємо ID на файл, як це зробила б
       // автопублікація. Наступного разу шукати вже не доведеться.

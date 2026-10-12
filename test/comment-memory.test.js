@@ -52,3 +52,15 @@ for (const platform of ['fb', 'ig']) test(`${platform}: paginate roots and repli
   assert.ok(result.some(c => c.id === 'second'));
   assert.equal(snapshots.find(c => c.id === 'root').thread[0].ours, true);
 });
+
+test('cached plot is reused across different roots without reading Sheet or Drive', async () => {
+  const { checkPlatform } = await import('../src/comment-flow.js');
+  const state = { seen: {}, drafts: {}, posts: { 'ig:post': { title: 'Старий замок', rowId: 'row', script: ['Відомий сюжет'], matchedBy: 'strong' } } };
+  const adapter = { key: 'ig', label: 'Instagram', icon: '', link: () => '', fetch: async () => [{ id: 'new-root', mediaId: 'post', text: 'Коли його побудували?', author: 'A' }] };
+  let prompt;
+  await checkPlatform(adapter, { state, listFiles: async () => { throw new Error('Drive must not be read'); }, listItems: async () => { throw new Error('Sheet must not be read'); }, chat: async p => { prompt = p; return 'Уточнимо дату.'; }, notifyFn: async () => ({ message_id: 1 }), chatId: 'owner' });
+  assert.match(prompt, /Відомий сюжет/);
+  assert.match(prompt, /Старий замок/);
+  assert.equal(state.seen['ig:new-root'], 'pending');
+  assert.equal(JSON.parse(JSON.stringify(stateDoc(state))).posts['ig:post'].rowId, 'row');
+});
