@@ -38,3 +38,25 @@ export async function diagnoseConfiguredComments() {
     console.log('[comments:diagnostic]', JSON.stringify(report));
   }
 }
+
+export async function diagnoseWebhookComments(events) {
+  if (!process.env.META_COMMENT_DIAGNOSTICS) return;
+  const state = await readState();
+  for (const event of events.filter(e => e.platform === 'fb').slice(0, 10)) {
+    const report = { postId: event.postId, commentId: event.commentId };
+    try {
+      const c = await graphRequest(encodeURIComponent(event.commentId), {
+        token: process.env.META_PAGE_ACCESS_TOKEN,
+        params: { fields: 'id,message,created_time,from,parent{id},comments.limit(25){id,from,created_time}' },
+      });
+      report.ownAuthor = c.from?.id === process.env.META_PAGE_ID;
+      report.hasText = Boolean(c.message);
+      report.createdAt = c.created_time;
+      report.parentId = c.parent?.id || null;
+      report.ownReplies = (c.comments?.data || []).filter(r => r.from?.id === process.env.META_PAGE_ID).length;
+      report.seen = state.seen?.[`fb:${c.id}`] || null;
+      report.historical = isHistorical(state, 'fb', { publishedAt: c.created_time });
+    } catch (error) { report.error = error.message; }
+    console.log('[comments:event-diagnostic]', JSON.stringify(report));
+  }
+}

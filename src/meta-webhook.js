@@ -134,7 +134,12 @@ export async function handleWebhook(req, res, url, options = {}) {
   try { payload = JSON.parse(raw.toString('utf8')); }
   catch { res.writeHead(400); res.end('Invalid JSON'); return; }
   // Відповідаємо 200 лише після збереження черги, щоб рестарт не губив події.
-  const accepted = await (options.accept || acceptEvents)(parseEvents(payload));
+  const events = parseEvents(payload);
+  const accepted = await (options.accept || acceptEvents)(events);
+  if (process.env.META_COMMENT_DIAGNOSTICS && events.length) {
+    console.log('[meta:webhook:events]', JSON.stringify(events.map(({ platform, postId, commentId }) => ({ platform, postId, commentId }))));
+    import('./comment-diagnostics.js').then(m => m.diagnoseWebhookComments(events)).catch(e => console.error('[comments:event-diagnostic]', e.message));
+  }
   console.log('[meta:webhook] прийнято', accepted, 'режим', status.mode);
   res.writeHead(200, { 'content-type': 'text/plain' }); res.end('EVENT_RECEIVED');
   if (webhookMode()) setTimeout(() => drainQueue(), 0);
