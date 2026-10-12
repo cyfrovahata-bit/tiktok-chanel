@@ -15,6 +15,33 @@ function token() {
   return value;
 }
 
+// Догортаємо коментарі й відповіді; історія не обмежена першим вкладеним пакетом.
+async function expandThreads(posts, edge, options) {
+  const fields = edge === 'comments'
+    ? 'id,message,created_time,from,attachment'
+    : 'id,text,timestamp,username,from';
+  async function expand(connection, path, queryFields) {
+    if (!connection) return;
+    const visited = new Set();
+    for (let page = 0; page < 20 && connection.paging?.next; page += 1) {
+      const after = connection.paging?.cursors?.after;
+      if (!after || visited.has(after)) break;
+      visited.add(after);
+      const next = await graphRequest(path, { params: { fields: queryFields, limit: 100, after },
+        token: options.token || token(), fetchImpl: options.fetchImpl });
+      connection.data = [...(connection.data || []), ...(next.data || [])];
+      connection.paging = next.paging;
+    }
+  }
+  for (const post of posts) {
+    await expand(post.comments, `${encodeURIComponent(post.id)}/comments`,
+      `${fields},${edge}.limit(100){${fields}}`);
+    for (const c of post.comments?.data || []) {
+      await expand(c[edge], `${encodeURIComponent(c.id)}/${edge}`, fields);
+    }
+  }
+}
+
 // --- Facebook ----------------------------------------------------------------
 
 export function facebookEnabled() {
@@ -42,7 +69,8 @@ export async function fetchFacebookComments(options = {}) {
   do {
     // eslint-disable-next-line no-await-in-loop
     const page = await fetchPostsPage(pageId, { pageSize, after, options });
-    scanned += collectFromPosts(page.data || [], pageId, out);
+    await expandThreads(page.data || [], 'comments', options);
+    scanned += collectFromPosts(page.data || [], pageId, out, options);
     after = options.deep ? page.paging?.cursors?.after || null : null;
   } while (after && scanned < maxPosts);
   return out;
@@ -82,14 +110,17 @@ export function isSticker(comment) {
 
 // Розбирає одну сторінку дописів у список коментарів. Повертає, скільки
 // дописів переглянули — за цим лічильником зупиняється глибокий обхід.
-function collectFromPosts(posts, pageId, out) {
+function collectFromPosts(posts, pageId, out, options = {}) {
   for (const post of posts) {
     const common = { postId: post.id, postText: post.message || '' };
     for (const c of post.comments?.data || []) {
       // Свої ж коментарі пропускаємо, інакше бот відповідатиме сам собі.
       if (!c.id || c.from?.id === pageId) continue;
 
-      const raw = c.comments?.data || [];
+      const raw = [...(c.comments?.data || [])].sort((a, b) => String(a.created_time || '').localeCompare(String(b.created_time || '')));
+      const snapshot = { ...common, id: c.id, text: c.message || '', author: c.from?.name || 'Глядач', publishedAt: c.created_time || '',
+        thread: raw.map(r => ({ id: r.id, author: r.from?.id === pageId ? 'Канал' : (r.from?.name || 'Глядач'), text: r.message || '', ours: r.from?.id === pageId, publishedAt: r.created_time || '' })) };
+      options.onThread?.(snapshot);
       // «Чи ми вже писали» рахуємо по ВСІХ відповідях, а не лише по тих, що
       // мають id: відповідь без id — це все одно наша відповідь, і пропустити
       // її означало б написати в гілку вдруге.
@@ -109,6 +140,7 @@ function collectFromPosts(posts, pageId, out) {
           sticker: !c.message && isSticker(c),
           author: c.from?.name || 'Глядач',
           publishedAt: c.created_time || '',
+          thread: snapshot.thread,
         });
       }
 
@@ -143,6 +175,7 @@ function collectFromPosts(posts, pageId, out) {
         thread: replies
           .filter((r) => r.message)
           .map((r) => ({
+            id: r.id, publishedAt: r.created_time || '',
             author: r.from?.id === pageId ? 'Канал' : (r.from?.name || 'Глядач'),
             text: r.message,
             ours: r.from?.id === pageId,
@@ -209,6 +242,8 @@ export async function fetchInstagramComments(options = {}) {
     fetchImpl: options.fetchImpl,
   });
 
+  await expandThreads(data.data || [], 'replies', options);
+
   const own = String(process.env.META_IG_USERNAME || '').toLowerCase();
   // Instagram не завжди віддає from, тож звіряємо ще й за іменем автора.
   const isOurs = (c) => c?.from?.id === igUserId
@@ -227,6 +262,9 @@ export async function fetchInstagramComments(options = {}) {
       if (!c.id || !c.text || isOurs(c)) continue;
 
       const replies = [...(c.replies?.data || [])].sort(byTime);
+      const snapshot = { ...common, id: c.id, text: c.text, author: nameOf(c), publishedAt: c.timestamp || '',
+        thread: replies.map(r => ({ id: r.id, author: isOurs(r) ? 'Канал' : nameOf(r), text: r.text || '', ours: isOurs(r), publishedAt: r.timestamp || '' })) };
+      options.onThread?.(snapshot);
       const ours = replies.filter(isOurs);
       const answered = ours.length > 0;
       const lastOursAt = answered ? String(ours[ours.length - 1].timestamp || '') : '';
@@ -238,6 +276,7 @@ export async function fetchInstagramComments(options = {}) {
           text: c.text,
           author: nameOf(c),
           publishedAt: c.timestamp || '',
+          thread: snapshot.thread,
         });
       }
 
@@ -262,6 +301,7 @@ export async function fetchInstagramComments(options = {}) {
         parentText: c.text,
         threadAnswered: answered,
         thread: replies.filter((r) => r.text).map((r) => ({
+          id: r.id, publishedAt: r.timestamp || '',
           author: isOurs(r) ? 'Канал' : nameOf(r),
           text: r.text,
           ours: isOurs(r),
