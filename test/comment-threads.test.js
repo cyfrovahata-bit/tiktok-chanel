@@ -179,7 +179,7 @@ test('вкладена репліка несе ID верхнього комен�
   });
   const inThread = list.find((c) => c.parentId);
   assert.equal(inThread.id, 'CM_REPLY', 'відповідаємо саме на цю репліку за змістом');
-  assert.equal(inThread.replyTo, 'CM_TOP', 'а публікуємо у верхній коментар');
+  assert.equal(inThread.replyTo, 'CM_REPLY', 'публікуємо на конкретну репліку');
 });
 
 test('надсилання з Telegram шле у верхній коментар, а не у вкладену репліку', async () => {

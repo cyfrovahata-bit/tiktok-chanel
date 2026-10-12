@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkPlatform, autoReplyEnabled, autoReport } from '../src/comment-flow.js';
+import { checkPlatform, autoReplyEnabled, autoReport, replyTargets, sendReply } from '../src/comment-flow.js';
 import { facebookAdapter } from '../src/meta-comments.js';
 
 const comment = { id: 'p_c', postId: 'page_p', author: 'Viewer', text: 'Чому?', publishedAt: '2026-10-12T17:30:00Z' };
@@ -41,4 +41,13 @@ test('YouTube keeps approval mode and Facebook URLs identify the original commen
   assert.equal(facebookAdapter.link(comment), 'https://www.facebook.com/page_p?comment_id=c');
   const report = autoReport(facebookAdapter, comment, { text: 'Answer', reply: { id: 'p_reply' } });
   assert.match(report, /comment_id=c&reply_comment_id=reply/);
+});
+
+test('Facebook uses the exact reply ID even when the stored draft points at the root', async () => {
+  assert.deepEqual(replyTargets({ key: 'fb' }, 'REPLY', 'ROOT'), ['REPLY']);
+  const tried = [];
+  await assert.rejects(() => sendReply({ key: 'fb', reply: async id => {
+    tried.push(id); throw new Error('Object does not exist');
+  } }, replyTargets({ key: 'fb' }, 'REPLY', 'ROOT'), 'Text'));
+  assert.deepEqual(tried, ['REPLY']);
 });

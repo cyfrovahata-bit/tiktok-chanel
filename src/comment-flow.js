@@ -717,7 +717,7 @@ export async function checkPlatform(adapter, options = {}) {
     // Не вдалося — лишаємо коментар нерозібраним: наступний прохід або
     // відповість, або віддасть його власникові.
     const sent = await act('автовідповідь', async () => {
-      const reply = await adapter.reply(comment.replyTo || comment.id, text, options);
+      const reply = await adapter.reply(adapter.key === 'fb' ? comment.id : (comment.replyTo || comment.id), text, options);
       rememberReply(state, threadKey(adapter.key, comment), reply, text);
     });
     if (!sent) continue;
@@ -778,7 +778,7 @@ export async function checkPlatform(adapter, options = {}) {
       }
       let sent;
       const ok = await act('автовідповідь', async () => {
-        sent = await sendReply(adapter, [comment.replyTo, comment.id], draft, options);
+        sent = await sendReply(adapter, replyTargets(adapter, comment.id, comment.replyTo), draft, options);
       });
       if (!ok) {
         await report(comment, { kind: 'error', reason: `Не опубліковано: ${actionError || 'Тимчасове обмеження дій'}. Повторю пізніше.`, post });
@@ -985,6 +985,11 @@ export function humanError(message) {
 // відповіді: на частині коментарів проходить публікація у верхній коментар, на
 // частині — у саму репліку. Тому пробуємо обидва шляхи, перш ніж казати, що не
 // вийшло: помилка «об'єкта немає» на одному ID ще не означає, що гілка мертва.
+export function replyTargets(adapter, commentId, rootId) {
+  // Facebook: never silently redirect a reply to the root of the thread.
+  return adapter.key === 'fb' ? [commentId] : [rootId, commentId];
+}
+
 export async function sendReply(adapter, targets, text, options = {}) {
   const tried = [...new Set(targets.filter(Boolean).map(String))];
   let last = null;
@@ -1063,7 +1068,7 @@ export async function handleCallback(callbackQuery, options = {}) {
       return true;
     }
     try {
-      const sent = await sendReply(adapter, [draft.replyTo, commentId], draft.text, options);
+      const sent = await sendReply(adapter, replyTargets(adapter, commentId, draft.replyTo), draft.text, options);
       rememberReply(state, draft.threadKey, sent.reply, draft.text);
       state.seen[key] = 'sent';
       await finish('Опубліковано ✅');
@@ -1091,7 +1096,7 @@ export async function handleMessage(message, options = {}) {
 
   const notify = options.notifyFn || sendMessage;
   try {
-    const sent = await sendReply(adapter, [draft.replyTo, rest.join(':')], text, options);
+    const sent = await sendReply(adapter, replyTargets(adapter, rest.join(':'), draft.replyTo), text, options);
     rememberReply(state, draft.threadKey, sent.reply, text);
     state.seen[key] = 'sent';
     delete state.drafts[key];
