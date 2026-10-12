@@ -829,7 +829,7 @@ async function runCheckAll(options = {}) {
   // Час глибокого обходу вирішуємо тут, один раз на прохід — щоб усі платформи
   // в одному проході працювали однаково.
   const lastDeep = Date.parse(state.deepAt || '') || 0;
-  const deep = options.deep ?? (Date.now() - lastDeep > DEEP_EVERY_MS);
+  const deep = !options.webhookTargets && (options.deep ?? (Date.now() - lastDeep > DEEP_EVERY_MS));
   if (deep) state.deepAt = new Date().toISOString();
   const results = [];
   for (const adapter of platforms.values()) {
