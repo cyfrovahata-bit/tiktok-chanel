@@ -42,7 +42,7 @@ export async function drainCommentLikes(state, adapter, options = {}) {
       console.error(`[comments:${adapter.key}] лайк:`, error.message);
       if (isRateLimit(error.message)) state.budget = pause(state.budget, now);
       // Do not spend every pass retrying a missing scope. Replies keep running.
-      if (/permission|not supported|unsupported|code (10|200)\b/i.test(error.message)) {
+      if (/authorization|permission|not supported|unsupported|code (10|190|200)\b/i.test(error.message)) {
         state.likeBlocked ||= {};
         state.likeBlocked[adapter.key] = { until: now + 24 * 60 * 60 * 1000, error: error.message, authStamp };
         if (options.notifyFn) await options.notifyFn(options.chatId,

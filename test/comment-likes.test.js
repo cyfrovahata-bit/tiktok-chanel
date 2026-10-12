@@ -59,3 +59,14 @@ test('Instagram likes target the IG User edge with the actual comment ID', async
   assert.equal(call.request.method, 'POST');
   assert.equal(call.request.body.get('comment_id'), 'reply-id');
 });
+
+test('Instagram Authorization Error code 100 subcode 33 reports access failure and pauses only likes', async () => {
+  const s = setup(); let message;
+  const a = { key: 'ig', label: 'Instagram', like: async () => { throw new Error('Authorization Error (code 100, subcode 33)'); } };
+  queueCommentLikes(s, a, { id: 'c' });
+  await drainCommentLikes(s, a, { ...opts, notifyFn: async (_, text) => { message = text; } });
+  assert.match(message, /instagram_manage_engagement/);
+  assert.ok(s.likeBlocked.ig.until > Date.now());
+  assert.ok(s.likeQueue['ig:c']);
+  assert.equal(s.budget?.pausedUntil || 0, 0);
+});
