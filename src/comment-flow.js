@@ -1,4 +1,3 @@
-import { webhookMode } from './meta-webhook.js';
 import { ensureHistory, isHistorical, collectHistoryStep } from './comment-history.js';
 import { threadKey, rememberThread, withThreadMemory, rememberReply } from './comment-memory.js';
 // Спільна механіка відповідей на коментарі: знайти нові → написати чернетку →
@@ -837,7 +836,8 @@ async function runCheckAll(options = {}) {
     if (adapter.enabled && !adapter.enabled()) continue;
     const target = options.webhookTargets?.[adapter.key];
     if (options.webhookTargets && !target) continue;
-    if (!options.webhookTargets && webhookMode() && ['fb', 'ig'].includes(adapter.key)) continue;
+    // Періодичний обхід залишається резервом для втрачених webhook-подій.
+    // Спільні seen/pending та checkAll lock запобігають дублюванню чернеток.
     try {
       results.push(await checkPlatform(adapter, { ...options, state, deep: target ? false : deep, ...(target ? { postId: target } : {}) }));
     } catch (error) {
