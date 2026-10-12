@@ -1,3 +1,4 @@
+import { ensureHistory, isHistorical, collectHistoryStep } from './comment-history.js';
 import { threadKey, rememberThread, withThreadMemory, rememberReply } from './comment-memory.js';
 // Спільна механіка відповідей на коментарі: знайти нові → написати чернетку →
 // спитати власника в Telegram → опублікувати схвалене.
@@ -544,7 +545,7 @@ export async function checkPlatform(adapter, options = {}) {
   for (const comment of fetched) rememberThread(state, adapter.key, comment);
   const comments = fetched.map(c => withThreadMemory(state, adapter.key, c)).filter(Boolean);
   const activeRoots = new Set(comments.filter(c => c.parentId).map(c => threadKey(adapter.key, c)));
-  const fresh = comments.filter(c => !state.seen[`${adapter.key}:${c.id}`]
+  const fresh = comments.filter(c => !isHistorical(state, adapter.key, c) && !state.seen[`${adapter.key}:${c.id}`]
     && !(threadKey(adapter.key, c) && !c.parentId && activeRoots.has(threadKey(adapter.key, c))));
   const result = { platform: adapter.key, checked: comments.length, fresh: fresh.length, asked: 0, flagged: 0 };
   if (!fresh.length) {
@@ -773,8 +774,48 @@ export function expirePending(state, now = Date.now(), ttlMs = PENDING_TTL_MS, m
   return { dropped, closed };
 }
 
-export async function checkAll(options = {}) {
+let checking = null;
+export function checkAll(options = {}) {
+  if (checking) return checking;
+  checking = runCheckAll(options).finally(() => { checking = null; });
+  return checking;
+}
+
+async function runCheckAll(options = {}) {
+  if (options.historyOnly && process.env.COMMENTS_HISTORY_ENABLED !== '1' && !options.historyEnabled) return [];
   const state = options.state || await readState();
+  if (process.env.COMMENTS_HISTORY_ENABLED === '1' || options.historyEnabled) {
+    const adapters = [...platforms.values()];
+    ensureHistory(state, adapters);
+    if (!state.history.completedAt) {
+      let index = options.postIndex;
+      const needsContext = adapters.some(a => {
+        const p = state.history.platforms[a.key];
+        return p && !p.done && !(Date.parse(p.retryAt || '') > Date.now());
+      });
+      if (!index && needsContext) {
+        try { index = await loadPostIndex(options); }
+        catch (error) { console.error('[comments:history] сюжети:', error.message); index = []; }
+      }
+      const historyResult = await collectHistoryStep(state, adapters, { ...options,
+        rememberPost: (platform, comment) => {
+          const id = comment.postId || comment.mediaId;
+          const key = `${platform}:${id}`;
+          if (state.posts?.[key]) return;
+          const post = findPost(index || [], platform, comment);
+          if (post && post.matchedBy !== 'weak') {
+            state.posts ||= {};
+            const { bind, ...snapshot } = post;
+            state.posts[key] = snapshot;
+          }
+        },
+      });
+      console.log('[comments:history]', JSON.stringify(historyResult));
+      // Курсор і репліки записуємо до будь-яких дій над новими коментарями.
+      await writeState(state);
+    }
+    if (options.historyOnly) return [];
+  }
   // Прострочені картки знімаємо ПЕРЕД обходом: інакше коментар лишався б у
   // стані «pending» і збирач цього ж проходу його б не побачив.
   const expired = expirePending(state, options.now ?? Date.now());
@@ -952,7 +993,10 @@ export async function pendingSummary() {
   for (const value of Object.values(state.seen || {})) {
     statuses[value] = (statuses[value] || 0) + 1;
   }
-  return { pending: byPlatform, seen: statuses, platforms: [...platforms.keys()] };
+  return { pending: byPlatform, seen: statuses, platforms: [...platforms.keys()],
+    history: state.history || null, savedThreads: Object.keys(state.threads || {}).length,
+    savedPosts: Object.keys(state.posts || {}).length,
+    savedMessages: Object.values(state.threads || {}).reduce((n, t) => n + 1 + Object.keys(t.messages || {}).length, 0) };
 }
 
 // Прибирання застарілих карток. Якщо коментаря вже немає серед актуальних
@@ -1019,15 +1063,18 @@ let watchTimer = null;
 
 export function startCommentWatcher() {
   if (watchTimer || !platforms.size) return;
+  let lastMonitor = 0;
   const tick = async () => {
     try {
-      const results = await checkAll();
+      const historyOnly = Date.now() - lastMonitor < WATCH_MS;
+      if (!historyOnly) lastMonitor = Date.now();
+      const results = await checkAll({ historyOnly });
       const notable = results.filter((r) => r.error || r.asked || r.skipped);
       if (notable.length) console.log('[comments]', JSON.stringify(notable));
     } catch (error) {
       console.error('[comments]', error.message);
     }
   };
-  watchTimer = setInterval(tick, WATCH_MS);
+  watchTimer = setInterval(tick, process.env.COMMENTS_HISTORY_ENABLED === '1' ? Math.min(WATCH_MS, 60_000) : WATCH_MS);
   tick();
 }

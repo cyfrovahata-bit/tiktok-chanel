@@ -32,6 +32,7 @@ async function expandThreads(posts, edge, options) {
       connection.data = [...(connection.data || []), ...(next.data || [])];
       connection.paging = next.paging;
     }
+    if (connection.paging?.next) throw new Error('Meta: не вдалося догортати весь список коментарів');
   }
   for (const post of posts) {
     await expand(post.comments, `${encodeURIComponent(post.id)}/comments`,
@@ -64,15 +65,16 @@ export async function fetchFacebookComments(options = {}) {
     : pageSize;
 
   const out = [];
-  let after = null;
+  let after = options.after || null;
   let scanned = 0;
   do {
     // eslint-disable-next-line no-await-in-loop
     const page = await fetchPostsPage(pageId, { pageSize, after, options });
     await expandThreads(page.data || [], 'comments', options);
     scanned += collectFromPosts(page.data || [], pageId, out, options);
+    options.onPage?.({ count: (page.data || []).length, next: page.paging?.next ? page.paging?.cursors?.after || null : null });
     after = options.deep ? page.paging?.cursors?.after || null : null;
-  } while (after && scanned < maxPosts);
+  } while (!options.history && after && scanned < maxPosts);
   return out;
 }
 
@@ -236,6 +238,7 @@ export async function fetchInstagramComments(options = {}) {
       // ще не записано; replies — щоб бачити розмову, а не окремі репліки.
       fields: 'id,caption,permalink,comments.limit(25)'
         + '{id,text,timestamp,username,from,replies.limit(25){id,text,timestamp,username,from}}',
+      ...(options.after ? { after: options.after } : {}),
       limit: options.limit || LIMIT,
     },
     token: options.token || token(),
@@ -243,6 +246,7 @@ export async function fetchInstagramComments(options = {}) {
   });
 
   await expandThreads(data.data || [], 'replies', options);
+  options.onPage?.({ count: (data.data || []).length, next: data.paging?.next ? data.paging?.cursors?.after || null : null });
 
   const own = String(process.env.META_IG_USERNAME || '').toLowerCase();
   // Instagram не завжди віддає from, тож звіряємо ще й за іменем автора.
@@ -309,6 +313,10 @@ export async function fetchInstagramComments(options = {}) {
       });
     }
   }
+  if (options.deep && !options.history && data.paging?.next && data.paging?.cursors?.after
+      && (options.scanned || 0) + (data.data || []).length < (Number(process.env.META_COMMENTS_DEEP_MAX) || 200)) {
+    out.push(...await fetchInstagramComments({ ...options, after: data.paging.cursors.after, scanned: (options.scanned || 0) + (data.data || []).length }));
+  }
   return out;
 }
 
@@ -330,3 +338,13 @@ export const instagramAdapter = {
   reply: replyInstagram,
   link: (c) => c.permalink || '',
 };
+
+async function historyPage(fetchFn, options) {
+  const threads = [];
+  let page = { count: 0, next: null };
+  await fetchFn({ ...options, history: true, deep: false, limit: 5,
+    onThread: c => threads.push(c), onPage: p => { page = p; } });
+  return { ...page, threads };
+}
+facebookAdapter.history = options => historyPage(fetchFacebookComments, options);
+instagramAdapter.history = options => historyPage(fetchInstagramComments, options);
