@@ -1782,7 +1782,7 @@ if (process.env.ENABLE_WEB === '1' && import.meta.url === pathToFileURL(process.
       startTelegramLoop();
       startCommentWatcher();
       startWebhookWorker(async job => {
-        const results = await checkAll({ webhookTargets: { [job.platform]: job.postId } });
+        const results = await checkAll({ webhookTargets: { [job.platform]: job.postId }, webhookComments: Object.values(job.comments || {}) });
         return results.find(r => r.platform === job.platform) || { error: 'Платформа коментарів не ввімкнена' };
       });
     }

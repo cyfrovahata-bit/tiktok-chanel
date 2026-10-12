@@ -54,8 +54,43 @@ for (const platform of ['fb', 'ig']) test(`${platform}: fetch a webhook post dir
   const paths = [];
   const result = await (platform === 'fb' ? fetchFacebookComments : fetchInstagramComments)({ postId: 'old-post', fetchImpl: async url => {
     paths.push(new URL(url).pathname);
-    return { ok: true, text: async () => JSON.stringify({ id: 'old-post', comments: { data: [{ id: 'c', text: 'Question', message: 'Question', timestamp: '2026-10-12', created_time: '2026-10-12' }] } }) };
+    return { ok: true, text: async () => JSON.stringify({ id: 'old-post', comments: { data: [{ id: 'c', from: { id: 'viewer' }, text: 'Question', message: 'Question', timestamp: '2026-10-12', created_time: '2026-10-12' }] } }) };
   } });
   assert.equal(paths.length, 1); assert.ok(paths[0].endsWith('/old-post'));
   assert.equal(result[0].id, 'c');
+});
+test('Facebook webhook reads missing comment directly without optional author permission, preserving own replies', async () => {
+  process.env.META_PAGE_ID = 'page';
+  const seen = [];
+  const result = await fetchFacebookComments({ postId: 'post', token: 'token',
+    webhookComments: [{ platform: 'fb', postId: 'post', commentId: 'new', parentId: 'post', authorId: 'viewer' }],
+    fetchImpl: async url => {
+      const u = new URL(url); const id = u.pathname.split('/').at(-1); const fields = u.searchParams.get('fields');
+      seen.push({ id, fields });
+      let data;
+      if (id === 'post') data = { id: 'post', comments: { data: [] } };
+      else if (id === 'new' && fields.includes('from')) return { ok: false, status: 400, text: async () => JSON.stringify({ error: { code: 100, message: 'Author is unavailable' } }) };
+      else if (id === 'new') data = { id: 'new', message: 'Thank you', created_time: '2026-10-12T15:22:42Z', comments: { data: [{ id: 'ours', message: 'Thanks', created_time: '2026-10-12T15:25:42Z' }] } };
+      else if (id === 'ours') data = { id: 'ours', from: { id: 'page' } };
+      return { ok: true, text: async () => JSON.stringify(data) };
+    },
+  });
+  assert.ok(seen.some(r => r.id === 'new' && !r.fields.includes('from')));
+  assert.deepEqual(result, []); // Existing Page reply must still suppress another draft.
+});
+test('Facebook missing root comment gets a candidate when author field is inaccessible', async () => {
+  process.env.META_PAGE_ID = 'page';
+  const result = await fetchFacebookComments({ postId: 'post', token: 'token',
+    webhookComments: [{ platform: 'fb', postId: 'post', commentId: 'new', parentId: 'post', authorId: 'viewer' }],
+    fetchImpl: async url => {
+      const u = new URL(url); const id = u.pathname.split('/').at(-1);
+      if (u.searchParams.get('fields').includes('from') && id !== 'post') return { ok: false, status: 400, text: async () => JSON.stringify({ error: { code: 100, message: 'Author unavailable' } }) };
+      const data = id === 'post' ? { id: 'post', comments: { data: [] } } : { id: 'new', message: 'Thank you', created_time: '2026-10-12T15:22:42Z' };
+      return { ok: true, text: async () => JSON.stringify(data) };
+    },
+  });
+  assert.equal(result[0].id, 'new'); assert.equal(result[0].text, 'Thank you');
+  const q = { pending: {}, seen: {} };
+  mergeEvents(q, [{ platform: 'fb', postId: 'post', commentId: 'new', fingerprint: 'event', authorId: 'viewer' }]);
+  assert.equal(q.pending['fb:post'].comments.new.authorId, 'viewer');
 });

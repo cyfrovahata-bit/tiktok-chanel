@@ -33,7 +33,9 @@ export function parseEvents(payload, config = process.env) {
       const commentId = platform === 'fb' ? v.comment_id : v.id;
       if (!postId || !commentId) continue;
       const fingerprint = createHash('sha256').update(JSON.stringify([platform, entry.id, entry.time, change])).digest('hex');
-      events.push({ platform, postId: String(postId), commentId: String(commentId), fingerprint });
+      events.push({ platform, postId: String(postId), commentId: String(commentId), fingerprint,
+        ...(platform === 'fb' ? { parentId: v.parent_id ? String(v.parent_id) : null,
+          authorId: v.from?.id ? String(v.from.id) : null, authorName: v.from?.name || null, verb: v.verb || 'add' } : {}) });
     }
   }
   return events;
@@ -67,7 +69,8 @@ export function mergeEvents(q, events, now = Date.now()) {
     if (q.seen[e.fingerprint]) continue;
     const key = `${e.platform}:${e.postId}`;
     const prev = q.pending[key] || {};
-    q.pending[key] = { platform: e.platform, postId: e.postId, revision: (prev.revision || 0) + 1 };
+    const comments = { ...(prev.comments || {}), [e.commentId]: e };
+    q.pending[key] = { platform: e.platform, postId: e.postId, comments, revision: (prev.revision || 0) + 1 };
     q.seen[e.fingerprint] = now;
     accepted++;
   }
@@ -109,7 +112,11 @@ export function startWebhookWorker(fn) {
   processPost = fn;
   if (worker) return;
   worker = setInterval(() => drainQueue(), 30_000);
-  drainQueue();
+  if (process.env.META_WEBHOOK_REPLAY) {
+    Promise.resolve().then(() => JSON.parse(process.env.META_WEBHOOK_REPLAY))
+      .then(events => acceptEvents(events)).then(() => drainQueue())
+      .catch(error => console.error('[meta:webhook:replay]', error.message));
+  } else drainQueue();
 }
 
 export async function handleWebhook(req, res, url, options = {}) {

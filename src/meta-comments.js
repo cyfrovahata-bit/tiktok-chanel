@@ -15,6 +15,68 @@ function token() {
   return value;
 }
 
+// Meta may allow comment text while denying the author field. Retry only that
+// optional field; preserve all other errors and recover Page authors separately.
+async function facebookRead(path, options) {
+  try { return await graphRequest(path, options); }
+  catch (error) {
+    if (!String(error.message).includes('code 100') || !String(options.params?.fields).includes('from')) throw error;
+    const fields = options.params.fields.replace(/,from(?=[,}]|$)/g, '');
+    const data = await graphRequest(path, { ...options, params: { ...options.params, fields } });
+    const mark = node => {
+      if (node.id) node.authorFallback = true;
+      for (const c of node.comments?.data || []) mark(c);
+      for (const c of node.data || []) mark(c);
+    };
+    mark(data);
+    return data;
+  }
+}
+async function recoverFacebookAuthors(posts, options) {
+  for (const post of posts) {
+    for (const c of post.comments?.data || []) {
+      for (const node of [c, ...(c.comments?.data || [])]) {
+        if (node.from || !node.id || !node.authorFallback) continue;
+        try {
+          const author = await graphRequest(encodeURIComponent(node.id), {
+            params: { fields: 'id,from' }, token: options.token || token(), fetchImpl: options.fetchImpl,
+          });
+          if (author.from) node.from = author.from;
+        } catch (error) {
+          if (!String(error.message).includes('code 100')) throw error;
+        }
+      }
+    }
+  }
+}
+async function includeWebhookComments(post, options) {
+  post.comments ||= { data: [] };
+  post.comments.data ||= [];
+  for (const event of options.webhookComments || []) {
+    if (event.platform !== 'fb' || event.postId !== options.postId || event.verb === 'remove') continue;
+    const nodes = post.comments.data.flatMap(c => [c, ...(c.comments?.data || [])]);
+    if (nodes.some(c => c.id === event.commentId)) continue;
+    const c = await facebookRead(encodeURIComponent(event.commentId), {
+      params: { fields: 'id,message,created_time,from,attachment,comments.limit(100){id,message,created_time,from,attachment}' },
+      token: options.token || token(), fetchImpl: options.fetchImpl,
+    });
+    if (!c.from && event.authorId) c.from = { id: event.authorId, name: event.authorName || 'Глядач' };
+    const parentId = event.parentId;
+    if (parentId && parentId !== event.postId && !parentId.endsWith('_' + post.id.split('_').at(-1))) {
+      let root = post.comments.data.find(r => r.id === parentId);
+      if (!root) {
+        root = await facebookRead(encodeURIComponent(parentId), {
+          params: { fields: 'id,message,created_time,from,attachment,comments.limit(100){id,message,created_time,from,attachment}' },
+          token: options.token || token(), fetchImpl: options.fetchImpl,
+        });
+        post.comments.data.push(root);
+      }
+      root.comments ||= { data: [] }; root.comments.data ||= [];
+      if (!root.comments.data.some(r => r.id === c.id)) root.comments.data.push(c);
+    } else post.comments.data.push(c);
+  }
+}
+
 // Догортаємо коментарі й відповіді; історія не обмежена першим вкладеним пакетом.
 async function expandThreads(posts, edge, options) {
   const fields = edge === 'comments'
@@ -27,7 +89,7 @@ async function expandThreads(posts, edge, options) {
       const after = connection.paging?.cursors?.after;
       if (!after || visited.has(after)) break;
       visited.add(after);
-      const next = await graphRequest(path, { params: { fields: queryFields, limit: 100, after },
+      const next = await (edge === 'comments' ? facebookRead : graphRequest)(path, { params: { fields: queryFields, limit: 100, after },
         token: options.token || token(), fetchImpl: options.fetchImpl });
       connection.data = [...(connection.data || []), ...(next.data || [])];
       connection.paging = next.paging;
@@ -72,7 +134,9 @@ export async function fetchFacebookComments(options = {}) {
     const page = options.postId
       ? { data: [await fetchPostsPage(pageId, { pageSize, after, options })] }
       : await fetchPostsPage(pageId, { pageSize, after, options });
+    if (options.postId && page.data?.[0]) await includeWebhookComments(page.data[0], options);
     await expandThreads(page.data || [], 'comments', options);
+    await recoverFacebookAuthors(page.data || [], options);
     scanned += collectFromPosts(page.data || [], pageId, out, options);
     options.onPage?.({ count: (page.data || []).length, next: page.paging?.next ? page.paging?.cursors?.after || null : null });
     after = options.deep ? page.paging?.cursors?.after || null : null;
@@ -81,7 +145,7 @@ export async function fetchFacebookComments(options = {}) {
 }
 
 function fetchPostsPage(pageId, { pageSize, after, options }) {
-  return graphRequest(options.postId ? encodeURIComponent(options.postId) : `${encodeURIComponent(pageId)}/posts`, {
+  return facebookRead(options.postId ? encodeURIComponent(options.postId) : `${encodeURIComponent(pageId)}/posts`, {
     params: {
       ...(after ? { after } : {}),
       // Вкладені comments — це відповіді на коментар. Потрібні, щоб не
