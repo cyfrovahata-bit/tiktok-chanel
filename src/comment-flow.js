@@ -448,6 +448,7 @@ export function draftPrompt(comment, platformLabel = '', post = null) {
     '  право на свою думку», «сподіваюсь, знайдемо спільні інтереси». Це',
     '  замирення з тим, чого співрозмовник не казав, і звучить як слабкість;',
     '- поверни ЛИШЕ текст відповіді, без лапок і пояснень.',
+    `- якщо пропускаєш, поверни ${SKIP}: і коротку конкретну причину українською.`,
     '',
     ...(comment.parentId ? [
       // Уся гілка одним списком, від першої репліки до останньої: розмову
@@ -474,7 +475,10 @@ export async function draftReply(comment, options = {}) {
   const answer = String(
     await ask(draftPrompt(comment, options.platformLabel, options.post), { model: MODEL }),
   ).trim();
-  if (!answer || answer.toUpperCase().startsWith(SKIP)) return null;
+  if (!answer || answer.toUpperCase().startsWith(SKIP)) {
+    options.onSkip?.(answer.slice(SKIP.length).replace(/^[\s:—-]+/, '') || 'Модель рекомендує не відповідати: коментар не потребує відповіді або продовження недоречне.');
+    return null;
+  }
   return answer.replace(/^["'«»]+|["'«»]+$/g, '').slice(0, 900);
 }
 
@@ -523,38 +527,93 @@ function card(adapter, comment, draft, { auto = false, post = null } = {}) {
   ].filter((line) => line !== null).join('\n');
 }
 
+export function autoReplyEnabled(platform, options = {}) {
+  return ['fb', 'ig'].includes(platform) && (options.autoReply ?? process.env.META_COMMENTS_AUTO_REPLY === '1');
+}
+
+export function autoReport(adapter, comment, { text, reason, reply, post } = {}) {
+  const replyComment = { ...comment, parentId: comment.parentId || comment.id,
+    id: reply?.id || comment.id };
+  return [text ? `✅ ${adapter.label}: відповів` : `⏭ ${adapter.label}: не відповів`,
+    post?.title ? `🎬 ${post.title}` : null,
+    `Коментар (${comment.author || 'Глядач'}):`, String(comment.text || '[стікер або реакція]').slice(0, 1200),
+    `Коментар: ${adapter.link(comment)}`,
+    text ? `Відповідь:
+${text}` : `Причина: ${reason || 'Модель рекомендує пропустити коментар.'}`,
+    reply?.id ? `Відкрити відповідь: ${adapter.link(replyComment)}` : null,
+  ].filter(Boolean).join('\n\n');
+}
+
+async function flushAutoReports(state, notify, chatId, persist) {
+  for (const [key, report] of Object.entries(state.autoReportQueue || {})) {
+    try {
+      await notify(chatId, report.text, report.keyboard);
+      state.autoReportsDone ||= {}; state.autoReportsDone[key] = new Date().toISOString();
+      delete state.autoReportQueue[key];
+      state.autoReportsDone = Object.fromEntries(Object.entries(state.autoReportsDone).slice(-KEEP));
+      await persist(state);
+    } catch (error) { console.error('[comments:report]', error.message); }
+  }
+}
+
 // --- Один прохід -------------------------------------------------------------
 
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 export async function checkPlatform(adapter, options = {}) {
   const state = options.state || await readState();
+  const autonomous = autoReplyEnabled(adapter.key, options);
+  const notify = options.notifyFn || sendMessage;
+  const chatId = options.chatId || ownerChatId();
+  const persist = options.persistFn || (options.state ? async () => {} : writeState);
+  await flushAutoReports(state, notify, chatId, persist);
+  const report = async (comment, details) => {
+    const key = `${adapter.key}:${comment.id}:${details.text ? 'sent' : details.kind || 'skipped'}`;
+    if (state.autoReportsDone?.[key]) return;
+    state.autoReportQueue ||= {};
+    state.autoReportQueue[key] = { text: autoReport(adapter, comment, details),
+      keyboard: details.reply?.id ? { inline_keyboard: [[{ text: '🗑 Видалити відповідь', callback_data: `c:d:${adapter.key}:${comment.id}` }]] } : undefined };
+    await persist(state);
+    await flushAutoReports(state, notify, chatId, persist);
+  };
 
   // Платформа вже просила зупинитися — мовчимо, доки не мине пауза. Пробувати
   // «ще разочок» саме тут і перетворює тимчасове обмеження на постійне.
   // Пауза спільна для всіх платформ навмисно: стеля дій на годину й добу теж
   // спільна, і саме вона тримає канал подалі від позначки «бот».
+  const eventComment = e => ({ id: e.commentId, postId: e.postId, mediaId: e.postId, author: e.authorName || 'Глядач', text: e.text || '[текст ще не прочитано]', permalink: '' });
   if (isPaused(state.budget)) {
+    if (autonomous) for (const event of options.webhookComments || []) await report(eventComment(event), { kind: 'deferred', reason: 'Платформа тимчасово обмежила дії. Коментар у черзі, повторю після паузи.' });
     return { platform: adapter.key, checked: 0, fresh: 0, asked: 0, flagged: 0, paused: true };
   }
 
-  const fetched = await adapter.fetch({ ...options, onThread: comment => {
+  let fetched;
+  try { fetched = await adapter.fetch({ ...options, onThread: comment => {
     rememberThread(state, adapter.key, comment);
     options.onThread?.(comment);
-  } });
+  } }); } catch (error) {
+    if (autonomous) for (const event of options.webhookComments || []) await report(eventComment(event), { kind: 'error', reason: `Не вдалося прочитати коментар: ${error.message}. Повторю пізніше.` });
+    throw error;
+  }
   for (const comment of fetched) rememberThread(state, adapter.key, comment);
   const comments = fetched.map(c => withThreadMemory(state, adapter.key, c)).filter(Boolean);
   const activeRoots = new Set(comments.filter(c => c.parentId).map(c => threadKey(adapter.key, c)));
   const fresh = comments.filter(c => !isHistorical(state, adapter.key, c) && !state.seen[`${adapter.key}:${c.id}`]
     && !(threadKey(adapter.key, c) && !c.parentId && activeRoots.has(threadKey(adapter.key, c))));
   const result = { platform: adapter.key, checked: comments.length, fresh: fresh.length, asked: 0, flagged: 0 };
+  if (autonomous) for (const event of options.webhookComments || []) {
+    if (event.verb === 'remove' || state.seen[`${adapter.key}:${event.commentId}`] || fresh.some(c => c.id === event.commentId)) continue;
+    const c = fetched.find(c => c.id === event.commentId);
+    const reason = event.authorId === process.env.META_PAGE_ID ? 'Це власний коментар сторінки.'
+      : c && isHistorical(state, adapter.key, c) ? 'Коментар належить до зібраної історії; старі коментарі не обробляємо автоматично.'
+      : c && !withThreadMemory(state, adapter.key, c) ? 'У цій гілці сторінка вже відповіла.'
+      : 'API не повернув цей коментар серед кандидатів: він може бути вже відповіданий, прихований або недоступний.';
+    await report(c || eventComment(event), { reason });
+  }
   if (!fresh.length) {
     if (!options.state) await writeState(state);
     return result;
   }
-
-  const notify = options.notifyFn || sendMessage;
-  const chatId = options.chatId || ownerChatId();
 
   // Індекс роликів вантажимо лише коли є на що відповідати, і один раз на
   // прохід. Якщо Drive чи таблиця недоступні — не валимо весь прохід:
@@ -589,8 +648,10 @@ export async function checkPlatform(adapter, options = {}) {
   // один вентиль: стеля на годину й добу, пауза між діями, зупинка на скаргу
   // про темп.
   let acted = 0;
+  let actionError = null;
   const act = async (what, run) => {
-    if (!canAct(state.budget)) { result.throttled = true; return false; }
+    actionError = null;
+    if (!canAct(state.budget)) { result.throttled = true; actionError = 'Досягнуто ліміту дій; повторю пізніше.'; return false; }
     // Паузу тримаємо ПЕРЕД дією й лише між ними: двадцять дій за десять
     // секунд — упізнаваний слід бота, навіть коли їх мало.
     if (acted > 0) await sleep(nextPauseMs());
@@ -600,6 +661,7 @@ export async function checkPlatform(adapter, options = {}) {
       acted += 1;
       return true;
     } catch (error) {
+      actionError = error.message;
       if (isRateLimit(error.message)) {
         state.budget = pause(state.budget);
         result.throttled = true;
@@ -626,6 +688,12 @@ export async function checkPlatform(adapter, options = {}) {
   const rest = [];
   state.thanks = state.thanks || {};
   for (const comment of ordered) {
+    if (autonomous) {
+      const simple = isReaction(comment) || (!comment.parentId && isShortAppreciation(comment.text));
+      const under = String(comment.postId || comment.mediaId || '');
+      rest.push(simple ? { ...comment, autoDraft: thanksReply(comment, { recent: state.thanks[under] || [] }) } : comment);
+      continue;
+    }
     // Реакції — перед усіма іншими правилами, гілки включно: подяка за стікер
     // доречна будь-де й нічого не може зіпсувати.
     if (AUTO_REACTION && isReaction(comment)) { auto.push(comment); continue; }
@@ -690,14 +758,46 @@ export async function checkPlatform(adapter, options = {}) {
       console.error(`[comments:${adapter.key}] пошук ролика:`, error.message);
     }
 
+    let skipReason = null;
     let draft = comment.autoDraft || null;
     if (!draft) {
       try {
-        draft = await draftReply(comment, { ...options, platformLabel: adapter.label, post });
+        draft = await draftReply(comment, { ...options, platformLabel: adapter.label, post, onSkip: reason => { skipReason = reason; } });
       } catch (error) {
         console.error(`[comments:${adapter.key}] чернетка:`, error.message);
+        if (autonomous) await report(comment, { kind: 'error', reason: `Не вдалося згенерувати відповідь: ${error.message}`, post });
         continue; // спробуємо наступного разу
       }
+    }
+    if (autonomous) {
+      if (!draft) {
+        state.seen[key] = 'skipped-auto';
+        await report(comment, { reason: skipReason, post });
+        result.skipped = (result.skipped || 0) + 1;
+        continue;
+      }
+      let sent;
+      const ok = await act('автовідповідь', async () => {
+        sent = await sendReply(adapter, [comment.replyTo, comment.id], draft, options);
+      });
+      if (!ok) {
+        await report(comment, { kind: 'error', reason: `Не опубліковано: ${actionError || 'Тимчасове обмеження дій'}. Повторю пізніше.`, post });
+        continue;
+      }
+      rememberReply(state, memoryKey, sent.reply, draft);
+      state.seen[key] = 'sent';
+      state.autoReplies ||= {};
+      state.autoReplies[key] = { replyId: sent.reply?.id, text: draft, threadKey: memoryKey, at: new Date().toISOString() };
+      delete state.drafts[key];
+      if (comment.autoDraft) {
+        const under = String(comment.postId || comment.mediaId || '');
+        state.thanks[under] = [...(state.thanks[under] || []), draft].slice(-12);
+      }
+      await persist(state); // Publication is remembered before attempting Telegram delivery.
+      await report(comment, { text: draft, reply: sent.reply, post });
+      await like(comment);
+      result.replied = (result.replied || 0) + 1;
+      continue;
     }
     // Картка йде ЗАВЖДИ, навіть коли модель радить промовчати: власник має
     // бачити всі коментарі й вирішувати сам. Без чернетки просто немає кнопки
@@ -839,7 +939,7 @@ async function runCheckAll(options = {}) {
     // Періодичний обхід залишається резервом для втрачених webhook-подій.
     // Спільні seen/pending та checkAll lock запобігають дублюванню чернеток.
     try {
-      results.push(await checkPlatform(adapter, { ...options, state, deep: target ? false : deep, ...(target ? { postId: target } : {}) }));
+      results.push(await checkPlatform(adapter, { ...options, state, persistFn: options.persistFn || writeState, deep: target ? false : deep, ...(target ? { postId: target } : {}) }));
     } catch (error) {
       results.push({ platform: adapter.key, error: error.message });
     }
@@ -927,6 +1027,22 @@ export async function handleCallback(callbackQuery, options = {}) {
     await answerCallbackQuery(callbackQuery.id, note);
   };
 
+  if (action === 'd') {
+    const saved = state.autoReplies?.[key];
+    if (!saved?.replyId || !adapter.remove) {
+      await answerCallbackQuery(callbackQuery.id, 'Відповідь уже видалена або її ID недоступний');
+      return true;
+    }
+    try {
+      await adapter.remove(saved.replyId, options);
+      const thread = state.threads?.[saved.threadKey];
+      if (thread?.messages) delete thread.messages[saved.replyId];
+      delete state.autoReplies[key];
+      state.seen[key] = 'deleted';
+      await finish('Відповідь видалено ✅');
+    } catch (error) { await answerCallbackQuery(callbackQuery.id, `Не вдалося видалити: ${error.message}`.slice(0, 190)); }
+    return true;
+  }
   if (action === 'x') {
     state.seen[key] = 'skipped';
     await finish('Пропущено');

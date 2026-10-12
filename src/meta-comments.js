@@ -282,7 +282,13 @@ export const facebookAdapter = {
   fetch: fetchFacebookComments,
   reply: replyFacebook,
   like: likeFacebook,
-  link: (c) => `https://www.facebook.com/${c.postId}`,
+  link: (c) => {
+    const root = String(c.parentId || c.id || '').split('_').at(-1);
+    const id = String(c.id || '').split('_').at(-1);
+    return `https://www.facebook.com/${c.postId}?comment_id=${encodeURIComponent(root)}`
+      + (c.parentId && id !== root ? `&reply_comment_id=${encodeURIComponent(id)}` : '');
+  },
+  remove: removeMetaReply,
 };
 
 // --- Instagram ---------------------------------------------------------------
@@ -403,7 +409,8 @@ export const instagramAdapter = {
   enabled: instagramEnabled,
   fetch: fetchInstagramComments,
   reply: replyInstagram,
-  link: (c) => c.permalink || '',
+  link: (c) => c.permalink ? `${c.permalink}${c.permalink.includes('?') ? '&' : '?'}comment_id=${encodeURIComponent(c.id || '')}` : '',
+  remove: removeMetaReply,
 };
 
 async function historyPage(fetchFn, options) {
@@ -415,3 +422,7 @@ async function historyPage(fetchFn, options) {
 }
 facebookAdapter.history = options => historyPage(fetchFacebookComments, options);
 instagramAdapter.history = options => historyPage(fetchInstagramComments, options);
+
+export function removeMetaReply(id, options = {}) {
+  return graphRequest(encodeURIComponent(id), { method: 'DELETE', token: options.token || token(), fetchImpl: options.fetchImpl });
+}
