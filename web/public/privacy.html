@@ -30,65 +30,29 @@
 </head>
 <body>
 <main>
-  <h1>Privacy Policy</h1>
-  <p class="updated">Chy Vy Znaly publishing automation · Last updated 28 July 2026</p>
-
-  <p>
-    This tool is operated by an individual for their own social media accounts. It has one user —
-    the operator — and collects no information about anyone else.
-  </p>
-
-  <h2>Information the tool stores</h2>
-  <ul>
-    <li><b>Authorisation tokens</b> for the operator's own Google, Meta and TikTok accounts, held as
-      environment variables on the hosting provider and used solely to publish the operator's own
-      content.</li>
-    <li><b>Content the operator created</b>: video topics, titles, descriptions and finished MP4
-      files, stored in the operator's own Google Sheet and Google Drive.</li>
-    <li><b>Publication markers</b> — the identifier a platform returns after a successful upload,
-      stored so the same video is not published twice.</li>
-  </ul>
-
-  <h2>Information the tool does not collect</h2>
-  <ul>
-    <li>No data about YouTube viewers, subscribers or any other users.</li>
-    <li>No data about channels or videos the operator does not own.</li>
-    <li>No analytics, tracking, cookies or advertising identifiers.</li>
-    <li>No personal data of third parties, and therefore none is inferred, sold or shared.</li>
-  </ul>
-
-  <h2>YouTube API Services</h2>
-  <p>
-    This tool uses YouTube API Services. By using it, the operator agrees to be bound by the
-    <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>. Data obtained through the
-    API is limited to the operator's own channel identity and is used only to confirm the upload
-    destination. Google's handling of data is described in the
-    <a href="https://policies.google.com/privacy">Google Privacy Policy</a>. Access can be reviewed
-    or revoked at any time at
-    <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>;
-    revoking it immediately and permanently ends this tool's access.
-  </p>
-
-  <h2>Service providers</h2>
-  <p>
-    Hosting is provided by Railway. Images and narration are produced with generative services
-    (OpenAI, ElevenLabs) from prompts written by the operator. Finished videos are delivered to the
-    platforms the operator publishes on: YouTube, Facebook, Instagram and TikTok. No data beyond the
-    operator's own content and authorisation is sent to any of them.
-  </p>
-
-  <h2>Retention and deletion</h2>
-  <p>
-    Content remains in the operator's own Google Drive and Google Sheet until the operator deletes
-    it. Authorisation tokens are kept only while the integration is in use and are removed when the
-    corresponding variable is deleted or access is revoked. Because no third-party personal data is
-    collected, there is no third-party data to request, export or erase.
-  </p>
-
-  <h2>Contact</h2>
-  <p>Questions about this policy: <a href="mailto:cyfrovahata@gmail.com">cyfrovahata@gmail.com</a></p>
-
-  <footer><p><a href="/about">About this tool</a></p></footer>
+<h1>Privacy Policy</h1>
+<p class="updated">TikTok Channel / Chy Vy Znaly · Last updated 12 October 2026</p>
+<p>This application is operated by the creator of Chy Vy Znaly to manage the creator's own social accounts, publish content and handle comments. Administrative access is restricted to the operator. Public commenters do not need to register with this application.</p>
+<h2>Information processed</h2>
+<ul>
+<li>Account identifiers and authorisation tokens for connected Google, Meta and TikTok accounts.</li>
+<li>Videos, scripts, post descriptions and publication identifiers supplied by the operator through Google Drive and Google Sheets.</li>
+<li>Comments on the connected accounts: text, author names or usernames available from the platform, comment and post identifiers, timestamps, replies and conversation relationships.</li>
+<li>Reply drafts, published replies, processing status, webhook events and operational logs.</li>
+</ul>
+<h2>Why we use this information</h2>
+<p>The application publishes content, detects new comments, keeps conversation context and prepares relevant replies using the post's script and the comment thread. The operator can review reply drafts through Telegram. Configured automatic reactions or replies may also be applied. Comment history is stored so later replies can take earlier messages into account.</p>
+<h2>Storage and service providers</h2>
+<p>Railway hosts the application and its configuration. Google Drive stores content, comment memory and processing state; Google Sheets supplies publication information. Telegram delivers comments and reply drafts to the operator. Relevant comment text, conversation context and post information may be sent to OpenAI to generate replies. ElevenLabs may process scripts to generate narration. Connected social platforms receive published content, replies or reactions.</p>
+<p>These providers process information under their own terms and policies. OpenAI's retention and data-sharing treatment depend on the API account's settings and applicable terms. We do not sell comment data.</p>
+<h2>Retention and deletion</h2>
+<p>Comment history and cached post context remain stored until removed by the operator; there is currently no automatic expiry for conversation memory. Deleting a comment on Facebook or Instagram does not automatically remove the application's stored copy. Webhook deduplication records are retained for up to seven days, subject to a size limit; pending events remain until processed or removed. Logs and provider-held records are subject to the relevant provider's retention settings.</p>
+<p>You can request removal of your stored comment information using the <a href="/data-deletion">data deletion instructions</a>. Removing application copies does not delete the original post or comment on a social platform.</p>
+<h2>YouTube API Services</h2>
+<p>This application uses YouTube API Services to publish the operator's videos and manage comments on the connected channel. Use is subject to the <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a> and <a href="https://policies.google.com/privacy">Google Privacy Policy</a>. The operator can review or revoke Google access at <a href="https://myaccount.google.com/permissions">Google account permissions</a>.</p>
+<h2>Access and contact</h2>
+<p>Tokens are stored in the application's hosting configuration and used to access connected accounts. Administrative controls are restricted to the operator. For questions or a deletion request, contact <a href="mailto:cyfrovahata@gmail.com">cyfrovahata@gmail.com</a>. Do not send passwords or access tokens.</p>
+<footer><a href="/about">About</a> · <a href="/terms">Terms of Service</a> · <a href="/data-deletion">Data deletion</a></footer>
 </main>
 </body>
 </html>
