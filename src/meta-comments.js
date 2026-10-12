@@ -262,8 +262,7 @@ export function replyFacebook(commentId, message, options = {}) {
 }
 
 // Уподобання коментаря від імені Сторінки. Той самий дозвіл, що й на
-// відповіді (pages_manage_engagement), окремий ендпоінт. Instagram такого не
-// вміє через API, тож там лишається тільки відповідь.
+// відповіді (pages_manage_engagement), окремий ендпоінт.
 export function likeFacebook(commentId, options = {}) {
   return graphRequest(`${encodeURIComponent(commentId)}/likes`, {
     method: 'POST',
@@ -400,6 +399,17 @@ export function replyInstagram(commentId, message, options = {}) {
   });
 }
 
+// Like Media and Comments API uses the IG User edge, not the comment edge.
+// Requires instagram_manage_engagement on the Facebook Login token.
+export function likeInstagram(commentId, options = {}) {
+  const igUserId = options.igUserId || process.env.META_IG_USER_ID;
+  if (!igUserId) throw new Error('META_IG_USER_ID не задано');
+  return graphRequest(`${encodeURIComponent(igUserId)}/likes`, {
+    method: 'POST', params: { comment_id: String(commentId) },
+    token: options.token || token(), fetchImpl: options.fetchImpl,
+  });
+}
+
 export const instagramAdapter = {
   key: 'ig',
   label: 'Instagram',
@@ -407,6 +417,7 @@ export const instagramAdapter = {
   enabled: instagramEnabled,
   fetch: fetchInstagramComments,
   reply: replyInstagram,
+  like: likeInstagram,
   link: (c) => c.permalink ? `${c.permalink}${c.permalink.includes('?') ? '&' : '?'}comment_id=${encodeURIComponent(c.id || '')}` : '',
   remove: removeMetaReply,
 };

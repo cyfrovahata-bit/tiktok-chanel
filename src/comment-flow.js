@@ -1,3 +1,4 @@
+import { queueCommentLikes, drainCommentLikes } from './comment-likes.js';
 import { ensureHistory, isHistorical, collectHistoryStep } from './comment-history.js';
 import { threadKey, rememberThread, withThreadMemory, rememberReply } from './comment-memory.js';
 // Спільна механіка відповідей на коментарі: знайти нові → написати чернетку →
@@ -41,9 +42,6 @@ const AUTO_REACTION = process.env.COMMENTS_AUTO_REACTION !== '0';
 // пожартувати рівно настільки, щоб не вийшло глузування. Коментарів мало —
 // кількадесят на добу, — тож сильніша модель коштує копійки.
 const MODEL = process.env.COMMENTS_MODEL || 'gpt-4o';
-// Лайки коментарів. Вмикати їх безпечніше за автовідповіді: лайк не можна
-// сформулювати невдало, а глядач бачить, що його прочитали. Не ставимо лише
-// там, де модель радить промовчати — уподобаний випад виглядав би згодою.
 // Скільки картка чекає на рішення. Не дочекалась — забуваємо про неї зовсім,
 // і коментар повертається у звичайний пошук. Сенс саме в поверненні: якщо
 // власник тим часом відповів руками, збирач цього коментаря вже не віддасть
@@ -53,8 +51,6 @@ const PENDING_TTL_MS = Number(process.env.COMMENTS_PENDING_TTL_MS) || 12 * 60 * 
 // Скільки разів картка може повернутися. Без стелі коментар, на який власник
 // ніколи не відповість, ходив би по колу кожні дванадцять годин вічно.
 const PENDING_TRIES = Number(process.env.COMMENTS_PENDING_TRIES) || 3;
-const AUTO_LIKE = process.env.COMMENTS_AUTO_LIKE !== '0';
-const LIKE_PER_RUN = Number(process.env.COMMENTS_LIKE_PER_RUN) || 15;
 const SKIP = 'ПРОПУСТИТИ';
 
 // Реєстр платформ: ключ → адаптер. Заповнюється при старті (registerPlatform).
@@ -590,12 +586,17 @@ export async function checkPlatform(adapter, options = {}) {
   let fetched;
   try { fetched = await adapter.fetch({ ...options, onThread: comment => {
     rememberThread(state, adapter.key, comment);
+    queueCommentLikes(state, adapter, comment);
     options.onThread?.(comment);
   } }); } catch (error) {
     if (autonomous) for (const event of options.webhookComments || []) await report(eventComment(event), { kind: 'error', reason: `Не вдалося прочитати коментар: ${error.message}. Повторю пізніше.` });
     throw error;
   }
-  for (const comment of fetched) rememberThread(state, adapter.key, comment);
+  for (const comment of fetched) {
+    rememberThread(state, adapter.key, comment);
+    queueCommentLikes(state, adapter, comment);
+  }
+  await persist(state);
   const comments = fetched.map(c => withThreadMemory(state, adapter.key, c)).filter(Boolean);
   const activeRoots = new Set(comments.filter(c => c.parentId).map(c => threadKey(adapter.key, c)));
   const fresh = comments.filter(c => !isHistorical(state, adapter.key, c) && !state.seen[`${adapter.key}:${c.id}`]
@@ -610,7 +611,9 @@ export async function checkPlatform(adapter, options = {}) {
       : 'API не повернув цей коментар серед кандидатів: він може бути вже відповіданий, прихований або недоступний.';
     await report(c || eventComment(event), { reason });
   }
+  const drainLikes = async () => Object.assign(result, await drainCommentLikes(state, adapter, { ...options, persistFn: persist, notifyFn: notify, chatId }));
   if (!fresh.length) {
+    await drainLikes();
     if (!options.state) await writeState(state);
     return result;
   }
@@ -642,8 +645,6 @@ export async function checkPlatform(adapter, options = {}) {
   // Лайкаємо окремо від відповідей: більшість коментарів відповіді не
   // отримає — ані автоматичної, ані від власника, — але побачити, що їх
   // прочитали, має кожен.
-  state.liked = state.liked || {};
-  let likes = 0;
   // Кожна дія — лайк чи відповідь, байдуже на якій платформі — проходить через
   // один вентиль: стеля на годину й добу, пауза між діями, зупинка на скаргу
   // про темп.
@@ -673,16 +674,6 @@ export async function checkPlatform(adapter, options = {}) {
     }
   };
 
-  const like = async (comment) => {
-    if (!AUTO_LIKE || !adapter.like || likes >= LIKE_PER_RUN) return;
-    const key = `${adapter.key}:${comment.id}`;
-    if (state.liked[key]) return;
-    const ok = await act('лайк', () => adapter.like(comment.id, options));
-    if (!ok) return;
-    state.liked[key] = 1;
-    likes += 1;
-    result.liked = (result.liked || 0) + 1;
-  };
 
   const auto = [];
   const rest = [];
@@ -713,7 +704,6 @@ export async function checkPlatform(adapter, options = {}) {
     const under = String(comment.postId || comment.videoId || comment.mediaId || '');
     const recent = state.thanks[under] || [];
     const text = thanksReply(comment, { recent });
-    await like(comment);
     // Не вдалося — лишаємо коментар нерозібраним: наступний прохід або
     // відповість, або віддасть його власникові.
     const sent = await act('автовідповідь', async () => {
@@ -795,17 +785,12 @@ export async function checkPlatform(adapter, options = {}) {
       }
       await persist(state); // Publication is remembered before attempting Telegram delivery.
       await report(comment, { text: draft, reply: sent.reply, post });
-      await like(comment);
       result.replied = (result.replied || 0) + 1;
       continue;
     }
     // Картка йде ЗАВЖДИ, навіть коли модель радить промовчати: власник має
     // бачити всі коментарі й вирішувати сам. Без чернетки просто немає кнопки
     // «Надіслати».
-    // Лайк ставимо ЛИШЕ там, де є чернетка: порожня означає, що модель радить
-    // промовчати (образа, провокація, спам), а вподобати таке — гірше за
-    // мовчання.
-    if (draft) await like(comment);
 
     const message = await notify(
       chatId,
@@ -840,6 +825,7 @@ export async function checkPlatform(adapter, options = {}) {
       .catch(() => {});
   }
 
+  await drainLikes();
   result.remaining = fresh.filter(c => !state.seen[`${adapter.key}:${c.id}`]).length;
   if (!options.state) await writeState(state);
   return result;

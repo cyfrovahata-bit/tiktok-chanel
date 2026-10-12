@@ -150,7 +150,7 @@ test('подяка словами без вмикання йде карткою,
     { id: 'c3', text: '', sticker: true, author: 'Ганна', postId: 'p1' },
   ], posted), {
     state,
-    postIndex: [],
+    postIndex: [], sleepFn: async () => {},
     notifyFn: async (_chat, text) => { cards.push(text); return { message_id: cards.length }; },
     chatId: 1,
   });
@@ -171,7 +171,7 @@ test('картка короткої подяки несе готовий тек�
   const cards = [];
   await checkPlatform(fakeAdapter([{ id: 'c1', text: 'дуже цікаво', author: 'Іван', postId: 'p1' }], []), {
     state: { seen: {}, drafts: {} },
-    postIndex: [],
+    postIndex: [], sleepFn: async () => {},
     notifyFn: async (_chat, text) => { cards.push(text); return { message_id: 1 }; },
     chatId: 1,
   });
@@ -202,26 +202,25 @@ test('коментар із чернеткою отримує лайк', async (
     { id: 'c1', text: 'Дякую!', author: 'Іван', postId: 'p1' },
   ], log), {
     state: { seen: {}, drafts: {} },
-    postIndex: [],
+    postIndex: [], sleepFn: async () => {},
     notifyFn: async () => ({ message_id: 1 }),
     chatId: 1,
   });
   assert.ok(log.some((l) => l.act === 'like' && l.id === 'c1'));
 });
 
-test('там, де модель радить промовчати, лайка немає', async () => {
-  // Уподобаний випад виглядав би згодою з ним.
+test('лайк ставиться незалежно від рішення моделі промовчати', async () => {
   const log = [];
   await checkPlatform(adapterWithLike([
     { id: 'c2', text: 'тупа маячня від ботів', author: 'Тролль', postId: 'p1' },
   ], log), {
     state: { seen: {}, drafts: {} },
-    postIndex: [],
+    postIndex: [], sleepFn: async () => {},
     chat: async () => 'ПРОПУСТИТИ',
     notifyFn: async () => ({ message_id: 1 }),
     chatId: 1,
   });
-  assert.ok(!log.some((l) => l.act === 'like'), 'випад лайкати не можна');
+  assert.ok(log.some((l) => l.act === 'like' && l.id === 'c2'));
 });
 
 test('двічі той самий коментар не лайкається', async () => {
