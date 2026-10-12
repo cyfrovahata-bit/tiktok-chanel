@@ -1776,6 +1776,9 @@ if (process.env.ENABLE_WEB === '1' && import.meta.url === pathToFileURL(process.
     if (process.env.ENABLE_YT_COMMENTS === '1'
       || process.env.ENABLE_FB_COMMENTS === '1'
       || process.env.ENABLE_IG_COMMENTS === '1') {
+      if (process.env.META_COMMENT_DIAGNOSTICS) {
+        import('../src/comment-diagnostics.js').then(m => m.diagnoseConfiguredComments()).catch(e => console.error('[comments:diagnostic]', e.message));
+      }
       startTelegramLoop();
       startCommentWatcher();
       startWebhookWorker(async job => {
