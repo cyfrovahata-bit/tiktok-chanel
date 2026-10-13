@@ -64,6 +64,7 @@ export function registeredPlatforms() {
     label: a.label,
     ready: a.enabled ? Boolean(a.enabled()) : true,
     likes: Boolean(a.like),
+    autoReply: autoReplyEnabled(a.key),
   }));
 }
 
@@ -556,7 +557,9 @@ function card(adapter, comment, draft, { auto = false, post = null } = {}) {
 }
 
 export function autoReplyEnabled(platform, options = {}) {
-  return ['fb', 'ig'].includes(platform) && (options.autoReply ?? process.env.META_COMMENTS_AUTO_REPLY === '1');
+  if (!['fb', 'ig', 'yt'].includes(platform)) return false;
+  const configured = platform === 'yt' ? process.env.YOUTUBE_COMMENTS_AUTO_REPLY : process.env.META_COMMENTS_AUTO_REPLY;
+  return options.autoReply ?? configured === '1';
 }
 
 export function autoReport(adapter, comment, { text, reason, reply, post } = {}) {

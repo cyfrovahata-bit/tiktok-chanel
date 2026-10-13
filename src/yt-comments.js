@@ -61,7 +61,7 @@ export async function fetchComments(options = {}) {
     part: ['snippet', 'replies'],
     allThreadsRelatedToChannelId: mine,
     order: 'time',
-    maxResults: Number(options.maxResults) || 20,
+    maxResults: Math.max(1, Math.min(100, Number(options.maxResults) || 100)),
     textFormat: 'plainText',
   });
 
@@ -144,12 +144,18 @@ export async function publishReply(commentId, text, options = {}) {
   return res.data?.id || null;
 }
 
+export async function deleteReply(commentId, options = {}) {
+  const client = options.client || youtube();
+  await client.comments.delete({ id: String(commentId) });
+}
+
 export const youtubeAdapter = {
   key: 'yt',
   label: 'YouTube',
   icon: '▶️',
   enabled: youtubeEnabled,
   fetch: fetchComments,
-  reply: publishReply,
-  link: (c) => `https://youtu.be/${c.videoId}`,
+  reply: async (id, text, options) => ({ id: await publishReply(id, text, options) }),
+  remove: deleteReply,
+  link: (c) => `https://www.youtube.com/watch?v=${encodeURIComponent(c.videoId || '')}&lc=${encodeURIComponent(c.id || '')}`,
 };

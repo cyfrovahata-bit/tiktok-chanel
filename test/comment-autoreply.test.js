@@ -36,8 +36,9 @@ test('model skip supplies a reason without publishing or approval buttons', asyn
   assert.equal(replyCalls, 0); assert.match(report, /Особиста сварка/);
   assert.equal(s.seen['fb:p_c'], 'skipped-auto');
 });
-test('YouTube keeps approval mode and Facebook URLs identify the original comment and reply', () => {
-  assert.equal(autoReplyEnabled('yt', { autoReply: true }), false);
+test('YouTube can use autonomous mode and Facebook URLs identify the original comment and reply', () => {
+  assert.equal(autoReplyEnabled('yt', { autoReply: true }), true);
+  assert.equal(autoReplyEnabled('yt', { autoReply: false }), false);
   assert.equal(facebookAdapter.link(comment), 'https://www.facebook.com/page_p?comment_id=c');
   const report = autoReport(facebookAdapter, comment, { text: 'Answer', reply: { id: 'p_reply' } });
   assert.match(report, /comment_id=c&reply_comment_id=reply/);
@@ -76,4 +77,26 @@ test('saved Instagram own reply IDs are silent even when webhook has no author',
     ...settings(s, async (_, text) => reports.push(text)), webhookComments: [{ commentId: 'own-reply', postId: 'p' }],
   });
   assert.equal(reports.length, 0);
+});
+
+test('YouTube autonomous replies retain IDs, reports, direct links and deletion support', async () => {
+  const { youtubeAdapter } = await import('../src/yt-comments.js');
+  const s = state(); const calls = []; const reports = [];
+  const original = { id: 'comment-id', videoId: 'video-id', author: 'Viewer', text: 'Чому?' };
+  const client = { comments: {
+    insert: async request => { calls.push(request); return { data: { id: 'reply-id' } }; },
+    delete: async request => calls.push(request),
+  } };
+  const adapter = { ...youtubeAdapter, fetch: async () => [original] };
+  const options = { ...settings(s, async (...args) => reports.push(args)), client };
+  await checkPlatform(adapter, options);
+  await checkPlatform(adapter, options);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].requestBody.snippet.parentId, 'comment-id');
+  assert.equal(s.autoReplies['yt:comment-id'].replyId, 'reply-id');
+  assert.match(reports[0][1], /lc=comment-id/);
+  assert.match(reports[0][1], /lc=reply-id/);
+  assert.equal(reports[0][2].inline_keyboard[0][0].callback_data, 'c:d:yt:comment-id');
+  await adapter.remove('reply-id', { client });
+  assert.deepEqual(calls[1], { id: 'reply-id' });
 });
