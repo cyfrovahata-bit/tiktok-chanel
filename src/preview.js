@@ -49,7 +49,7 @@ function folderId() {
 async function findFile(kind) {
   const res = await drive().files.list({
     q: `'${folderId()}' in parents and name = '${nameFor(kind)}' and trashed = false`,
-    fields: 'files(id, name, size, mimeType, modifiedTime)',
+    fields: 'files(id, name, size, mimeType, modifiedTime, appProperties)',
     pageSize: 1,
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
@@ -64,9 +64,11 @@ export async function previewInfo(kind = 'video') {
   return {
     kind,
     exists: true,
+    fileId: file.id,
     bytes: Number(file.size) || 0,
     mimeType: file.mimeType || null,
     updatedAt: file.modifiedTime || null,
+    generationKey: file.appProperties?.generationKey || null,
   };
 }
 
@@ -77,7 +79,7 @@ export async function previewState() {
 }
 
 // data — base64 (з префіксом data: або без нього), як його шле мінідодаток.
-export async function savePreview({ kind = 'video', data, mimeType } = {}) {
+export async function savePreview({ kind = 'video', data, mimeType, generationKey = '' } = {}) {
   const buffer = Buffer.from(String(data || '').replace(/^data:[^,]+,/, ''), 'base64');
   if (!buffer.length) throw new Error('Порожній файл');
   if (buffer.length > MAX_BYTES) {
@@ -86,9 +88,9 @@ export async function savePreview({ kind = 'video', data, mimeType } = {}) {
   const media = { mimeType: mimeType || 'image/jpeg', body: Readable.from(buffer) };
   const existing = await findFile(kind);
   const res = existing
-    ? await drive().files.update({ fileId: existing.id, media, fields: 'id, modifiedTime', supportsAllDrives: true })
+    ? await drive().files.update({ fileId: existing.id, requestBody: { appProperties: { generationKey } }, media, fields: 'id, modifiedTime', supportsAllDrives: true })
     : await drive().files.create({
-      requestBody: { name: nameFor(kind), parents: [folderId()] },
+      requestBody: { name: nameFor(kind), parents: [folderId()], appProperties: { generationKey } },
       media,
       fields: 'id, modifiedTime',
       supportsAllDrives: true,

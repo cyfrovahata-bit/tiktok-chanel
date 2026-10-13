@@ -1,3 +1,4 @@
+import { ensureCompilationImages, compilationImageKey, compilationImageMatchesPlan } from './long-images.js';
 // Денний цикл довгої збірки: підбір → монтаж → заливка.
 //
 // Три кроки рознесені в часі на години:
@@ -20,7 +21,7 @@ import {
 } from './videos.js';
 import { chatOnce } from './openai.js';
 import { sendMessage, ownerChatId } from './telegram.js';
-import { fetchPreview, removePreview, normalizeThumbnail } from './preview.js';
+import { fetchPreview, removePreview, normalizeThumbnail, previewInfo } from './preview.js';
 import { compileLong, orderEpisodes } from './compile-long.js';
 import { publishYouTubeLong, setYouTubeThumbnail } from './youtube.js';
 import {
@@ -388,20 +389,44 @@ export async function planDay({ now = new Date(), ask = chatOnce, notifyFn = not
     `🎬 Підібрано ${size} фактів на сьогодні.\n\n`
     + `Тема: ${plan.title}\n${plan.theme ? `${plan.theme}\n` : ''}\n`
     + `${chosen.map((it, i) => `${i + 1}. ${plan.labels[i] || it.title}`).join('\n')}\n\n`
-    + 'Промти на прев\'ю — у мінідодатку, кнопками «скопіювати».\n'
-    + 'Прев\'ю для відео чекаю до 16:00, інакше о 18:00 вийде звичайний шортс.',
+    + 'Прев’ю для відео й обкладинку намалюю автоматично. Стан і повторний запуск — у мінідодатку.',
   );
   return plan;
+}
+
+export async function generateDayImages({ now = new Date(), plan, force = false, kinds, notifyFn = notify, onProgress = () => {}, ...options } = {}) {
+  const current = plan || await readPlan(kyivToday(now));
+  if (!current) throw new Error('Спочатку підбери добірку');
+  const generated = await ensureCompilationImages(current, { ...options, force, kinds, notifyFn, onProgress,
+    persistFn: async next => {
+      const latest = await readPlan(current.date);
+      if (!latest || compilationImageKey(latest, 'video') !== compilationImageKey(current, 'video')) throw new Error('План добірки змінився — запусти генерацію для нового плану');
+      return writePlan({ ...latest, imageGeneration: next.imageGeneration });
+    },
+  });
+  const readyKey = compilationImageKey(current, 'video');
+  if (['video', 'youtube'].every(kind => generated.imageGeneration?.[kind]?.state === 'done') && generated.imagesReadyNotified !== readyKey) {
+    const links = ['video', 'youtube'].map(kind => {
+      const image = generated.imageGeneration[kind];
+      return image.fileId ? `${kind === 'video' ? 'Прев’ю 9:16' : 'Обкладинка 4:5'}: https://drive.google.com/file/d/${image.fileId}/view` : '';
+    }).filter(Boolean).join('\n');
+    await notifyFn(`🖼 Прев’ю й обкладинка до «${generated.title}» готові для телефону.\n${links}`);
+    const latest = await readPlan(current.date);
+    if (latest && compilationImageKey(latest, 'video') === readyKey) return writePlan({ ...latest, imagesReadyNotified: readyKey });
+  }
+  return generated;
 }
 
 // --- Крок 2: монтаж ----------------------------------------------------------
 
 export async function buildDay({ now = new Date(), ask = chatOnce, notifyFn = notify, onProgress = () => {} } = {}) {
   const date = kyivToday(now);
-  const plan = await readPlan(date);
+  let plan = await readPlan(date);
   if (!plan || plan.cancelled || plan.builtAt) return plan;
+  if (process.env.LONG_AUTO_IMAGES !== '0') plan = await generateDayImages({ now, plan, notifyFn, onProgress });
 
-  const previewPath = await fetchPreview(path.join(os.tmpdir(), `long-preview-${date}.jpg`)).catch(() => null);
+  const matchingPreview = process.env.LONG_AUTO_IMAGES === '0' || compilationImageMatchesPlan(plan, 'video', await previewInfo('video'));
+  const previewPath = matchingPreview ? await fetchPreview(path.join(os.tmpdir(), `long-preview-${date}.jpg`)).catch(() => null) : null;
   if (!previewPath) {
     await notifyFn(
       `🚫 Прев'ю до 16:00 не з'явилось — сьогоднішня добірка «${plan.title}» скасована.\n`
@@ -495,6 +520,10 @@ async function download(fileId) {
 // цьому перша заливка добірки дістала «The provided image content is invalid».
 async function readThumbnail(date) {
   try {
+    if (process.env.LONG_AUTO_IMAGES !== '0') {
+      const plan = await readPlan(date);
+      if (!plan || !compilationImageMatchesPlan(plan, 'youtube', await previewInfo('youtube'))) return null;
+    }
     const at = await fetchPreview(path.join(os.tmpdir(), `long-thumb-${date}.jpg`), 'youtube');
     if (!at) return null;
     const ready = await normalizeThumbnail(at, path.join(os.tmpdir(), `long-thumb-${date}-ready.jpg`));
@@ -551,11 +580,18 @@ export async function runLongDayOnce({ now = new Date(), ...deps } = {}) {
   if (!size) return { status: 'not-a-compilation-day' };
 
   const date = kyivToday(now);
-  const plan = await readPlan(date).catch(() => null);
+  let plan = await readPlan(date).catch(() => null);
   const step = nextStep(plan, { minutes: kyivMinutes(now), size });
-  if (step === 'plan') return { status: 'planned', plan: await planDay({ now, ...deps }) };
+  if (step === 'plan') {
+    plan = await planDay({ now, ...deps });
+    if (plan && !plan.cancelled && process.env.LONG_AUTO_IMAGES !== '0') plan = await generateDayImages({ now, plan, ...deps });
+    return { status: 'planned', plan };
+  }
   if (step === 'build') return { status: 'built', plan: await buildDay({ now, ...deps }) };
   if (step === 'publish') return { status: 'published', plan: await publishDay({ now, ...deps }) };
+  if (step === 'wait' && plan && !plan.cancelled && !plan.builtAt && kyivMinutes(now) >= NOTIFY_AT && process.env.LONG_AUTO_IMAGES !== '0') {
+    await generateDayImages({ now, plan, ...deps });
+  }
   return { status: step };
 }
 

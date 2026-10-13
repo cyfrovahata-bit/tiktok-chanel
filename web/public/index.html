@@ -275,16 +275,20 @@
     <div id="cutToday"><p class="own-hint">Перевіряю…</p></div>
 
     <div class="cut-opts-title">Прев'ю</div>
+    <p class="own-hint">До добірки дня зображення малюються автоматично. Кнопка «Намалювати» створює новий варіант і оплачується з балансу генерації.</p>
+    <p class="own-hint" id="cutImageGeneration"></p>
     <p class="own-hint" id="cutPreviewState">Перевіряю…</p>
     <input type="file" id="cutPreviewFile" accept="image/*" hidden data-kind="video" />
     <input type="file" id="cutThumbFile" accept="image/*" hidden data-kind="youtube" />
     <div class="own-actions">
       <button class="btn secondary" id="cutPreviewPick" data-kind="video">🖼 Прев'ю для відео</button>
+      <button class="btn secondary" id="cutPreviewGenerate" data-kind="video">Намалювати 9:16</button>
       <button class="btn secondary" id="cutPreviewClear" data-kind="video">Прибрати</button>
     </div>
     <p class="own-hint" id="cutThumbState">Перевіряю…</p>
     <div class="own-actions">
       <button class="btn secondary" id="cutThumbPick" data-kind="youtube">🖼 Обкладинка YouTube</button>
+      <button class="btn secondary" id="cutThumbGenerate" data-kind="youtube">Намалювати 4:5</button>
       <button class="btn secondary" id="cutThumbClear" data-kind="youtube">Прибрати</button>
     </div>
 
@@ -1118,7 +1122,7 @@
     $('#cutToggle').addEventListener('click', () => {
       const panel = $('#cutPanel');
       panel.classList.toggle('open');
-      if (panel.classList.contains('open')) { cutRenderList(); cutPoll(); cutPreviewState(); cutTodayLoad(); }
+      if (panel.classList.contains('open')) { cutRenderList(); cutPoll(); cutPreviewState(); cutTodayLoad(); pollImageGeneration(); }
     });
 
     $('#cutStart').addEventListener('click', async () => {
@@ -1202,6 +1206,11 @@
       }
       box.appendChild(el('p', 'own-hint',
         `${esc(plan.title)} — ${plan.size} фактів${plan.builtAt ? ', змонтовано' : ''}${plan.youtubeId ? ', опубліковано' : ''}.`));
+      for (const [kind, image] of Object.entries(plan.imageGeneration || {})) {
+        const label = kind === 'video' ? 'Прев’ю 9:16' : 'Обкладинка 4:5';
+        const status = image.state === 'done' ? 'готово' : image.state === 'running' ? 'малюється' : `не вдалося: ${image.error || 'повтори генерацію'}`;
+        box.appendChild(el('p', 'own-hint', `${label}: ${esc(status)}`));
+      }
       if (plan.labels?.length) {
         box.appendChild(el('p', 'own-hint', plan.labels
           .map((l, i) => `${i + 1}. ${esc(l || '—')}`).join(' · ')));
@@ -1435,6 +1444,31 @@
         if (!file) return;
         if (!initData) { toast('Відкрий через Telegram'); return; }
         await previewUpload(kind, file);
+      });
+    }
+
+    async function pollImageGeneration() {
+      try {
+        const job = await fetch('/api/compile/preview/generate').then(r => r.json());
+        $('#cutImageGeneration').textContent = job.error || (job.log || []).slice(-2).join(' · ');
+        for (const btn of document.querySelectorAll('#cutPreviewGenerate, #cutThumbGenerate')) btn.disabled = Boolean(job.running);
+        if (job.running) setTimeout(pollImageGeneration, 3000);
+        else { cutPreviewState(); cutTodayLoad(); }
+      } catch (error) { $('#cutImageGeneration').textContent = error.message; }
+    }
+    for (const btn of document.querySelectorAll('#cutPreviewGenerate, #cutThumbGenerate')) {
+      btn.addEventListener('click', async () => {
+        if (!initData) { toast('Відкрий через Telegram'); return; }
+        btn.disabled = true;
+        try {
+          const ids = Array.from(document.querySelectorAll('#cutList input:checked')).map(c => c.value);
+          const result = await fetch('/api/compile/preview/generate', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ initData, kind: btn.dataset.kind, ids, regenerate: true }),
+          }).then(r => r.json());
+          if (result.error) { toast(result.error); btn.disabled = false; }
+          else { toast('Малюю…'); pollImageGeneration(); }
+        } catch (error) { toast(error.message); btn.disabled = false; }
       });
     }
 

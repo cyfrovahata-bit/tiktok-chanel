@@ -1,3 +1,5 @@
+import { ensureCompilationImages } from '../src/long-images.js';
+import { previewPromptVideo, previewPromptYouTube } from '../src/long-copy.js';
 import { handleWebhook, webhookStatus, startWebhookWorker } from '../src/meta-webhook.js';
 // Веб-сервер мінідодатка Telegram для каналу «Чи Ви Знали?».
 // Роль: показати готові (DONE) матеріали з Google Sheet, у яких уже є
@@ -26,7 +28,7 @@ import { downloadArchive } from '../src/drive.js';
 import { extractPhotoArchive, splitScriptLines } from '../src/archive.js';
 import { compileLong, orderEpisodes } from '../src/compile-long.js';
 import { savePreview, previewState, removePreview, fetchPreview } from '../src/preview.js';
-import { readPlan, buildDay, planDay, resetDay, rehookDay, rebuildDay, retryThumbnail } from '../src/long-day.js';
+import { readPlan, buildDay, planDay, resetDay, rehookDay, rebuildDay, retryThumbnail, generateDayImages } from '../src/long-day.js';
 import { plannedSize } from '../src/long-plan.js';
 import {
   createSubmission, addPhoto, submitOwn, submitSurname, deleteOwnFolder, extractOwnStory,
@@ -92,6 +94,7 @@ export function promptRoute(rest) {
 
 // Ручний монтаж сьогоднішньої добірки: чи триває й що встиг зробити.
 let longBuild = { running: false, log: [] };
+let longImages = { running: false, log: [], error: null };
 
 // Довга добірка з готових епізодів. Тримаємо РІВНО ОДНЕ завдання за раз:
 // збірка перекодовує відео й синтезує озвучку наново, тож два паралельні
@@ -718,6 +721,41 @@ const server = http.createServer(async (req, res) => {
     // під сталим іменем, тож переживає передеплой і використовується щотижня,
     // доки її не замінять. Тіло приймаємо як base64 у JSON — тим самим шляхом,
     // що й фото власних сюжетів.
+    if (pathname === '/api/compile/preview/generate') {
+      if (req.method === 'GET') return json(res, 200, longImages);
+      if (req.method === 'POST') {
+        const body = JSON.parse(await readBody(req));
+        const check = verifyInitData(body.initData);
+        if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+        if (!isOwner(check.user)) return json(res, 403, { error: 'Малювати обкладинки може лише власник каналу' });
+        if (longImages.running) return json(res, 409, { error: 'Зображення вже малюються' });
+        if (body.kind && !['video', 'youtube'].includes(body.kind)) return json(res, 400, { error: 'Невідомий вид зображення' });
+        const kinds = body.kind ? [body.kind] : ['video', 'youtube'];
+        let plan = await readPlan(kyivToday());
+        let manual = false;
+        const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+        if (ids.length >= 2) {
+          const { items, missing } = orderEpisodes(await readAllItems(), ids);
+          if (missing.length) return json(res, 400, { error: 'Не знайдено вибраний сюжет' });
+          if (!plan || JSON.stringify([...plan.ids].map(String).sort()) !== JSON.stringify([...ids].sort())) {
+            manual = true;
+            const title = 'ІНША УКРАЇНА';
+            const theme = 'Історії та відкриття українських земель із цієї добірки';
+            plan = { date: `manual-${kyivToday()}`, title, theme, ids: items.map(it => String(it.id)), plannedAt: new Date().toISOString(),
+              prompts: { video: previewPromptVideo({ title, theme, items }), youtube: previewPromptYouTube({ title, theme, items, caption: title }) } };
+          }
+        }
+        if (!plan) return json(res, 400, { error: 'Спочатку підбери добірку або познач щонайменше два сюжети' });
+        const job = { running: true, log: [], error: null }; longImages = job;
+        const options = { plan, force: body.regenerate === true, kinds, onProgress: text => job.log.push(text) };
+        const task = manual ? ensureCompilationImages(plan, options) : generateDayImages(options);
+        task.then(result => { job.images = result.imageGeneration; })
+          .catch(error => { job.error = error.message; })
+          .finally(() => { job.running = false; });
+        return json(res, 202, { ok: true, running: true });
+      }
+    }
+
     if (pathname === '/api/compile/preview') {
       if (req.method === 'GET') {
         try { return json(res, 200, await previewState()); }
