@@ -14,7 +14,7 @@ import { chatOnce } from './openai.js';
 import { listVideoFiles, setVideoAppProperties } from './videos.js';
 import { readAllItems } from './sheets.js';
 import { parseSlideLines } from './queue-prompt.js';
-import { isShortAppreciation, isReaction, thanksReply } from './comment-thanks.js';
+import { isShortAppreciation, isReaction, thanksReply, canUseUkrainianThanks } from './comment-thanks.js';
 import { canAct, spend, pause, isPaused, isRateLimit, nextPauseMs } from './comment-budget.js';
 
 const FILE_NAME = 'comments.json';
@@ -360,6 +360,20 @@ export function draftPrompt(comment, platformLabel = '', post = null) {
     '«совок», і не пропонуй «різні погляди» там, де йдеться про те, чия це',
     'історія. Росію та її дії не називай нейтрально.',
     '',
+    'МОВА ВІДПОВІДІ — ЗА МОВОЮ ПОТОЧНОГО КОМЕНТАРЯ АВТОРА.',
+    'На український або російський коментар відповідай УКРАЇНСЬКОЮ.',
+    'На коментар будь-якою іншою мовою відповідай ТІЄЮ САМОЮ мовою:',
+    'англійською на англійський, польською на польський, італійською на',
+    'італійський тощо. Це стосується також коротких подяк, жартів і критики.',
+    'Українська позиція каналу не означає, що іншомовному автору треба',
+    'відповідати українською. Приклади фраз нижче перекладай мовою відповіді.',
+    'У гілці орієнтуйся на мову саме тієї репліки, на яку відповідаєш,',
+    'а не сюжету, імені автора чи попередніх відповідей каналу.',
+    'Якщо мов кілька — обери основну за змістом; для української та російської',
+    'основної мови відповідь усе одно українська. На самі емодзі або стікер',
+    'без тексту, коли мову визначити неможливо, відповідай українською.',
+    'Причину ПРОПУСТИТИ для власника в Telegram завжди пиши українською.',
+    '',
     'ТОН. Спокійний, доброзичливий, ввічливий — навіть коли співрозмовник різкий.',
     'Пиши так, щоб після відповіді хотілося читати далі: з повагою до людини й',
     'до її країни, без пафосу й без гасел. Де доречно — легкий теплий гумор, але',
@@ -450,7 +464,7 @@ export function draftPrompt(comment, platformLabel = '', post = null) {
       ] : []),
     ] : []),
     'Правила:',
-    '- українською, тепло й по-людськи, без канцеляриту;',
+    '- мовою, визначеною правилом вище, тепло й по-людськи, без канцеляриту;',
     '- до 200 символів; якщо коментар довгий і змістовний — до 400;',
     '- без хештегів, без емодзі більше одного, без звертання «шановний»;',
     '- не вигадуй фактів: якщо коментар питає те, чого ти не знаєш напевно, чесно скажи;',
@@ -731,13 +745,14 @@ export async function checkPlatform(adapter, options = {}) {
   state.thanks = state.thanks || {};
   for (const comment of ordered) {
     if (autonomous) {
-      const simple = isReaction(comment) || (!comment.parentId && isShortAppreciation(comment.text));
+      const simple = canUseUkrainianThanks(comment) && (isReaction(comment) || (!comment.parentId && isShortAppreciation(comment.text)));
       const under = String(comment.postId || comment.mediaId || '');
       rest.push(simple ? { ...comment, autoDraft: thanksReply(comment, { recent: state.thanks[under] || [] }) } : comment);
       continue;
     }
     // Реакції — перед усіма іншими правилами, гілки включно: подяка за стікер
     // доречна будь-де й нічого не може зіпсувати.
+    if (!canUseUkrainianThanks(comment)) { rest.push(comment); continue; }
     if (AUTO_REACTION && isReaction(comment)) { auto.push(comment); continue; }
     // Гілки — завжди на схвалення, хай там хоч саме «дякую»: відповідь у чужій
     // розмові читається інакше, ніж окремий коментар під дописом.

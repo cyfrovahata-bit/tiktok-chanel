@@ -179,6 +179,14 @@ export function isReaction(comment) {
   return Boolean(comment?.sticker) || isEmojiOnly(comment?.text);
 }
 
+// Foreign-language text must go through the model, not a Ukrainian template.
+// Ignore account mentions; emojis/stickers without words have no language.
+export function canUseUkrainianThanks(comment) {
+  const text = withoutChannelName(String(comment?.text || '').replace(/@[\p{L}\p{N}_.]+/gu, ''));
+  const letters = text.match(/\p{L}/gu) || [];
+  return letters.every(letter => /[А-Яа-яЁёІіЇїЄєҐґ]/u.test(letter));
+}
+
 export function thanksReply(comment, { recent = [] } = {}) {
   const seed = String(comment?.id || comment?.text || '');
   const openers = isReaction(comment) ? EMOJI_THANKS : THANKS;
