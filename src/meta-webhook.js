@@ -35,7 +35,8 @@ export function parseEvents(payload, config = process.env) {
       const fingerprint = createHash('sha256').update(JSON.stringify([platform, entry.id, entry.time, change])).digest('hex');
       events.push({ platform, postId: String(postId), commentId: String(commentId), fingerprint,
         ...(platform === 'fb' ? { parentId: v.parent_id ? String(v.parent_id) : null,
-          authorId: v.from?.id ? String(v.from.id) : null, authorName: v.from?.name || null, text: v.message || null, verb: v.verb || 'add' } : {}) });
+          authorId: v.from?.id ? String(v.from.id) : null, authorName: v.from?.name || null, text: v.message || null, verb: v.verb || 'add' } : {
+          authorId: v.from?.id ? String(v.from.id) : null, authorName: v.from?.username || v.username || null, text: v.text || null }) });
     }
   }
   return events;

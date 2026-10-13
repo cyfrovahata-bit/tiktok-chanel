@@ -51,3 +51,29 @@ test('Facebook uses the exact reply ID even when the stored draft points at the 
   } }, replyTargets({ key: 'fb' }, 'REPLY', 'ROOT'), 'Text'));
   assert.deepEqual(tried, ['REPLY']);
 });
+
+test('own webhook comments never produce skip, pause, or fetch-error reports; viewer reports remain', async () => {
+  const previous = process.env.META_PAGE_ID;
+  process.env.META_PAGE_ID = 'page-owner';
+  try {
+    const own = { commentId: 'own', authorId: 'page-owner', postId: 'p' };
+    const viewer = { commentId: 'viewer', authorId: 'viewer-account', postId: 'p' };
+    for (const mode of ['normal', 'paused', 'error']) {
+      const s = state(); const reports = [];
+      if (mode === 'paused') s.budget = { pausedUntil: Date.now() + 60000 };
+      const a = { ...makeAdapter(async () => {}), fetch: async () => { if (mode === 'error') throw new Error('network'); return []; } };
+      const call = () => checkPlatform(a, { ...settings(s, async (_, text) => reports.push(text)), webhookComments: [own, viewer] });
+      if (mode === 'error') await assert.rejects(call); else await call();
+      assert.equal(reports.length, 1, mode);
+      assert.match(reports[0], /comment_id=viewer/);
+    }
+  } finally { if (previous === undefined) delete process.env.META_PAGE_ID; else process.env.META_PAGE_ID = previous; }
+});
+test('saved Instagram own reply IDs are silent even when webhook has no author', async () => {
+  const s = state(); s.autoReplies = { 'ig:viewer': { replyId: 'own-reply' } };
+  const reports = [];
+  await checkPlatform({ key: 'ig', label: 'Instagram', fetch: async () => [], link: () => '' }, {
+    ...settings(s, async (_, text) => reports.push(text)), webhookComments: [{ commentId: 'own-reply', postId: 'p' }],
+  });
+  assert.equal(reports.length, 0);
+});

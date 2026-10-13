@@ -542,6 +542,11 @@ ${text}` : `Причина: ${reason || 'Модель рекомендує пр�
 
 async function flushAutoReports(state, notify, chatId, persist) {
   for (const [key, report] of Object.entries(state.autoReportQueue || {})) {
+    if (/^Причина: Це власний коментар сторінки\.$/m.test(report.text || '')) {
+      delete state.autoReportQueue[key];
+      await persist(state);
+      continue;
+    }
     try {
       await notify(chatId, report.text, report.keyboard);
       state.autoReportsDone ||= {}; state.autoReportsDone[key] = new Date().toISOString();
@@ -558,6 +563,16 @@ const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 export async function checkPlatform(adapter, options = {}) {
   const state = options.state || await readState();
+  const ownIds = new Set(Object.entries(state.autoReplies || {}).filter(([key]) => key.startsWith(`${adapter.key}:`)).map(([, reply]) => reply.replyId).filter(Boolean));
+  for (const [key, thread] of Object.entries(state.threads || {})) {
+    if (key.startsWith(`${adapter.key}:`)) for (const message of Object.values(thread.messages || {})) if (message.ours) ownIds.add(message.id);
+  }
+  const ownAccount = adapter.key === 'fb' ? process.env.META_PAGE_ID : adapter.key === 'ig' ? process.env.META_IG_USER_ID : null;
+  const ownUsername = adapter.key === 'ig' ? String(process.env.META_IG_USERNAME || '').replace(/^@/, '').toLowerCase() : '';
+  const isOwnEvent = event => ownIds.has(event.commentId)
+    || (ownAccount && String(event.authorId || '') === String(ownAccount))
+    || (ownUsername && String(event.authorName || '').replace(/^@/, '').toLowerCase() === ownUsername);
+  options = { ...options, webhookComments: (options.webhookComments || []).filter(event => !isOwnEvent(event)) };
   const autonomous = autoReplyEnabled(adapter.key, options);
   const notify = options.notifyFn || sendMessage;
   const chatId = options.chatId || ownerChatId();
@@ -586,6 +601,7 @@ export async function checkPlatform(adapter, options = {}) {
   let fetched;
   try { fetched = await adapter.fetch({ ...options, onThread: comment => {
     rememberThread(state, adapter.key, comment);
+    for (const message of comment.thread || []) if (message.ours) ownIds.add(message.id);
     queueCommentLikes(state, adapter, comment);
     options.onThread?.(comment);
   } }); } catch (error) {
@@ -594,6 +610,7 @@ export async function checkPlatform(adapter, options = {}) {
   }
   for (const comment of fetched) {
     rememberThread(state, adapter.key, comment);
+    for (const message of comment.thread || []) if (message.ours) ownIds.add(message.id);
     queueCommentLikes(state, adapter, comment);
   }
   await persist(state);
@@ -603,10 +620,9 @@ export async function checkPlatform(adapter, options = {}) {
     && !(threadKey(adapter.key, c) && !c.parentId && activeRoots.has(threadKey(adapter.key, c))));
   const result = { platform: adapter.key, checked: comments.length, fresh: fresh.length, asked: 0, flagged: 0 };
   if (autonomous) for (const event of options.webhookComments || []) {
-    if (event.verb === 'remove' || state.seen[`${adapter.key}:${event.commentId}`] || fresh.some(c => c.id === event.commentId)) continue;
+    if (isOwnEvent(event) || event.verb === 'remove' || state.seen[`${adapter.key}:${event.commentId}`] || fresh.some(c => c.id === event.commentId)) continue;
     const c = fetched.find(c => c.id === event.commentId);
-    const reason = event.authorId === process.env.META_PAGE_ID ? 'Це власний коментар сторінки.'
-      : c && isHistorical(state, adapter.key, c) ? 'Коментар належить до зібраної історії; старі коментарі не обробляємо автоматично.'
+    const reason = c && isHistorical(state, adapter.key, c) ? 'Коментар належить до зібраної історії; старі коментарі не обробляємо автоматично.'
       : c && !withThreadMemory(state, adapter.key, c) ? 'У цій гілці сторінка вже відповіла.'
       : 'API не повернув цей коментар серед кандидатів: він може бути вже відповіданий, прихований або недоступний.';
     await report(c || eventComment(event), { reason });
