@@ -1262,6 +1262,76 @@ const server = http.createServer(async (req, res) => {
 
     // Що саме автопублікація вже відправила: мітки живуть у appProperties
     // самого MP4, і без цього подивитися на них нема як.
+
+    // Read-only audit: include every episode and preserved marker, regardless of Sheet status.
+    if (req.method === 'GET' && pathname === '/api/autopost/missing-youtube') {
+      const [files, items] = await Promise.all([listVideoFiles(), readAllItems()]);
+      const byName = new Map();
+      for (const item of items) {
+        const name = videoName(item.id);
+        if (!byName.has(name)) byName.set(name, []);
+        byName.get(name).push(item);
+      }
+      const names = new Set();
+      for (const name of files.keys()) {
+        if (/\.mp4$/i.test(name)) names.add(name);
+        else if (/\.mp4\.autopost\.json$/i.test(name)) names.add(name.slice(0, -14));
+      }
+      const rows = [];
+      let withHistory = 0;
+      for (const name of names) {
+        const marker = files.get(name + '.autopost.json')?.appProperties || {};
+        const props = { ...marker, ...(files.get(name)?.appProperties || {}) };
+        if (Object.keys(props).length) withHistory++;
+        if (!props.instagramPostId || !props.tiktokPostId || props.youtubePostId) continue;
+        const matches = byName.get(name) || [];
+        rows.push({
+          id: matches[0]?.id || name.slice(0, -4),
+          file: name,
+          title: matches[0]?.title || matches[0]?.theme || 'Назва відсутня в таблиці',
+          theme: matches[0]?.theme || null,
+          sheetRows: matches.map(item => item.rowNumber),
+          videoExists: files.has(name),
+          instagramAt: props.instagramPublishedAt || null,
+          tiktokAt: props.tiktokPublishedAt || null,
+          slot: props.autoPostSlot || null,
+          youtubeSkipped: props.youtubeSkipped || null,
+          compiledAt: props.compiledAt || null,
+        });
+      }
+      rows.sort((a, b) => String(a.instagramAt || a.slot || a.id).localeCompare(String(b.instagramAt || b.slot || b.id)));
+      const report = {
+        generatedAt: new Date().toISOString(),
+        timeZone: 'Europe/Kyiv',
+        criteria: 'instagramPostId AND tiktokPostId AND NOT youtubePostId',
+        coverage: { episodeFilesOrMarkers: names.size, withHistory, sheetRows: items.length },
+        count: rows.length,
+        rows,
+      };
+      res.setHeader('cache-control', 'no-store');
+      if (url.searchParams.get('format') === 'json') return json(res, 200, report);
+      const date = value => {
+        if (!value) return '—';
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? value
+          : parsed.toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
+      };
+      const headers = ['ID', 'Сюжет', 'Instagram (Київ)', 'TikTok (Київ)', 'Слот', 'Пропуск YouTube', 'У добірці', 'MP4', 'Рядки таблиці'];
+      const body = rows.map(row => '<tr>' + [
+        row.id, row.title, date(row.instagramAt), date(row.tiktokAt), row.slot || '—',
+        row.youtubeSkipped || '—', date(row.compiledAt), row.videoExists ? 'є' : 'немає',
+        row.sheetRows.join(', ') || 'не знайдено',
+      ].map(value => '<td>' + escapeHtml(value) + '</td>').join('') + '</tr>').join('');
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      return res.end('<!doctype html><html lang="uk"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        + '<title>Ролики без YouTube</title><style>body{font:16px system-ui;margin:24px;color:#18202b}table{border-collapse:collapse;width:100%}td,th{padding:10px;border:1px solid #ccd2da;text-align:left}th{background:#edf2f7}main{overflow:auto}</style>'
+        + '<h1>Instagram і TikTok є, YouTube немає: ' + rows.length + '</h1>'
+        + '<p>Перевірено епізодів із MP4 або збереженою історією: ' + names.size + '; із мітками: ' + withHistory + '. Статус у таблиці не обмежує пошук.</p>'
+        + '<p>Це перевірка збережених міток. Відсутня дата TikTok означає, що її не збережено. Мітка добірки не означає окрему публікацію шортсу. Facebook не враховано.</p>'
+        + '<p>Оновлено: ' + escapeHtml(date(report.generatedAt)) + '. <a href="?format=json">JSON звіту</a></p>'
+        + '<main><table><thead><tr>' + headers.map(h => '<th>' + escapeHtml(h) + '</th>').join('') + '</tr></thead><tbody>' + body + '</tbody></table></main></html>');
+    }
+
     if (req.method === 'GET' && pathname === '/api/autopost/status') {
       try {
         const files = await listVideoFiles();
