@@ -479,6 +479,32 @@
       const body = el('div', 'card-body');
       if (item.theme) body.appendChild(el('div', 'kicker', esc(item.theme)));
       body.appendChild(platformRow(item));
+      const pendingPlatforms = (item.platforms || []).filter((p) => p.enabled && !p.done && !p.skipped);
+      if (pendingPlatforms.length) {
+        const nowButton = el('button', 'btn primary', '🚀 Опублікувати зараз');
+        nowButton.style.width = '100%';
+        nowButton.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!initData) { toast('Відкрий через Telegram'); return; }
+          const names = pendingPlatforms.map((p) => PLATFORM_NAMES[p.platform] || p.platform).join(', ');
+          if (!await askConfirm(`Опублікувати це відео зараз: ${names}?`)) return;
+          nowButton.disabled = true; nowButton.textContent = 'Публікую…';
+          try {
+            const r = await fetch('/api/publish-now', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id: item.id, initData }),
+            });
+            const data = await r.json();
+            if (!r.ok || data.error) throw new Error(data.error || 'Помилка');
+            const summary = (data.results || []).map((p) =>
+              `${PLATFORM_NAMES[p.platform] || p.platform}: ${p.detail || p.status}`).join('\n');
+            notify(data.status === 'incomplete' ? 'error' : 'success');
+            await askConfirm(summary || 'Немає платформ, що чекають публікації.');
+          } catch (err) { notify('error'); toast(err.message); }
+          finally { nowButton.disabled = false; nowButton.textContent = '🚀 Опублікувати зараз'; load(); }
+        });
+        body.appendChild(nowButton);
+      }
       body.appendChild(copyable({ label: 'Назва', icon: '📌', main: item.title }));
       body.appendChild(copyable({ label: 'Опис + хештеги', icon: '📝', main: item.description, isDesc: true }));
       const actions = el('div', 'actions');

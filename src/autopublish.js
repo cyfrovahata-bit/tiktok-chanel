@@ -11,7 +11,7 @@
 // мінідодатку, щоб можна було забрати відео для TikTok і позначити
 // «Опубліковано» руками, коли справді все зроблено.
 import { readAllItems, isReady } from './sheets.js';
-import { listVideoFiles, setVideoAppProperties, videoName, streamVideo } from './videos.js';
+import { listVideoFiles, setVideoAppProperties, videoName, streamVideo, videoProps } from './videos.js';
 import { publish } from './publish.js';
 import { shortDisplacedByLong, isCompilationDay, COMPILATION_HOUR, LONG_VIDEO_PLATFORMS } from './long-plan.js';
 import { runLongDayOnce, compilationStillOn } from './long-day.js';
@@ -240,7 +240,68 @@ export async function remindFacebookOnce({
 
 // Один безпечний прохід. Залежності ін'єктуються для тестів; у Railway
 // використовуються Google Sheet, Drive, Meta API та Telegram.
+// Manual and scheduled publishing share one lock: a timer must not post while
+// an owner request is waiting for a platform response.
+let publishing = false;
 export async function runAutoPublishOnce(options = {}) {
+  if (publishing) return { status: 'busy' };
+  publishing = true;
+  try { return await autoPublishOnce(options); }
+  finally { publishing = false; }
+}
+
+export async function publishNow(id, {
+  listItems = readAllItems, listFiles = listVideoFiles,
+  setProperties = setVideoAppProperties, publishPlatform = publish,
+  publicUrl = PUBLIC_URL, now = new Date(),
+} = {}) {
+  if (publishing) throw new Error('Публікація вже триває. Спробуй трохи пізніше.');
+  publishing = true;
+  try {
+    const [items, files] = await Promise.all([listItems(), listFiles()]);
+    const item = items.find((it) => it.id === id);
+    if (!item || !isReady(item) || item.status === 'PUBLISHED') {
+      throw new Error('Матеріал не готовий або вже позначений як опублікований');
+    }
+    const file = files.get(videoName(id));
+    if (!file) throw new Error('Готове відео не знайдено');
+    const props = videoProps(files, id);
+    // Keep intentional omissions (e.g. a short replaced by a compilation).
+    const platforms = enabledMetaPlatforms().filter((p) => !platformSettled(props, p));
+    if (!platforms.length) return { status: 'nothing-to-publish', results: [] };
+    const claim = { autoPostItemId: id, autoPostSlot: props.autoPostSlot || `manual-${now.toISOString()}` };
+    for (const platform of platforms) {
+      const slot = slotFor(platformHours(platform), now);
+      if (slot) claim[claimProperty(platform)] = slot.key;
+    }
+    await setProperties(file.id, claim);
+    let bufferOnce;
+    const payload = {
+      videoUrl: `${String(publicUrl).replace(/\/$/, '')}/api/video/${encodeURIComponent(id)}`,
+      title: item.title, description: item.description,
+      coverMs: Number(props.coverMs) || null,
+      videoBuffer: () => (bufferOnce ||= fetchVideoBuffer(file.id)),
+    };
+    const results = [];
+    for (const platform of platforms) {
+      let result;
+      try { result = await publishPlatform(platform, payload); }
+      catch (error) { result = { platform, status: 'error', detail: error.message }; }
+      if (result.status === 'published' && result.id) {
+        // Stop on a persistence failure: do not silently continue posting if
+        // the duplicate guard cannot be saved.
+        await setProperties(file.id, {
+          [`${platform}PostId`]: result.id,
+          [`${platform}PublishedAt`]: now.toISOString(),
+        });
+      }
+      results.push(result);
+    }
+    return { status: results.every((r) => r.status === 'published' && r.id) ? 'published' : 'incomplete', results };
+  } finally { publishing = false; }
+}
+
+async function autoPublishOnce(options = {}) {
   const {
     now = new Date(),
     listItems = readAllItems,

@@ -36,7 +36,7 @@ import {
   MAX_PHOTOS,
 } from '../src/own.js';
 import { sendMessage, ownerChatId } from '../src/telegram.js';
-import { startAutoPublisher, currentPublishSlot, publishHours, platformHours, claimProperty, unpublishedPlatforms } from '../src/autopublish.js';
+import { startAutoPublisher, publishNow, currentPublishSlot, publishHours, platformHours, claimProperty, unpublishedPlatforms } from '../src/autopublish.js';
 import { availablePlatforms } from '../src/publish.js';
 import { tiktokConfigured, consentUrl as tiktokConsentUrl, exchangeCode as tiktokExchangeCode, redirectUri as tiktokRedirectUri, accessToken as tiktokAccessToken, creatorInfo as tiktokCreatorInfo } from '../src/tiktok.js';
 import { tokenStatus as tiktokTokenStatus } from '../src/tiktok-token.js';
@@ -278,6 +278,7 @@ function queueFrom(c, now = new Date()) {
         platform,
         enabled: platformEnabled(platform),
         done: Boolean(props[`${platform}PostId`]),
+        skipped: Boolean(props[`${platform}Skipped`]),
         at: props[`${platform}PublishedAt`] || null,
       }));
       return {
@@ -1601,6 +1602,19 @@ const server = http.createServer(async (req, res) => {
       } catch (error) {
         return json(res, 400, { error: error.message });
       }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/publish-now') {
+      const { id, initData } = JSON.parse(await readBody(req));
+      const check = verifyInitData(initData);
+      if (!check.ok) return json(res, 401, { error: 'Підпис Telegram недійсний' });
+      if (!isOwner(check.user)) return json(res, 403, { error: 'Публікувати може лише власник каналу' });
+      try {
+        const result = await publishNow(id);
+        return json(res, 200, result);
+      } catch (error) {
+        return json(res, 400, { error: error.message });
+      } finally { cache.at = 0; }
     }
 
     if (req.method === 'POST' && pathname === '/api/publish') {
