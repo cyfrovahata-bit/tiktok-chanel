@@ -544,7 +544,11 @@ export function draftPrompt(comment, platformLabel = '', post = null) {
 export async function draftReply(comment, options = {}) {
   const ask = options.chat || chatOnce;
   const answer = String(
-    await ask(draftPrompt(comment, options.platformLabel, options.post), { model: MODEL }),
+    await ask(draftPrompt(comment, options.platformLabel, options.post), {
+      model: MODEL,
+      store: true,
+      metadata: { app: 'tiktok-channel', purpose: 'comment-reply', comment_id: String(comment.id || '').slice(0, 512) },
+    }),
   ).trim();
   if (!answer || answer.toUpperCase().startsWith(SKIP)) {
     options.onSkip?.(answer.slice(SKIP.length).replace(/^[\s:—-]+/, '') || 'Модель рекомендує не відповідати: коментар не потребує відповіді або продовження недоречне.');
